@@ -18,7 +18,7 @@ class VerifyItemDto {
   })
   @IsUUID()
   @IsNotEmpty()
-  variationID: string;
+  variationID!: string;
 
   @ApiProperty({
     description: 'Cantidad recibida/escaneada',
@@ -27,7 +27,7 @@ class VerifyItemDto {
   })
   @IsInt()
   @IsPositive()
-  quantityReceived: number;
+  quantityReceived!: number;
 
   @ApiProperty({
     description: 'Precio neto unitario usado al ajustar la OC',
@@ -47,5 +47,5 @@ export class VerifyPurchaseOrderDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => VerifyItemDto)
-  items: VerifyItemDto[];
+  items!: VerifyItemDto[];
 }

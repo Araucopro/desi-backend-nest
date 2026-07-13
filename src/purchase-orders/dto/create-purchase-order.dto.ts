@@ -13,19 +13,19 @@ import {
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
-class PurchaseOrderItemDto {
+export class PurchaseOrderItemDto {
   @ApiProperty({
     description: 'ID de la variación solicitada',
     example: '123e4567-e89b-12d3-a456-426614174000',
   })
   @IsUUID()
   @IsNotEmpty()
-  variationID: string;
+  variationID!: string;
 
   @ApiProperty({ description: 'Cantidad solicitada', example: 2, minimum: 1 })
   @IsInt()
   @IsPositive()
-  quantity: number;
+  quantity!: number;
 
   @ApiProperty({
     description: 'Precio neto unitario pactado en la OC',
@@ -34,7 +34,7 @@ class PurchaseOrderItemDto {
   })
   @IsNumber()
   @IsPositive()
-  unitPrice: number;
+  unitPrice!: number;
 }
 
 export class CreatePurchaseOrderDto {
@@ -44,7 +44,7 @@ export class CreatePurchaseOrderDto {
   })
   @IsUUID()
   @IsNotEmpty()
-  storeID: string;
+  storeID!: string;
 
   @ApiProperty({
     description: 'Indica si la OC es para un tercero',
@@ -87,5 +87,5 @@ export class CreatePurchaseOrderDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => PurchaseOrderItemDto)
-  items: PurchaseOrderItemDto[];
+  items!: PurchaseOrderItemDto[];
 }

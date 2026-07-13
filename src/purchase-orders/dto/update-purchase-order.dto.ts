@@ -1,13 +1,17 @@
 import {
+  IsArray,
   IsBoolean,
   IsDateString,
   IsEnum,
   IsNumber,
   IsOptional,
   IsUUID,
+  ValidateNested,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import type { PurchaseOrderStatus } from '../entities/purchase-order.entity';
+import { PurchaseOrderItemDto } from './create-purchase-order.dto';
 
 export class UpdatePurchaseOrderDto {
   @ApiProperty({
@@ -60,4 +64,15 @@ export class UpdatePurchaseOrderDto {
   @IsOptional()
   @IsUUID()
   storeID?: string;
+
+  @ApiProperty({
+    type: [PurchaseOrderItemDto],
+    description: 'Actualización del detalle de productos',
+    required: false,
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PurchaseOrderItemDto)
+  items?: PurchaseOrderItemDto[];
 }

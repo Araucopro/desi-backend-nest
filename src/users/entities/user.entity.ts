@@ -18,32 +18,32 @@ export enum UserRole {
 @Entity({ name: 'Users', schema: 'public' })
 export class User {
   @PrimaryGeneratedColumn('uuid', { name: 'userID' })
-  userID: string;
+  userID!: string;
 
   @Column({ type: 'varchar', length: 128, unique: true })
-  email: string;
+  email!: string;
 
   @Column({ type: 'varchar', length: 128 })
-  name: string;
+  name!: string;
 
   @Column({
     type: 'enum',
     enum: UserRole,
   })
-  role: UserRole;
+  role!: UserRole;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
-  userImg: string | null;
+  userImg!: string | null;
 
   @Column({ type: 'varchar', length: 255 })
-  password: string;
+  password!: string;
 
   @OneToMany(() => UserStore, (userStore) => userStore.user)
-  userStores: UserStore[];
+  userStores!: UserStore[];
 
   @CreateDateColumn({ type: 'timestamp with time zone', name: 'createdAt' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ type: 'timestamp with time zone', name: 'updatedAt' })
-  updatedAt: Date;
+  updatedAt!: Date;
 }

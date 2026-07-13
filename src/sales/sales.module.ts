@@ -7,6 +7,7 @@ import { SaleProduct } from './entities/sale-product.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
 import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import { InventoryMovement } from '../inventory/entities/inventory-movement.entity';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.en
       ProductVariation,
       Store,
       StoreProduct,
+      InventoryMovement,
     ]),
   ],
   controllers: [SalesController],

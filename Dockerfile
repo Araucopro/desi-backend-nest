@@ -1,44 +1,40 @@
-# Stage 1: Build the application
+# Stage 1: Build
 FROM node:24-alpine AS builder
 
-# Set the working directory
 WORKDIR /usr/src/app
 
-# Copy package.json and pnpm-lock.yaml
-COPY package.json pnpm-lock.yaml ./
+# Copiar archivos necesarios para resolver dependencias
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
-# Install pnpm
-RUN npm install -g pnpm
+# Usar la versión de pnpm declarada en package.json
+RUN corepack enable
 
-# Install dependencies
-RUN pnpm install --unsafe-perm
+# Instalar dependencias
+RUN pnpm install --unsafe-perm --dangerously-allow-all-builds
 
-# Copy the rest of the application source code
+# Copiar código fuente
 COPY . .
 
-# Build the application
+# Compilar NestJS
 RUN pnpm run build
 
-# Stage 2: Create the production image
-FROM node:20-alpine
 
-# Set the working directory
+# Stage 2: Runtime
+FROM node:24-alpine
+
 WORKDIR /usr/src/app
 
-# Copy package.json and pnpm-lock.yaml
-COPY package.json pnpm-lock.yaml ./
+# Copiar archivos necesarios para dependencias de producción
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
-# Install pnpm
-RUN npm install -g pnpm
+RUN corepack enable
 
-# Install only production dependencies
-RUN pnpm install --prod --unsafe-perm
+# Instalar solo dependencias de producción
+RUN pnpm install --prod --unsafe-perm --dangerously-allow-all-builds
 
-# Copy the built application from the builder stage
+# Copiar artefactos compilados
 COPY --from=builder /usr/src/app/dist ./dist
 
-# Expose the port the app runs on
 EXPOSE 3001
 
-# Command to run the application
-CMD ["pnpm", "start:prod"]
+CMD ["node", "dist/main"]

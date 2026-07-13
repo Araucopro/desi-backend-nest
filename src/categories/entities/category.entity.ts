@@ -11,21 +11,21 @@ import {
 @Entity('categories')
 export class Category {
   @PrimaryGeneratedColumn('uuid')
-  categoryID: string;
+  categoryID!: string;
 
   @Column({ type: 'uuid', nullable: true })
-  parentID: string;
+  parentID!: string;
 
   @Column()
-  name: string;
+  name!: string;
 
   @ManyToOne(() => Category, (category) => category.children)
   @JoinColumn({ name: 'parentID' })
-  parent: Category;
+  parent!: Category;
 
   @OneToMany(() => Category, (category) => category.parent)
-  children: Category[];
+  children!: Category[];
 
   @OneToMany(() => Product, (product) => product.category)
-  products: Product[];
+  products!: Product[];
 }

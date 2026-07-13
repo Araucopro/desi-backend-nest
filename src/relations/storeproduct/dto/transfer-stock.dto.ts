@@ -1,4 +1,12 @@
-import { IsArray, IsInt, IsNotEmpty, IsNumber, IsPositive, IsUUID, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsPositive,
+  IsUUID,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -9,7 +17,7 @@ class StockTransferItemDto {
   })
   @IsUUID()
   @IsNotEmpty()
-  variationID: string;
+  variationID!: string;
 
   @ApiProperty({
     description: 'Cantidad de unidades a transferir',
@@ -18,16 +26,17 @@ class StockTransferItemDto {
   })
   @IsInt()
   @IsPositive()
-  quantity: number;
+  stock!: number;
 
   @ApiProperty({
-    description: 'Costo de compra por unidad (precio al que la tienda adquiere el producto)',
+    description:
+      'Costo de compra por unidad (precio al que la tienda adquiere el producto)',
     example: 12000,
     minimum: 0,
   })
   @IsNumber()
   @IsPositive()
-  purchaseCost: number;
+  priceCost!: number;
 }
 
 export class TransferStockDto {
@@ -37,7 +46,7 @@ export class TransferStockDto {
   })
   @IsUUID()
   @IsNotEmpty()
-  targetStoreID: string;
+  targetStoreID!: string;
 
   @ApiProperty({
     type: [StockTransferItemDto],
@@ -53,5 +62,5 @@ export class TransferStockDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => StockTransferItemDto)
-  items: StockTransferItemDto[];
+  items!: StockTransferItemDto[];
 }

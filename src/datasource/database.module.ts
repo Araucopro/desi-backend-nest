@@ -15,7 +15,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
         database: process.env.PGDATABASE,
         entities: [__dirname + '/../**/*.entity{.ts,.js}'],
         synchronize: true, // desactivar en producción
-        // dropSchema: true, // ELIMINA TODAS LAS TABLAS - Solo para desarrollo
+        //dropSchema: true, // ELIMINA TODAS LAS TABLAS - Solo para desarrollo
         autoLoadEntities: true,
       }),
     }),

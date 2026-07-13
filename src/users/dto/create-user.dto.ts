@@ -15,7 +15,7 @@ export class CreateUserDto {
     example: 'usuario@ejemplo.com',
   })
   @IsEmail()
-  email: string;
+  email!: string;
 
   @ApiProperty({
     description: 'El nombre completo del usuario.',
@@ -23,7 +23,7 @@ export class CreateUserDto {
   })
   @IsString()
   @IsNotEmpty()
-  name: string;
+  name!: string;
 
   @ApiProperty({
     description: 'El rol asignado al usuario.',
@@ -31,7 +31,7 @@ export class CreateUserDto {
     example: UserRole.STORE_MANAGER,
   })
   @IsEnum(UserRole)
-  role: UserRole;
+  role!: UserRole;
 
   @ApiProperty({
     description: 'URL de la imagen de perfil del usuario (opcional).',
@@ -50,5 +50,5 @@ export class CreateUserDto {
   })
   @IsString()
   @MinLength(8)
-  password: string;
+  password!: string;
 }

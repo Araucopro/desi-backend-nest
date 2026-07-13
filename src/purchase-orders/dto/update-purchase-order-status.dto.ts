@@ -8,5 +8,5 @@ export class UpdatePurchaseOrderStatusDto {
     description: 'Nuevo estado de la orden de compra',
   })
   @IsEnum(['Pagado', 'Pendiente', 'Anulado'])
-  status: PurchaseOrderStatus;
+  status!: PurchaseOrderStatus;
 }

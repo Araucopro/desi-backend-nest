@@ -19,7 +19,7 @@ export class CreateStoreDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
-  readonly location: string;
+  readonly location!: string;
 
   @ApiProperty({
     description: 'Rol Único Tributario de la tienda',
@@ -28,7 +28,7 @@ export class CreateStoreDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
-  readonly rut: string;
+  readonly rut!: string;
 
   @ApiProperty({
     description: 'Dirección física de la tienda',
@@ -37,7 +37,7 @@ export class CreateStoreDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
-  readonly address: string;
+  readonly address!: string;
 
   @ApiProperty({
     description: 'Número de teléfono de contacto',
@@ -46,7 +46,7 @@ export class CreateStoreDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
-  readonly phone: string;
+  readonly phone!: string;
 
   @ApiProperty({
     description: 'Ciudad donde se encuentra la tienda',
@@ -55,7 +55,7 @@ export class CreateStoreDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
-  readonly city: string;
+  readonly city!: string;
 
   @ApiPropertyOptional({
     description: 'URL de la imagen de la tienda',
@@ -75,7 +75,7 @@ export class CreateStoreDto {
   @IsEmail()
   @IsNotEmpty()
   @MaxLength(255)
-  readonly email: string;
+  readonly email!: string;
 
   @ApiProperty({
     description: 'Nombre de la tienda (debe ser único)',
@@ -84,7 +84,7 @@ export class CreateStoreDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
-  readonly name: string;
+  readonly name!: string;
 
   @ApiProperty({
     description: 'Tipo de tienda según el negocio',
@@ -93,7 +93,7 @@ export class CreateStoreDto {
   })
   @IsEnum(StoreType)
   @IsNotEmpty()
-  readonly type: StoreType;
+  readonly type!: StoreType;
 
   @ApiPropertyOptional({
     description: 'Indica si es una tienda central (valor por defecto: false)',

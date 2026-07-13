@@ -15,16 +15,17 @@ export class CreateProductVariationDto {
   })
   @IsString()
   @IsNotEmpty()
-  sku: string;
+  sku!: string;
 
   @ApiProperty({
-    description: 'Precio de costo de la variación (lo que cuesta producir/comprar)',
+    description:
+      'Precio de costo de la variación (lo que cuesta producir/comprar)',
     example: 15000,
     minimum: 0,
   })
   @IsNumber()
   @IsPositive()
-  priceCost: number;
+  priceCost!: number;
 
   @ApiProperty({
     description: 'Precio de lista o venta sugerido al público',
@@ -33,7 +34,7 @@ export class CreateProductVariationDto {
   })
   @IsNumber()
   @IsPositive()
-  priceList: number;
+  priceList!: number;
 
   @ApiProperty({
     description: 'Cantidad de stock disponible en la tienda central',
@@ -42,7 +43,7 @@ export class CreateProductVariationDto {
   })
   @IsNumber()
   @Min(0)
-  stock: number;
+  stock!: number;
 
   @ApiProperty({
     description: 'Color de la variante',

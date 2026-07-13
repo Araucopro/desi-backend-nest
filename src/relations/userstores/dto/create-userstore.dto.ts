@@ -8,7 +8,7 @@ export class CreateUserstoreDto {
   })
   @IsString()
   @IsUUID()
-  userID: string;
+  userID!: string;
 
   @ApiProperty({
     description: 'ID de la tienda donde se asignará el usuario',
@@ -16,5 +16,5 @@ export class CreateUserstoreDto {
   })
   @IsString()
   @IsUUID()
-  storeID: string;
+  storeID!: string;
 }

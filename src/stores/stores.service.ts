@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import { Store } from './entities/store.entity';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
-import { UserStore } from 'src/relations/userstores/entities/userstore.entity';
+import { UserStore } from '../relations/userstores/entities/userstore.entity';
 
 @Injectable()
 export class StoresService {

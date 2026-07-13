@@ -20,7 +20,7 @@ export enum ProductGenre {
 @Entity({ name: 'Products' })
 export class Product {
   @PrimaryGeneratedColumn('uuid')
-  productID: string;
+  productID!: string;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   image?: string;
@@ -30,10 +30,10 @@ export class Product {
 
   @ManyToOne(() => Category, (category) => category.products)
   @JoinColumn({ name: 'categoryID' })
-  category: Category;
+  category!: Category;
 
   @Column({ type: 'varchar', length: 255, unique: true })
-  name: string;
+  name!: string;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   brand?: string;
@@ -51,11 +51,11 @@ export class Product {
   @OneToMany(() => ProductVariation, (variation) => variation.product, {
     cascade: true,
   })
-  variations: ProductVariation[];
+  variations!: ProductVariation[];
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

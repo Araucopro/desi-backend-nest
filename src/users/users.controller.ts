@@ -13,15 +13,17 @@ import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
-import { Store } from 'src/stores/entities/store.entity';
-import { CustomMessage } from 'src/common/decorators/response-message';
+import { Store } from '../stores/entities/store.entity';
+import { CustomMessage } from '../common/decorators/response-message';
 import { User } from './entities/user.entity';
+import { Public } from '../auth/decorators/public.decorator';
 
 @ApiTags('Usuarios')
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  @Public()
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Crear un nuevo usuario' })
@@ -36,6 +38,7 @@ export class UsersController {
     return this.usersService.create(createUserDto);
   }
 
+  @Public()
   @Get()
   @CustomMessage('Lista de usuarios obtenida exitosamente')
   @ApiOperation({ summary: 'Obtener todos los usuarios' })

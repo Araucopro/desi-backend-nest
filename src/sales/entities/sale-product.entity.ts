@@ -9,38 +9,41 @@ import {
 } from 'typeorm';
 import { Sale } from './sale.entity';
 import { ProductVariation } from '../../products/entities/product-variation.entity';
+import { ColumnNumericTransformer } from '../../common/transformers/numeric.transformer';
 
 @Entity({ name: 'SaleProduct' })
 export class SaleProduct {
   @PrimaryGeneratedColumn('uuid')
-  saleProductID: string;
-
-  @Column('uuid')
-  saleID: string;
+  saleProductID!: string;
 
   @ManyToOne(() => Sale, (sale) => sale.saleProducts, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'saleID' })
-  sale: Sale;
-
-  @Column('uuid')
-  variationID: string;
+  sale!: Sale;
 
   @ManyToOne(() => ProductVariation, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'variationID' })
-  variation: ProductVariation;
+  variation!: ProductVariation;
 
-  @Column('decimal', { precision: 10, scale: 2 })
-  unitPrice: number;
+  @Column('decimal', {
+    precision: 10,
+    scale: 2,
+    transformer: new ColumnNumericTransformer(),
+  })
+  unitPrice!: number;
 
-  @Column('decimal', { precision: 10, scale: 2 })
-  subtotal: number;
+  @Column('decimal', {
+    precision: 10,
+    scale: 2,
+    transformer: new ColumnNumericTransformer(),
+  })
+  subtotal!: number;
 
   @Column('int')
-  quantitySold: number;
+  quantitySold!: number;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

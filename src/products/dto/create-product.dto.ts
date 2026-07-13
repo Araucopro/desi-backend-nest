@@ -20,7 +20,7 @@ export class CreateProductDto {
   })
   @IsString()
   @IsNotEmpty()
-  name: string;
+  name!: string;
 
   @ApiProperty({
     description: 'ID de la categoría a la que pertenece el producto',
@@ -76,5 +76,5 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @ArrayMinSize(1)
   @Type(() => CreateProductVariationDto)
-  variations: CreateProductVariationDto[];
+  variations!: CreateProductVariationDto[];
 }

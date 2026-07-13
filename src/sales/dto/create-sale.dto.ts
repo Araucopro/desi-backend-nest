@@ -1,4 +1,13 @@
-import { IsArray, IsEnum, IsInt, IsNotEmpty, IsNumber, IsPositive, IsUUID, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsPositive,
+  IsUUID,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -21,7 +30,7 @@ class SaleProductItemDto {
   quantity: number;
 
   @ApiProperty({
-    description: 'Precio unitario al que se vende a la tienda (puede variar del precio de lista)',
+    description: 'Precio unitario de venta',
     example: 15000,
     minimum: 0,
   })

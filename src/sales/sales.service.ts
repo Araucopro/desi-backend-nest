@@ -1,6 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { Sale } from './entities/sale.entity';
 import { SaleProduct } from './entities/sale-product.entity';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -8,6 +12,10 @@ import { UpdateSaleStatusDto } from './dto/update-sale-status.dto';
 import { ProductVariation } from '../products/entities/product-variation.entity';
 import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import {
+  InventoryMovement,
+  InventoryMovementReason,
+} from '../inventory/entities/inventory-movement.entity';
 
 @Injectable()
 export class SalesService {
@@ -18,6 +26,22 @@ export class SalesService {
     private readonly saleProductRepository: Repository<SaleProduct>,
     private readonly dataSource: DataSource,
   ) {}
+
+  private async findOneInTransaction(
+    manager: EntityManager,
+    id: string,
+  ): Promise<Sale> {
+    const sale = await manager.findOne(Sale, {
+      where: { saleID: id },
+      relations: ['store', 'saleProducts', 'saleProducts.variation'],
+    });
+
+    if (!sale) {
+      throw new NotFoundException(`Venta con ID ${id} no encontrada`);
+    }
+
+    return sale;
+  }
 
   async create(createSaleDto: CreateSaleDto): Promise<Sale> {
     const { storeID, paymentType, items } = createSaleDto;
@@ -31,9 +55,8 @@ export class SalesService {
         throw new NotFoundException(`Tienda con ID ${storeID} no encontrada`);
       }
 
-      // 2. Crear la venta (inicialmente en Pendiente)
       const sale = manager.create(Sale, {
-        storeID,
+        store: { storeID },
         paymentType,
         status: 'Pendiente',
         total: 0,
@@ -42,71 +65,67 @@ export class SalesService {
 
       let total = 0;
 
-      // 3. Procesar cada item
       for (const item of items) {
         const { variationID, quantity, unitPrice } = item;
-
-        // Bloquear y obtener variación (Central Stock)
         const variation = await manager.findOne(ProductVariation, {
           where: { variationID },
-          lock: { mode: 'pessimistic_write' },
         });
 
         if (!variation) {
-          throw new NotFoundException(`Variación con ID ${variationID} no encontrada`);
-        }
-
-        if (variation.stock < quantity) {
-          throw new BadRequestException(
-            `Stock insuficiente en central para SKU: ${variation.sku}. Solicitado: ${quantity}, Disponible: ${variation.stock}`,
+          throw new NotFoundException(
+            `Variación con ID ${variationID} no encontrada`,
           );
         }
 
-        // Calcular subtotal
         const subtotal = unitPrice * quantity;
         total += subtotal;
-
-        // Crear SaleProduct
         const saleProduct = manager.create(SaleProduct, {
-          saleID: savedSale.saleID,
-          variationID,
+          sale: { saleID: savedSale.saleID },
+          variation: { variationID: variation.variationID },
           unitPrice,
           subtotal,
           quantitySold: quantity,
         });
         await manager.save(saleProduct);
 
-        // Descontar de Central
-        variation.stock -= quantity;
-        await manager.save(variation);
-
-        // Agregar a StoreProduct de la tienda
-        let storeStock = await manager.findOne(StoreProduct, {
-          where: { storeID, variationID },
+        const storeStock = await manager.findOne(StoreProduct, {
+          where: {
+            store: { storeID },
+            variation: { variationID },
+          },
+          lock: { mode: 'pessimistic_write' },
         });
 
         if (!storeStock) {
-          storeStock = manager.create(StoreProduct, {
-            storeID,
-            variationID,
-            quantity: 0,
-            purchaseCost: unitPrice,
-          });
-        } else {
-          // Actualizar precio promedio ponderado (opcional, por ahora solo actualizamos)
-          storeStock.purchaseCost = unitPrice;
+          throw new BadRequestException(
+            `El producto no está asociado a la tienda (VariationID: ${variationID})`,
+          );
         }
 
-        storeStock.quantity += quantity;
+        if (storeStock.stock < quantity) {
+          throw new BadRequestException(
+            `Stock insuficiente en tienda para VariationID: ${variationID}. Solicitado: ${quantity}, Disponible: ${storeStock.stock}`,
+          );
+        }
+
+        const movement = manager.create(InventoryMovement, {
+          store: { storeID },
+          variation: { variationID: variation.variationID },
+          delta: -quantity,
+          reason: InventoryMovementReason.SALE,
+          referenceID: savedSale.saleID,
+        });
+        await manager.save(movement);
+
+        // StoreProduct remains a cache/read model; InventoryMovements is the source of truth.
+        storeStock.stock -= quantity;
         await manager.save(storeStock);
       }
 
-      // 4. Actualizar total de la venta
       savedSale.total = total;
       await manager.save(savedSale);
 
-      // 5. Retornar venta con relaciones
-      return this.findOne(savedSale.saleID);
+      return this.findOneInTransaction(manager, savedSale.saleID);
     });
   }
 
@@ -128,7 +147,10 @@ export class SalesService {
     return sale;
   }
 
-  async updateStatus(id: string, updateSaleStatusDto: UpdateSaleStatusDto): Promise<Sale> {
+  async updateStatus(
+    id: string,
+    updateSaleStatusDto: UpdateSaleStatusDto,
+  ): Promise<Sale> {
     const sale = await this.findOne(id);
     sale.status = updateSaleStatusDto.status;
     await this.saleRepository.save(sale);

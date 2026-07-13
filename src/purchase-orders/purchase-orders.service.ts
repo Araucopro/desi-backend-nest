@@ -23,8 +23,6 @@ export class PurchaseOrdersService {
   constructor(
     @InjectRepository(PurchaseOrder)
     private readonly purchaseOrderRepository: Repository<PurchaseOrder>,
-    @InjectRepository(PurchaseOrderItem)
-    private readonly purchaseOrderItemRepository: Repository<PurchaseOrderItem>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -34,7 +32,7 @@ export class PurchaseOrdersService {
 
   private calculateTotals(items: PurchaseOrderItem[], discount: number) {
     const subtotal = this.toMoney(
-      items.reduce((acc, item) => acc + Number(item.subtotal), 0),
+      items.reduce((acc, item) => acc + item.subtotal, 0),
     );
     const net = this.toMoney(Math.max(subtotal - discount, 0));
     const tax = this.toMoney(net * TAX_RATE);
@@ -56,33 +54,23 @@ export class PurchaseOrdersService {
       if (quantity <= 0) continue;
 
       const variation = await manager.findOne(ProductVariation, {
-        where: { variationID: item.variationID },
+        where: { variationID: item.variation.variationID },
         lock: { mode: 'pessimistic_write' },
       });
 
       if (!variation) {
         throw new NotFoundException(
-          `Variación con ID ${item.variationID} no encontrada`,
+          `Variación con ID ${item.variation.variationID} no encontrada`,
         );
       }
-
-      if (sign === 1 && variation.stock < quantity) {
-        throw new BadRequestException(
-          `Stock insuficiente en central para SKU ${variation.sku}. Disponible: ${variation.stock}, Requerido: ${quantity}`,
-        );
-      }
-
-      // mover stock central
-      variation.stock -= sign * quantity;
-      await manager.save(variation);
 
       // mover stock en tienda
-      const purchaseCost = Number(item.unitPrice ?? variation.priceCost);
+      const priceCost = item.unitPrice;
       await this.upsertStoreStock(
         manager,
-        order.storeID,
-        item.variationID,
-        purchaseCost,
+        order.store.storeID,
+        item.variation.variationID,
+        priceCost,
         sign * quantity,
       );
     }
@@ -92,25 +80,29 @@ export class PurchaseOrdersService {
     manager: EntityManager,
     storeID: string,
     variationID: string,
-    purchaseCost: number,
+    priceCost: number,
     delta: number,
   ) {
     let storeStock = await manager.findOne(StoreProduct, {
-      where: { storeID, variationID },
+      where: {
+        store: { storeID },
+        variation: { variationID },
+      },
       lock: { mode: 'pessimistic_write' },
     });
 
     if (!storeStock) {
       storeStock = manager.create(StoreProduct, {
-        storeID,
-        variationID,
-        quantity: 0,
-        purchaseCost,
+        store: { storeID },
+        variation: { variationID },
+        stock: 0,
+        priceCost,
+        priceList: 0, // default
       });
     }
 
-    storeStock.purchaseCost = purchaseCost;
-    storeStock.quantity += delta;
+    storeStock.priceCost = priceCost;
+    storeStock.stock += delta;
     await manager.save(storeStock);
   }
 
@@ -131,7 +123,7 @@ export class PurchaseOrdersService {
 
       const folio = randomBytes(3).toString('hex');
       const purchaseOrder = manager.create(PurchaseOrder, {
-        storeID: dto.storeID,
+        store: { storeID: dto.storeID },
         folio,
         isThirdParty,
         issueDate: new Date(),
@@ -161,8 +153,8 @@ export class PurchaseOrdersService {
 
         const subtotal = this.toMoney(itemDto.unitPrice * itemDto.quantity);
         const purchaseOrderItem = manager.create(PurchaseOrderItem, {
-          purchaseOrderID: savedOrder.purchaseOrderID,
-          variationID: itemDto.variationID,
+          purchaseOrder: { purchaseOrderID: savedOrder.purchaseOrderID },
+          variation: { variationID: itemDto.variationID },
           unitPrice: itemDto.unitPrice,
           subtotal,
           quantityRequested: itemDto.quantity,
@@ -184,7 +176,19 @@ export class PurchaseOrdersService {
       );
 
       await manager.save(savedOrder);
-      return this.findOne(savedOrder.purchaseOrderID);
+
+      const result = await manager.findOne(PurchaseOrder, {
+        where: { purchaseOrderID: savedOrder.purchaseOrderID },
+        relations: ['store', 'items', 'items.variation'],
+      });
+
+      if (!result) {
+        throw new NotFoundException(
+          `Orden de compra con ID ${savedOrder.purchaseOrderID} no encontrada`,
+        );
+      }
+
+      return result;
     });
   }
 
@@ -215,7 +219,6 @@ export class PurchaseOrdersService {
     return this.dataSource.transaction(async (manager) => {
       const purchaseOrder = await manager.findOne(PurchaseOrder, {
         where: { purchaseOrderID: id },
-        relations: ['items'],
         lock: { mode: 'pessimistic_write' },
       });
 
@@ -224,6 +227,10 @@ export class PurchaseOrdersService {
           `Orden de compra con ID ${id} no encontrada`,
         );
       }
+
+      purchaseOrder.items = await manager.find(PurchaseOrderItem, {
+        where: { purchaseOrder: { purchaseOrderID: id } },
+      });
 
       if (dto.storeID) {
         const store = await manager.findOne(Store, {
@@ -234,7 +241,7 @@ export class PurchaseOrdersService {
             `Tienda con ID ${dto.storeID} no encontrada`,
           );
         }
-        purchaseOrder.storeID = dto.storeID;
+        purchaseOrder.store = store;
       }
 
       if (dto.paymentStatus) {
@@ -257,6 +264,54 @@ export class PurchaseOrdersService {
         purchaseOrder.discount = dto.discount;
       }
 
+      if (dto.items) {
+        // Cargar items actuales para comparar
+        const existingItems = await manager.find(PurchaseOrderItem, {
+          where: { purchaseOrder: { purchaseOrderID: id } },
+          relations: ['variation'],
+        });
+
+        const itemsMap = new Map<string, PurchaseOrderItem>();
+        existingItems.forEach((item) => {
+          itemsMap.set(item.variation.variationID, item);
+        });
+
+        const updatedItems: PurchaseOrderItem[] = [];
+
+        for (const itemDto of dto.items) {
+          const existing = itemsMap.get(itemDto.variationID);
+
+          if (existing) {
+            // Actualizar datos de pedido, manteniendo lo recibido
+            existing.quantityRequested = itemDto.quantity;
+            existing.unitPrice = itemDto.unitPrice;
+            existing.subtotal = this.toMoney(
+              itemDto.unitPrice * itemDto.quantity,
+            );
+            updatedItems.push(existing);
+            itemsMap.delete(itemDto.variationID); // Quitamos del mapa para no borrarlo
+          } else {
+            // Crear nuevo ítem
+            const newItem = manager.create(PurchaseOrderItem, {
+              purchaseOrder: { purchaseOrderID: id },
+              variation: { variationID: itemDto.variationID },
+              unitPrice: itemDto.unitPrice,
+              quantityRequested: itemDto.quantity,
+              quantityReceived: 0,
+              subtotal: this.toMoney(itemDto.unitPrice * itemDto.quantity),
+            });
+            updatedItems.push(newItem);
+          }
+        }
+
+        // Los que queden en itemsMap ya no están en el nuevo pedido, se eliminan
+        if (itemsMap.size > 0) {
+          await manager.remove(Array.from(itemsMap.values()));
+        }
+
+        purchaseOrder.items = await manager.save(updatedItems);
+      }
+
       const totals = this.calculateTotals(
         purchaseOrder.items,
         purchaseOrder.discount,
@@ -265,6 +320,10 @@ export class PurchaseOrdersService {
       purchaseOrder.netTotal = totals.net;
       purchaseOrder.tax = totals.tax;
       purchaseOrder.total = totals.total;
+      purchaseOrder.totalProducts = purchaseOrder.items.reduce(
+        (acc, item) => acc + item.quantityRequested,
+        0,
+      );
 
       await manager.save(purchaseOrder);
       return this.findOne(id);
@@ -278,7 +337,6 @@ export class PurchaseOrdersService {
     return this.dataSource.transaction(async (manager) => {
       const purchaseOrder = await manager.findOne(PurchaseOrder, {
         where: { purchaseOrderID: id },
-        relations: ['items'],
         lock: { mode: 'pessimistic_write' },
       });
 
@@ -287,6 +345,19 @@ export class PurchaseOrdersService {
           `Orden de compra con ID ${id} no encontrada`,
         );
       }
+
+      // Cargar items y variaciones por separado
+      purchaseOrder.items = await manager.find(PurchaseOrderItem, {
+        where: { purchaseOrder: { purchaseOrderID: id } },
+        relations: ['variation'],
+      });
+
+      // Cargar tienda
+      const poWithStore = await manager.findOne(PurchaseOrder, {
+        where: { purchaseOrderID: id },
+        relations: ['store'],
+      });
+      purchaseOrder.store = poWithStore!.store;
 
       const previousStatus = purchaseOrder.paymentStatus;
       const nextStatus = dto.status;
@@ -325,7 +396,6 @@ export class PurchaseOrdersService {
     return this.dataSource.transaction(async (manager) => {
       const purchaseOrder = await manager.findOne(PurchaseOrder, {
         where: { purchaseOrderID: id },
-        relations: ['items'],
         lock: { mode: 'pessimistic_write' },
       });
 
@@ -335,9 +405,14 @@ export class PurchaseOrdersService {
         );
       }
 
+      purchaseOrder.items = await manager.find(PurchaseOrderItem, {
+        where: { purchaseOrder: { purchaseOrderID: id } },
+        relations: ['variation'],
+      });
+
       const itemsMap = new Map<string, PurchaseOrderItem>();
       for (const item of purchaseOrder.items) {
-        itemsMap.set(item.variationID, item);
+        itemsMap.set(item.variation.variationID, item);
       }
 
       const scannedVariations = new Set<string>();
@@ -396,7 +471,7 @@ export class PurchaseOrdersService {
 
       // Marcar faltantes de los no escaneados
       for (const item of itemsMap.values()) {
-        if (!scannedVariations.has(item.variationID)) {
+        if (!scannedVariations.has(item.variation.variationID)) {
           const missing = item.quantityRequested - (item.quantityReceived ?? 0);
           if (missing > 0) {
             summary.faltantes += missing;

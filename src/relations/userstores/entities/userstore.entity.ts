@@ -14,19 +14,19 @@ export class UserStore {
   @PrimaryGeneratedColumn('uuid', {
     name: 'userStoreID',
   })
-  userStoreID: string;
+  userStoreID!: string;
 
   @ManyToOne(() => User, (user) => user.userStores)
   @JoinColumn({ name: 'userID' })
-  user: User;
+  user!: User;
 
   @ManyToOne(() => Store, (store) => store.userStores)
   @JoinColumn({ name: 'storeID' })
-  store: Store;
+  store!: Store;
 
   @CreateDateColumn({ type: 'timestamp with time zone', name: 'createdAt' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ type: 'timestamp with time zone', name: 'updatedAt' })
-  updatedAt: Date;
+  updatedAt!: Date;
 }

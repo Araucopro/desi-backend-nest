@@ -1,5 +1,4 @@
-onlyBuiltDependencies:
-  - '@nestjs/core'
-  - '@scarf/scarf'
-  - bcrypt
-  - unrs-resolver
+allowBuilds:
+  '@scarf/scarf': true
+  bcrypt: true
+  unrs-resolver: true

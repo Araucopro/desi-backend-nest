@@ -16,7 +16,8 @@ export class PaginationDto {
 
   @ApiPropertyOptional({
     default: 0,
-    description: 'Número de elementos a omitir desde el inicio (para paginación)',
+    description:
+      'Número de elementos a omitir desde el inicio (para paginación)',
     example: 0,
     minimum: 0,
   })
