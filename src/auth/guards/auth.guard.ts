@@ -2,6 +2,7 @@ import {
   CanActivate,
   ExecutionContext,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -11,6 +12,8 @@ import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
+  private readonly logger = new Logger(AuthGuard.name);
+
   constructor(
     private jwtService: JwtService,
     private reflector: Reflector,
@@ -18,19 +21,25 @@ export class AuthGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest();
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
     if (isPublic) {
+      this.logger.log(
+        `Ruta pública permitida | ${request.method} ${request.url}`,
+      );
       return true;
     }
 
-    const request = context.switchToHttp().getRequest();
     const token = this.extractTokenFromHeader(request);
 
     if (!token) {
+      this.logger.warn(
+        `401 por token ausente | ${request.method} ${request.url}`,
+      );
       throw new UnauthorizedException('Token not provided');
     }
 
@@ -42,7 +51,11 @@ export class AuthGuard implements CanActivate {
       // We're assigning the payload to the request object here
       // so that we can access it in our route handlers
       request['user'] = payload;
+      this.logger.log(`Autenticación OK | ${request.method} ${request.url}`);
     } catch {
+      this.logger.warn(
+        `401 por token inválido o expirado | ${request.method} ${request.url}`,
+      );
       throw new UnauthorizedException('Invalid or expired token');
     }
 

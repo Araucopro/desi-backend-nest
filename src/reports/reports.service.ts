@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Sale } from '../sales/entities/sale.entity';
+import {
+  DteDocument,
+  DteDocumentStatus,
+} from '../dte/entities/dte-document.entity';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { Expense, ExpenseType } from '../expenses/entities/expense.entity';
 import { IncomeStatementQueryDto } from './dto/income-statement-query.dto';
@@ -23,11 +26,31 @@ type MonthlyExpenseDetailRow = {
   total: string | number | null;
 };
 
+type DteDocumentListItem = {
+  dteDocumentID: string;
+  token: string;
+  folio: number;
+  status: DteDocumentStatus;
+  paymentType: string;
+  total: number;
+  documentType: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+  store: {
+    storeID: string;
+    rut: string;
+    name: string;
+    location: string | null;
+  } | null;
+  items: Array<Record<string, unknown>>;
+  payloadNormalized: Record<string, unknown>;
+};
+
 @Injectable()
 export class ReportsService {
   constructor(
-    @InjectRepository(Sale)
-    private readonly saleRepository: Repository<Sale>,
+    @InjectRepository(DteDocument)
+    private readonly dteDocumentRepository: Repository<DteDocument>,
     @InjectRepository(PurchaseOrder)
     private readonly purchaseOrderRepository: Repository<PurchaseOrder>,
     @InjectRepository(Expense)
@@ -146,14 +169,14 @@ export class ReportsService {
     const [salesByMonth, purchaseOrdersByMonth, expenseRows] =
       await Promise.all([
         this.aggregateMonthlyTotal(
-          this.saleRepository,
-          'sale',
+          this.dteDocumentRepository,
+          'document',
           'createdAt',
           'total',
           start,
           end,
           filter.storeId,
-          "sale.status = 'Pagado'",
+          "document.status = 'EMITIDO'",
         ),
         this.aggregateMonthlyTotal(
           this.purchaseOrderRepository,
@@ -251,7 +274,6 @@ export class ReportsService {
 
   private normalizeDates(from?: string, to?: string) {
     const now = new Date();
-    // Default from: first day of current month at 00:00
     const defaultFrom = new Date(
       now.getFullYear(),
       now.getMonth(),
@@ -261,7 +283,6 @@ export class ReportsService {
       0,
       0,
     );
-    // Default to: start of next day (exclusive) to include current day fully
     const defaultTo = new Date(
       now.getFullYear(),
       now.getMonth(),
@@ -283,49 +304,84 @@ export class ReportsService {
     endIso: string,
     storeId?: string,
   ) {
-    const qb = this.saleRepository
-      .createQueryBuilder('sale')
-      .select('COUNT(sale.saleID)', 'count')
-      .addSelect('COALESCE(SUM(sale.total),0)', 'total')
-      .where('sale.createdAt >= :start AND sale.createdAt < :end', {
+    const qb = this.dteDocumentRepository
+      .createQueryBuilder('document')
+      .select('COUNT(document.dteDocumentID)', 'count')
+      .addSelect('COALESCE(SUM(document.total),0)', 'total')
+      .where('document.createdAt >= :start AND document.createdAt < :end', {
         start: startIso,
         end: endIso,
-      });
+      })
+      .andWhere("document.status = 'EMITIDO'");
 
-    if (storeId) qb.andWhere('sale.storeID = :storeId', { storeId });
+    if (storeId) qb.andWhere('document.storeID = :storeId', { storeId });
 
     const raw = await qb.getRawOne();
     return { count: Number(raw.count || 0), total: Number(raw.total || 0) };
+  }
+
+  private serializeDocument(document: DteDocument): DteDocumentListItem {
+    const payloadNormalized = document.payloadNormalized ?? {};
+    const items = Array.isArray(payloadNormalized.items)
+      ? (payloadNormalized.items as Array<Record<string, unknown>>)
+      : [];
+
+    return {
+      dteDocumentID: document.dteDocumentID,
+      token: document.token,
+      folio: document.folio,
+      status: document.status,
+      paymentType: document.paymentType,
+      total: Number(document.total),
+      documentType: document.documentType,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+      store: document.store
+        ? {
+            storeID: document.store.storeID,
+            rut: document.store.rut,
+            name: document.store.name,
+            location: document.store.location,
+          }
+        : null,
+      items,
+      payloadNormalized,
+    };
   }
 
   async getSalesReport(filter: ReportsSaleFilterDto) {
     const { storeId, page = 1, limit = 50 } = filter;
     const { from, to } = this.normalizeDates(filter.from, filter.to);
 
-    // Aggregation by paymentType
-    const paymentQuery = this.saleRepository
-      .createQueryBuilder('sale')
-      .select('sale.paymentType', 'key')
-      .addSelect('COUNT(sale.saleID)', 'count')
-      .addSelect('SUM(sale.total)', 'total')
-      .where('sale.createdAt >= :from AND sale.createdAt < :to', { from, to });
+    const paymentQuery = this.dteDocumentRepository
+      .createQueryBuilder('document')
+      .select('document.paymentType', 'key')
+      .addSelect('COUNT(document.dteDocumentID)', 'count')
+      .addSelect('SUM(document.total)', 'total')
+      .where('document.createdAt >= :from AND document.createdAt < :to', {
+        from,
+        to,
+      })
+      .andWhere("document.status = 'EMITIDO'");
 
-    // Aggregation by status
-    const statusQuery = this.saleRepository
-      .createQueryBuilder('sale')
-      .select('sale.status', 'key')
-      .addSelect('COUNT(sale.saleID)', 'count')
-      .addSelect('SUM(sale.total)', 'total')
-      .where('sale.createdAt >= :from AND sale.createdAt < :to', { from, to });
+    const statusQuery = this.dteDocumentRepository
+      .createQueryBuilder('document')
+      .select('document.status', 'key')
+      .addSelect('COUNT(document.dteDocumentID)', 'count')
+      .addSelect('SUM(document.total)', 'total')
+      .where('document.createdAt >= :from AND document.createdAt < :to', {
+        from,
+        to,
+      });
 
     if (storeId) {
-      paymentQuery.andWhere('sale.storeID = :storeId', { storeId });
-      statusQuery.andWhere('sale.storeID = :storeId', { storeId });
+      paymentQuery.andWhere('document.storeID = :storeId', { storeId });
+      statusQuery.andWhere('document.storeID = :storeId', { storeId });
     }
 
     const [paymentRaw, statusRaw] = await Promise.all([
-      paymentQuery.groupBy('sale.paymentType').getRawMany(),
-      statusQuery.groupBy('sale.status').getRawMany(),
+      paymentQuery.groupBy('document.paymentType').getRawMany(),
+      statusQuery.groupBy('document.status').getRawMany(),
     ]);
 
     const groupedByPaymentType = paymentRaw.map((r) => ({
@@ -339,7 +395,6 @@ export class ReportsService {
       total: Number(r.total),
     }));
 
-    // Period summaries: today, yesterday, month (only counts and totals)
     const now = new Date();
     const todayStart = new Date(
       now.getFullYear(),
@@ -396,17 +451,18 @@ export class ReportsService {
       ),
     ]);
 
-    // Sales list with pagination
-    const listQuery = this.saleRepository
-      .createQueryBuilder('sale')
-      .leftJoinAndSelect('sale.store', 'store')
-      .leftJoinAndSelect('sale.saleProducts', 'saleProducts')
-      .where('sale.createdAt >= :from AND sale.createdAt < :to', { from, to });
+    const listQuery = this.dteDocumentRepository
+      .createQueryBuilder('document')
+      .leftJoinAndSelect('document.store', 'store')
+      .where('document.createdAt >= :from AND document.createdAt < :to', {
+        from,
+        to,
+      });
 
-    if (storeId) listQuery.andWhere('sale.storeID = :storeId', { storeId });
+    if (storeId) listQuery.andWhere('document.storeID = :storeId', { storeId });
 
-    const [sales, total] = await listQuery
-      .orderBy('sale.createdAt', 'DESC')
+    const [documents, total] = await listQuery
+      .orderBy('document.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();
@@ -419,7 +475,7 @@ export class ReportsService {
         yesterday: yesterdaySummary,
         month: monthSummary,
       },
-      sales,
+      sales: documents.map((document) => this.serializeDocument(document)),
       meta: { page, limit, total },
     };
   }

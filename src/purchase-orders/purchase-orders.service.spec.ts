@@ -1,14 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { PurchaseOrder } from './entities/purchase-order.entity';
+import {
+  PurchaseOrder,
+  PurchaseOrderCommercialStatus,
+  PurchaseOrderPaymentStatus,
+} from './entities/purchase-order.entity';
 import { PurchaseOrderItem } from './entities/purchase-order-item.entity';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { NotFoundException } from '@nestjs/common';
 
 describe('PurchaseOrdersService', () => {
   let service: PurchaseOrdersService;
-  let purchaseOrderRepository: Repository<PurchaseOrder>;
 
   const mockPurchaseOrderRepository = {
     find: jest.fn(),
@@ -30,7 +33,8 @@ describe('PurchaseOrdersService', () => {
     purchaseOrderID: 'po-uuid-1',
     store: { storeID: 'store-uuid-1' } as any,
     folio: 'abc123',
-    paymentStatus: 'Pendiente',
+    paymentStatus: PurchaseOrderPaymentStatus.PENDIENTE,
+    status: PurchaseOrderCommercialStatus.PENDIENTE,
     subtotal: 1000,
     discount: 0,
     netTotal: 1000,
@@ -62,9 +66,6 @@ describe('PurchaseOrdersService', () => {
     }).compile();
 
     service = module.get<PurchaseOrdersService>(PurchaseOrdersService);
-    purchaseOrderRepository = module.get<Repository<PurchaseOrder>>(
-      getRepositoryToken(PurchaseOrder),
-    );
   });
 
   it('should be defined', () => {
@@ -191,7 +192,7 @@ describe('PurchaseOrdersService', () => {
         .mockResolvedValue(mockPurchaseOrder as PurchaseOrder);
 
       const result = await service.updateStatus('po-uuid-1', {
-        status: 'Pagado',
+        status: PurchaseOrderCommercialStatus.ENVIADO,
       });
 
       expect(mockDataSource.transaction).toHaveBeenCalled();

@@ -209,9 +209,7 @@ describe('PricingService', () => {
       andWhere: jest.fn().mockReturnThis(),
       getMany,
     };
-    priceHistoryRepository.createQueryBuilder.mockReturnValue(
-      queryBuilder as never,
-    );
+    priceHistoryRepository.createQueryBuilder.mockReturnValue(queryBuilder);
 
     const result = await service.getPriceHistoryList({
       storeID: 'store-1',

@@ -9,7 +9,6 @@ import { UserstoresModule } from './relations/userstores/userstores.module';
 import { ProductsModule } from './products/products.module';
 import { CategoriesModule } from './categories/categories.module';
 import { StoreProductModule } from './relations/storeproduct/storeproduct.module';
-import { SalesModule } from './sales/sales.module';
 import { ReportsModule } from './reports/reports.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { ExpensesModule } from './expenses/expenses.module';
@@ -18,6 +17,7 @@ import { PricingModule } from './pricing/pricing.module';
 import { TransfersModule } from './transfers/transfers.module';
 import { SeedModule } from './seed/seed.module';
 import { StoreMonthlyTargetsModule } from './store-monthly-targets/store-monthly-targets.module';
+import { DteModule } from './dte/dte.module';
 
 @Module({
   imports: [
@@ -29,7 +29,6 @@ import { StoreMonthlyTargetsModule } from './store-monthly-targets/store-monthly
     ProductsModule,
     CategoriesModule,
     StoreProductModule,
-    SalesModule,
     ReportsModule,
     PurchaseOrdersModule,
     ExpensesModule,
@@ -38,6 +37,7 @@ import { StoreMonthlyTargetsModule } from './store-monthly-targets/store-monthly
     TransfersModule,
     SeedModule,
     StoreMonthlyTargetsModule,
+    DteModule,
   ],
   providers: [
     {

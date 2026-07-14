@@ -44,7 +44,7 @@ export class ReportsController {
   })
   @ApiQuery({
     name: 'storeId',
-    required: true,
+    required: false,
     description: 'ID de la tienda para filtrar',
   })
   @ApiQuery({

@@ -15,6 +15,10 @@ import { VerifyPurchaseOrderDto } from './dto/verify-purchase-order.dto';
 import { Store } from '../stores/entities/store.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import {
+  PurchaseOrderCommercialStatus,
+  PurchaseOrderPaymentStatus,
+} from './entities/purchase-order.entity';
 
 const TAX_RATE = 0.19;
 
@@ -39,6 +43,37 @@ export class PurchaseOrdersService {
     const total = this.toMoney(net + tax);
 
     return { subtotal, net, tax, total };
+  }
+
+  private ensureCommercialStatusTransition(
+    currentStatus: PurchaseOrderCommercialStatus,
+    nextStatus: PurchaseOrderCommercialStatus,
+  ) {
+    if (currentStatus === nextStatus) {
+      return;
+    }
+
+    const allowedTransitions: Record<
+      PurchaseOrderCommercialStatus,
+      PurchaseOrderCommercialStatus[]
+    > = {
+      [PurchaseOrderCommercialStatus.PENDIENTE]: [
+        PurchaseOrderCommercialStatus.ENVIADO,
+        PurchaseOrderCommercialStatus.RECHAZADO,
+      ],
+      [PurchaseOrderCommercialStatus.ENVIADO]: [
+        PurchaseOrderCommercialStatus.ACEPTADO,
+        PurchaseOrderCommercialStatus.RECHAZADO,
+      ],
+      [PurchaseOrderCommercialStatus.ACEPTADO]: [],
+      [PurchaseOrderCommercialStatus.RECHAZADO]: [],
+    };
+
+    if (!allowedTransitions[currentStatus].includes(nextStatus)) {
+      throw new BadRequestException(
+        `No se puede cambiar el estado de ${currentStatus} a ${nextStatus}`,
+      );
+    }
   }
 
   // direction: +1 aplica stock (central -> tienda), -1 revierte
@@ -128,8 +163,8 @@ export class PurchaseOrdersService {
         isThirdParty,
         issueDate: new Date(),
         dueDate,
-        dteNumber: dto.dteNumber ?? null,
-        paymentStatus: 'Pendiente',
+        paymentStatus: PurchaseOrderPaymentStatus.PENDIENTE,
+        status: PurchaseOrderCommercialStatus.PENDIENTE,
         subtotal: 0,
         discount,
         netTotal: 0,
@@ -220,6 +255,7 @@ export class PurchaseOrdersService {
       const purchaseOrder = await manager.findOne(PurchaseOrder, {
         where: { purchaseOrderID: id },
         lock: { mode: 'pessimistic_write' },
+        relations: ['store'],
       });
 
       if (!purchaseOrder) {
@@ -230,6 +266,7 @@ export class PurchaseOrdersService {
 
       purchaseOrder.items = await manager.find(PurchaseOrderItem, {
         where: { purchaseOrder: { purchaseOrderID: id } },
+        relations: ['variation'],
       });
 
       if (dto.storeID) {
@@ -244,16 +281,8 @@ export class PurchaseOrdersService {
         purchaseOrder.store = store;
       }
 
-      if (dto.paymentStatus) {
-        purchaseOrder.paymentStatus = dto.paymentStatus;
-      }
-
       if (dto.dueDate) {
         purchaseOrder.dueDate = new Date(dto.dueDate);
-      }
-
-      if (dto.dteNumber !== undefined) {
-        purchaseOrder.dteNumber = dto.dteNumber ?? null;
       }
 
       if (dto.isThirdParty !== undefined) {
@@ -312,6 +341,31 @@ export class PurchaseOrdersService {
         purchaseOrder.items = await manager.save(updatedItems);
       }
 
+      if (dto.paymentStatus) {
+        const previousStatus = purchaseOrder.paymentStatus;
+        const nextStatus = dto.paymentStatus;
+
+        if (previousStatus !== nextStatus) {
+          if (
+            nextStatus === PurchaseOrderPaymentStatus.PAGADO &&
+            (previousStatus === PurchaseOrderPaymentStatus.PENDIENTE ||
+              previousStatus === PurchaseOrderPaymentStatus.ANULADO)
+          ) {
+            await this.applyStockForOrder(manager, purchaseOrder, 1);
+          }
+
+          if (
+            previousStatus === PurchaseOrderPaymentStatus.PAGADO &&
+            (nextStatus === PurchaseOrderPaymentStatus.PENDIENTE ||
+              nextStatus === PurchaseOrderPaymentStatus.ANULADO)
+          ) {
+            await this.applyStockForOrder(manager, purchaseOrder, -1);
+          }
+        }
+
+        purchaseOrder.paymentStatus = nextStatus;
+      }
+
       const totals = this.calculateTotals(
         purchaseOrder.items,
         purchaseOrder.discount,
@@ -326,7 +380,18 @@ export class PurchaseOrdersService {
       );
 
       await manager.save(purchaseOrder);
-      return this.findOne(id);
+      const result = await manager.findOne(PurchaseOrder, {
+        where: { purchaseOrderID: id },
+        relations: ['store', 'items', 'items.variation'],
+      });
+
+      if (!result) {
+        throw new NotFoundException(
+          `Orden de compra con ID ${id} no encontrada`,
+        );
+      }
+
+      return result;
     });
   }
 
@@ -338,6 +403,7 @@ export class PurchaseOrdersService {
       const purchaseOrder = await manager.findOne(PurchaseOrder, {
         where: { purchaseOrderID: id },
         lock: { mode: 'pessimistic_write' },
+        relations: ['store'],
       });
 
       if (!purchaseOrder) {
@@ -346,46 +412,29 @@ export class PurchaseOrdersService {
         );
       }
 
-      // Cargar items y variaciones por separado
-      purchaseOrder.items = await manager.find(PurchaseOrderItem, {
-        where: { purchaseOrder: { purchaseOrderID: id } },
-        relations: ['variation'],
-      });
-
-      // Cargar tienda
-      const poWithStore = await manager.findOne(PurchaseOrder, {
-        where: { purchaseOrderID: id },
-        relations: ['store'],
-      });
-      purchaseOrder.store = poWithStore!.store;
-
-      const previousStatus = purchaseOrder.paymentStatus;
+      const previousStatus = purchaseOrder.status;
       const nextStatus = dto.status;
 
-      // si no cambia el estado, no se toca stock
       if (previousStatus === nextStatus) {
         return this.findOne(id);
       }
 
-      // Pasar a Pagado desde Pendiente o Anulado -> aplicar stock
-      if (
-        nextStatus === 'Pagado' &&
-        (previousStatus === 'Pendiente' || previousStatus === 'Anulado')
-      ) {
-        await this.applyStockForOrder(manager, purchaseOrder, 1);
-      }
+      this.ensureCommercialStatusTransition(previousStatus, nextStatus);
 
-      // Salir de Pagado hacia Pendiente o Anulado -> revertir stock
-      if (
-        previousStatus === 'Pagado' &&
-        (nextStatus === 'Pendiente' || nextStatus === 'Anulado')
-      ) {
-        await this.applyStockForOrder(manager, purchaseOrder, -1);
-      }
-
-      purchaseOrder.paymentStatus = nextStatus;
+      purchaseOrder.status = nextStatus;
       await manager.save(purchaseOrder);
-      return this.findOne(id);
+      const result = await manager.findOne(PurchaseOrder, {
+        where: { purchaseOrderID: id },
+        relations: ['store', 'items', 'items.variation'],
+      });
+
+      if (!result) {
+        throw new NotFoundException(
+          `Orden de compra con ID ${id} no encontrada`,
+        );
+      }
+
+      return result;
     });
   }
 
@@ -492,7 +541,15 @@ export class PurchaseOrdersService {
 
       await manager.save(purchaseOrder);
 
-      const order = await this.findOne(id);
+      const order = await manager.findOne(PurchaseOrder, {
+        where: { purchaseOrderID: id },
+        relations: ['store', 'items', 'items.variation'],
+      });
+      if (!order) {
+        throw new NotFoundException(
+          `Orden de compra con ID ${id} no encontrada`,
+        );
+      }
       return { summary, order };
     });
   }

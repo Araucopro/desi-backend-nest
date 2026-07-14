@@ -77,8 +77,8 @@ describe('ReportsService', () => {
   });
 
   it('builds the monthly income statement with zero-filled months and totals', async () => {
-    const salesRepo = createRepositoryMock({
-      sale: [
+    const documentsRepo = createRepositoryMock({
+      document: [
         { month: '1', total: '100.50' },
         { month: '3', total: '75.25' },
       ],
@@ -94,12 +94,12 @@ describe('ReportsService', () => {
     });
 
     const service = new ReportsService(
-      salesRepo as any,
+      documentsRepo as any,
       purchaseOrdersRepo as any,
       expensesRepo as any,
     );
 
-    const result = await service.getIncomeStatement({ year: 2026 } as any);
+    const result = await service.getIncomeStatement({ year: 2026 });
 
     expect(result.year).toBe(2026);
     expect(result.months).toHaveLength(12);
@@ -144,12 +144,12 @@ describe('ReportsService', () => {
   });
 
   it('applies the store filter to every source', async () => {
-    const salesRepo = createRepositoryMock({ sale: [] });
+    const documentsRepo = createRepositoryMock({ document: [] });
     const purchaseOrdersRepo = createRepositoryMock({ purchaseOrder: [] });
     const expensesRepo = createRepositoryMock({ expense: [] });
 
     const service = new ReportsService(
-      salesRepo as any,
+      documentsRepo as any,
       purchaseOrdersRepo as any,
       expensesRepo as any,
     );
@@ -157,10 +157,10 @@ describe('ReportsService', () => {
     await service.getIncomeStatement({
       year: 2026,
       storeId: 'store-1',
-    } as any);
+    });
 
     for (const builder of [
-      salesRepo.builders[0],
+      documentsRepo.builders[0],
       purchaseOrdersRepo.builders[0],
       expensesRepo.builders[0],
     ]) {
@@ -171,21 +171,21 @@ describe('ReportsService', () => {
     }
   });
 
-  it('filters only paid sales and purchase orders', async () => {
-    const salesRepo = createRepositoryMock({ sale: [] });
+  it('filters only emitted documents and paid purchase orders', async () => {
+    const documentsRepo = createRepositoryMock({ document: [] });
     const purchaseOrdersRepo = createRepositoryMock({ purchaseOrder: [] });
     const expensesRepo = createRepositoryMock({ expense: [] });
 
     const service = new ReportsService(
-      salesRepo as any,
+      documentsRepo as any,
       purchaseOrdersRepo as any,
       expensesRepo as any,
     );
 
-    await service.getIncomeStatement({ year: 2026 } as any);
+    await service.getIncomeStatement({ year: 2026 });
 
-    expect(salesRepo.builders[0].wheres).toContainEqual({
-      expr: "sale.status = 'Pagado'",
+    expect(documentsRepo.builders[0].wheres).toContainEqual({
+      expr: "document.status = 'EMITIDO'",
       params: undefined,
     });
     expect(purchaseOrdersRepo.builders[0].wheres).toContainEqual({
@@ -195,40 +195,40 @@ describe('ReportsService', () => {
   });
 
   it('defaults to the current year when year is omitted', async () => {
-    const salesRepo = createRepositoryMock({ sale: [] });
+    const documentsRepo = createRepositoryMock({ document: [] });
     const purchaseOrdersRepo = createRepositoryMock({ purchaseOrder: [] });
     const expensesRepo = createRepositoryMock({ expense: [] });
 
     const service = new ReportsService(
-      salesRepo as any,
+      documentsRepo as any,
       purchaseOrdersRepo as any,
       expensesRepo as any,
     );
 
-    const result = await service.getIncomeStatement({} as any);
+    const result = await service.getIncomeStatement({});
 
     expect(result.year).toBe(2026);
   });
 
   it('queries the expected date and amount columns', async () => {
-    const salesRepo = createRepositoryMock({ sale: [] });
+    const documentsRepo = createRepositoryMock({ document: [] });
     const purchaseOrdersRepo = createRepositoryMock({ purchaseOrder: [] });
     const expensesRepo = createRepositoryMock({ expense: [] });
 
     const service = new ReportsService(
-      salesRepo as any,
+      documentsRepo as any,
       purchaseOrdersRepo as any,
       expensesRepo as any,
     );
 
-    await service.getIncomeStatement({ year: 2026 } as any);
+    await service.getIncomeStatement({ year: 2026 });
 
-    expect(salesRepo.builders[0].selects[0]).toEqual({
-      expr: 'EXTRACT(MONTH FROM sale.createdAt)',
+    expect(documentsRepo.builders[0].selects[0]).toEqual({
+      expr: 'EXTRACT(MONTH FROM document.createdAt)',
       as: 'month',
     });
-    expect(salesRepo.builders[0].selects[1]).toEqual({
-      expr: 'COALESCE(SUM(sale.total), 0)',
+    expect(documentsRepo.builders[0].selects[1]).toEqual({
+      expr: 'COALESCE(SUM(document.total), 0)',
       as: 'total',
     });
 
@@ -257,7 +257,7 @@ describe('ReportsService', () => {
   });
 
   it('aggregates expense detail by month and type', async () => {
-    const salesRepo = createRepositoryMock({ sale: [] });
+    const documentsRepo = createRepositoryMock({ document: [] });
     const purchaseOrdersRepo = createRepositoryMock({ purchaseOrder: [] });
     const expensesRepo = createRepositoryMock({
       expense: [
@@ -268,12 +268,12 @@ describe('ReportsService', () => {
     });
 
     const service = new ReportsService(
-      salesRepo as any,
+      documentsRepo as any,
       purchaseOrdersRepo as any,
       expensesRepo as any,
     );
 
-    const result = await service.getIncomeStatement({ year: 2026 } as any);
+    const result = await service.getIncomeStatement({ year: 2026 });
 
     expect(result.months[0].expenses).toBe(20);
     expect(result.months[0].expenseDetail).toEqual([

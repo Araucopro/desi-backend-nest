@@ -164,7 +164,7 @@ export class ExpensesService {
       totals: {
         total,
         byType,
-      } as ExpenseMonthlySummaryTotalsDto,
+      },
     };
   }
 
