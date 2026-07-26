@@ -10,6 +10,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
         const databaseUrl = process.env.DATABASE_URL;
 
         if (databaseUrl) {
+          // Railway (and most managed Postgres providers) expose a single
+          // DATABASE_URL connection string. TypeORM supports connecting
+          // directly via the `url` property.
           return {
             type: 'postgres',
             url: databaseUrl,
@@ -17,9 +20,15 @@ import { TypeOrmModule } from '@nestjs/typeorm';
             synchronize: true, // desactivar en producción
             //dropSchema: true, // ELIMINA TODAS LAS TABLAS - Solo para desarrollo
             autoLoadEntities: true,
-          } as const;
+            ssl:
+              process.env.NODE_ENV === 'production'
+                ? { rejectUnauthorized: false }
+                : false,
+          };
         }
 
+        // Fallback for local development using individual connection
+        // parameters (PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE).
         return {
           type: 'postgres',
           host: process.env.PGHOST || 'localhost',
@@ -31,7 +40,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
           synchronize: true, // desactivar en producción
           //dropSchema: true, // ELIMINA TODAS LAS TABLAS - Solo para desarrollo
           autoLoadEntities: true,
-        } as const;
+        };
       },
     }),
   ],
