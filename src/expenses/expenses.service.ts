@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
@@ -11,10 +12,10 @@ import { Repository } from 'typeorm';
 import {
   ExpenseSummaryDto,
   ExpenseMonthlySummaryMonthDto,
-  ExpenseMonthlySummaryTotalsDto,
   ExpenseTypeSummaryDto,
 } from './dto/expense-summary.dto';
 import { ExpenseSummaryQueryDto } from './dto/expense-summary-query.dto';
+import { TenantContextService } from '../multitenant/tenant-context.service';
 
 type ExpenseSummaryRow = {
   month: string | number;
@@ -27,16 +28,24 @@ export class ExpensesService {
   constructor(
     @InjectRepository(Expense)
     private readonly expenseRepository: Repository<Expense>,
+    @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
   async create(createExpenseDto: CreateExpenseDto) {
+    const run = (cb: (repo: Repository<Expense>) => Promise<Expense>) =>
+      this.tenantContext
+        ? this.tenantContext.transaction((manager) => cb(manager.getRepository(Expense)))
+        : cb(this.expenseRepository);
+
     try {
       const { storeID, ...expenseData } = createExpenseDto;
-      const expense = this.expenseRepository.create({
-        ...expenseData,
-        store: { storeID },
+      return await run((repo) => {
+        const expense = repo.create({
+          ...expenseData,
+          store: { storeID },
+        });
+        return repo.save(expense);
       });
-      return await this.expenseRepository.save(expense);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Database error';
       throw new BadRequestException(message);
@@ -44,6 +53,11 @@ export class ExpensesService {
   }
 
   async findAll() {
+    if (this.tenantContext) {
+      return this.tenantContext.transaction((manager) =>
+        manager.getRepository(Expense).find({ relations: ['store'] }),
+      );
+    }
     return await this.expenseRepository.find({
       relations: ['store'],
     });
@@ -90,85 +104,97 @@ export class ExpensesService {
   }
 
   async getSummary(filter: ExpenseSummaryQueryDto): Promise<ExpenseSummaryDto> {
-    const year = new Date().getFullYear();
-    const { start, end } = this.getYearBounds(year);
-    const conditions = [
-      'expense.deductibleDate >= :start AND expense.deductibleDate < :end',
-    ];
-    const parameters: Record<string, string> = {
-      start: start.toISOString(),
-      end: end.toISOString(),
-    };
+    const runQuery = async (repo: Repository<Expense>) => {
+      const year = new Date().getFullYear();
+      const { start, end } = this.getYearBounds(year);
+      const conditions = [
+        'expense.deductibleDate >= :start AND expense.deductibleDate < :end',
+      ];
+      const parameters: Record<string, string> = {
+        start: start.toISOString(),
+        end: end.toISOString(),
+      };
 
-    if (filter.storeId) {
-      conditions.push('expense.storeID = :storeId');
-      parameters.storeId = filter.storeId;
-    }
-
-    const qb = this.expenseRepository
-      .createQueryBuilder('expense')
-      .select('EXTRACT(MONTH FROM expense.deductibleDate)', 'month')
-      .addSelect('expense.type', 'type')
-      .addSelect('COALESCE(SUM(expense.amount), 0)', 'total');
-
-    qb.where(conditions.join(' AND '), parameters);
-
-    const rows: ExpenseSummaryRow[] = await qb
-      .groupBy('month')
-      .addGroupBy('expense.type')
-      .orderBy('month', 'ASC')
-      .addOrderBy('expense.type', 'ASC')
-      .getRawMany();
-
-    const monthlySeries = this.createMonthlySeries();
-    const monthlyMap = new Map<number, ExpenseMonthlySummaryMonthDto>(
-      monthlySeries.map((month) => [month.month, month]),
-    );
-    const yearlyTotalsByType = new Map<ExpenseType, number>(
-      (Object.values(ExpenseType) as ExpenseType[]).map((type) => [type, 0]),
-    );
-
-    for (const row of rows) {
-      const monthNumber = Number(row.month);
-      const month = monthlyMap.get(monthNumber);
-      const amount = this.toNumber(row.total);
-
-      if (!month) {
-        continue;
+      if (filter.storeId) {
+        conditions.push('expense.storeID = :storeId');
+        parameters.storeId = filter.storeId;
       }
 
-      const typeBucket = month.byType.find((item) => item.type === row.type);
-      if (typeBucket) {
-        typeBucket.total = amount;
-      }
+      const qb = repo
+        .createQueryBuilder('expense')
+        .select('EXTRACT(MONTH FROM expense.deductibleDate)', 'month')
+        .addSelect('expense.type', 'type')
+        .addSelect('COALESCE(SUM(expense.amount), 0)', 'total');
 
-      month.total += amount;
-      yearlyTotalsByType.set(
-        row.type,
-        (yearlyTotalsByType.get(row.type) ?? 0) + amount,
+      qb.where(conditions.join(' AND '), parameters);
+
+      const rows: ExpenseSummaryRow[] = await qb
+        .groupBy('month')
+        .addGroupBy('expense.type')
+        .orderBy('month', 'ASC')
+        .addOrderBy('expense.type', 'ASC')
+        .getRawMany();
+
+      const monthlySeries = this.createMonthlySeries();
+      const monthlyMap = new Map<number, ExpenseMonthlySummaryMonthDto>(
+        monthlySeries.map((month) => [month.month, month]),
       );
-    }
+      const yearlyTotalsByType = new Map<ExpenseType, number>(
+        (Object.values(ExpenseType) as ExpenseType[]).map((type) => [type, 0]),
+      );
 
-    const byType: ExpenseTypeSummaryDto[] = (
-      Object.values(ExpenseType) as ExpenseType[]
-    ).map((type) => ({
-      type,
-      total: yearlyTotalsByType.get(type) ?? 0,
-    }));
+      for (const row of rows) {
+        const monthNumber = Number(row.month);
+        const month = monthlyMap.get(monthNumber);
+        const amount = this.toNumber(row.total);
 
-    const total = monthlySeries.reduce((acc, month) => acc + month.total, 0);
+        if (!month) continue;
 
-    return {
-      year,
-      months: monthlySeries,
-      totals: {
-        total,
-        byType,
-      },
+        const typeBucket = month.byType.find((item) => item.type === row.type);
+        if (typeBucket) {
+          typeBucket.total = amount;
+        }
+
+        month.total += amount;
+        yearlyTotalsByType.set(
+          row.type,
+          (yearlyTotalsByType.get(row.type) ?? 0) + amount,
+        );
+      }
+
+      const byType: ExpenseTypeSummaryDto[] = (
+        Object.values(ExpenseType) as ExpenseType[]
+      ).map((type) => ({
+        type,
+        total: yearlyTotalsByType.get(type) ?? 0,
+      }));
+
+      const total = monthlySeries.reduce((acc, month) => acc + month.total, 0);
+
+      return {
+        year,
+        months: monthlySeries,
+        totals: {
+          total,
+          byType,
+        },
+      };
     };
+
+    if (this.tenantContext) {
+      return this.tenantContext.transaction((manager) => runQuery(manager.getRepository(Expense)));
+    }
+    return runQuery(this.expenseRepository);
   }
 
   async findOne(id: string) {
+    if (this.tenantContext) {
+      const expense = await this.tenantContext.transaction((manager) =>
+        manager.getRepository(Expense).findOne({ where: { id }, relations: ['store'] }),
+      );
+      if (!expense) throw new NotFoundException('Expense not found');
+      return expense;
+    }
     const expense = await this.expenseRepository.findOne({
       where: { id },
       relations: ['store'],
@@ -178,13 +204,31 @@ export class ExpensesService {
   }
 
   async update(id: string, updateExpenseDto: UpdateExpenseDto) {
+    if (this.tenantContext) {
+      return this.tenantContext.transaction(async (manager) => {
+        const repo = manager.getRepository(Expense);
+        const expense = await repo.findOne({ where: { id }, relations: ['store'] });
+        if (!expense) throw new NotFoundException('Expense not found');
+        const updatedExpense = Object.assign(expense, updateExpenseDto);
+        return repo.save(updatedExpense);
+      });
+    }
     const expense = await this.findOne(id);
     const updatedExpense = Object.assign(expense, updateExpenseDto);
     return await this.expenseRepository.save(updatedExpense);
   }
 
   async remove(id: string) {
+    if (this.tenantContext) {
+      return this.tenantContext.transaction(async (manager) => {
+        const repo = manager.getRepository(Expense);
+        const expense = await repo.findOne({ where: { id } });
+        if (!expense) throw new NotFoundException('Expense not found');
+        return repo.remove(expense);
+      });
+    }
     const expense = await this.findOne(id);
     return await this.expenseRepository.remove(expense);
   }
 }
+

@@ -5,11 +5,13 @@ import { ReportsController } from './reports.controller';
 import { DteDocument } from '../dte/entities/dte-document.entity';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { Expense } from '../expenses/entities/expense.entity';
+import { MultitenantModule } from '../multitenant/multitenant.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([DteDocument, PurchaseOrder, Expense])],
+  imports: [MultitenantModule, TypeOrmModule.forFeature([DteDocument, PurchaseOrder, Expense])],
   providers: [ReportsService],
   controllers: [ReportsController],
   exports: [ReportsService],
 })
 export class ReportsModule {}
+

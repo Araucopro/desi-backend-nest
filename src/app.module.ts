@@ -18,6 +18,8 @@ import { TransfersModule } from './transfers/transfers.module';
 import { SeedModule } from './seed/seed.module';
 import { StoreMonthlyTargetsModule } from './store-monthly-targets/store-monthly-targets.module';
 import { DteModule } from './dte/dte.module';
+import { MultitenantModule } from './multitenant/multitenant.module';
+import { TenantContextInterceptor } from './multitenant/tenant-context.interceptor';
 
 @Module({
   imports: [
@@ -38,12 +40,14 @@ import { DteModule } from './dte/dte.module';
     SeedModule,
     StoreMonthlyTargetsModule,
     DteModule,
+    MultitenantModule,
   ],
   providers: [
     {
       provide: APP_INTERCEPTOR,
       useClass: ResponseInterceptor,
     },
+    { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
   ],
 })
 export class AppModule {}

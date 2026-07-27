@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -28,6 +29,7 @@ import {
   DteDocumentPaymentType,
   DteDocumentStatus,
 } from './entities/dte-document.entity';
+import { TenantContextService } from '../multitenant/tenant-context.service';
 
 type NormalizedDteItem = {
   NroLinDet: number;
@@ -55,7 +57,15 @@ export class DteService {
     private readonly dteDocumentRepository: Repository<DteDocument>,
     private readonly configService: ConfigService,
     private readonly dataSource: DataSource,
+    @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
+
+  private runInTransaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return this.tenantContext
+      ? this.tenantContext.transaction(callback)
+      : this.dataSource.transaction(callback);
+  }
+
 
   private toMoney(value: number): number {
     return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -367,7 +377,7 @@ export class DteService {
       }
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.runInTransaction(async (manager) => {
       if (idempotencyKey) {
         const existing = await manager.findOne(DteDocument, {
           where: { idempotencyKey },
@@ -481,9 +491,12 @@ export class DteService {
   }
 
   async findByIdempotencyKey(idempotencyKey: string) {
-    return this.dteDocumentRepository.findOne({
-      where: { idempotencyKey },
-      relations: ['store'],
-    });
+    return this.runInTransaction((manager) =>
+      manager.getRepository(DteDocument).findOne({
+        where: { idempotencyKey },
+        relations: ['store'],
+      }),
+    );
   }
 }
+

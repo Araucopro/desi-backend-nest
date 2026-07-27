@@ -1,12 +1,13 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, EntityManager } from 'typeorm';
 import {
   InventoryMovement,
   InventoryMovementReason,
 } from './entities/inventory-movement.entity';
 import { CreateInventoryMovementDto } from './dto/create-inventory-movement.dto';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import { TenantContextService } from '../multitenant/tenant-context.service';
 
 @Injectable()
 export class InventoryService {
@@ -14,7 +15,14 @@ export class InventoryService {
     @InjectRepository(InventoryMovement)
     private readonly inventoryMovementRepository: Repository<InventoryMovement>,
     private readonly dataSource: DataSource,
+    @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
+
+  private runInTransaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return this.tenantContext
+      ? this.tenantContext.transaction(callback)
+      : this.dataSource.transaction(callback);
+  }
 
   async createMovement(
     createInventoryMovementDto: CreateInventoryMovementDto,
@@ -22,7 +30,7 @@ export class InventoryService {
     const { storeID, variationID, quantity, newStock, reason } =
       createInventoryMovementDto;
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.runInTransaction(async (manager) => {
       let storeProduct = await manager.findOne(StoreProduct, {
         where: {
           store: { storeID },
@@ -48,14 +56,14 @@ export class InventoryService {
         case InventoryMovementReason.TRANSFER_OUT:
           if (!quantity)
             throw new Error('Quantity required for this operation');
-          delta = -Math.abs(quantity); // Ensure negative
+          delta = -Math.abs(quantity);
           break;
 
         case InventoryMovementReason.PURCHASE:
         case InventoryMovementReason.TRANSFER_IN:
           if (!quantity)
             throw new Error('Quantity required for this operation');
-          delta = Math.abs(quantity); // Ensure positive
+          delta = Math.abs(quantity);
           break;
 
         case InventoryMovementReason.ADJUSTMENT:
@@ -85,12 +93,14 @@ export class InventoryService {
   }
 
   async getStoreStock(storeID: string): Promise<StoreProduct[]> {
-    // This reads from the CACHE (StoreProduct) for performance
-    return this.dataSource.getRepository(StoreProduct).find({
-      where: {
-        store: { storeID },
-      },
-      relations: ['variation', 'variation.product'],
-    });
+    return this.runInTransaction((manager) =>
+      manager.getRepository(StoreProduct).find({
+        where: {
+          store: { storeID },
+        },
+        relations: ['variation', 'variation.product'],
+      }),
+    );
   }
 }
+

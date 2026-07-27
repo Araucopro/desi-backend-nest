@@ -5,9 +5,11 @@ import { StoreTransferItem } from './entities/store-transfer-item.entity';
 import { TransfersService } from './transfers.service';
 import { TransfersController } from './transfers.controller';
 import { InventoryModule } from '../inventory/inventory.module';
+import { MultitenantModule } from '../multitenant/multitenant.module';
 
 @Module({
   imports: [
+    MultitenantModule,
     TypeOrmModule.forFeature([StoreTransfer, StoreTransferItem]),
     InventoryModule,
   ],
@@ -16,3 +18,4 @@ import { InventoryModule } from '../inventory/inventory.module';
   exports: [TypeOrmModule, TransfersService],
 })
 export class TransfersModule {}
+

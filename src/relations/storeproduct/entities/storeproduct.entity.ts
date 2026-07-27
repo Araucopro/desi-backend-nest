@@ -20,6 +20,9 @@ export class StoreProduct {
   @PrimaryGeneratedColumn('uuid')
   storeProductID!: string;
 
+  @Column({ type: 'uuid' })
+  tenantID!: string;
+
   @ManyToOne(() => Store, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'storeID' })
   store!: Store;

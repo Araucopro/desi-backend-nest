@@ -7,9 +7,11 @@ import { ProductVariation } from '../../products/entities/product-variation.enti
 import { Store } from '../../stores/entities/store.entity';
 import { Product } from '../../products/entities/product.entity';
 import { PricingModule } from '../../pricing/pricing.module';
+import { MultitenantModule } from '../../multitenant/multitenant.module';
 
 @Module({
   imports: [
+    MultitenantModule,
     TypeOrmModule.forFeature([StoreProduct, ProductVariation, Store, Product]),
     PricingModule,
   ],
@@ -17,3 +19,4 @@ import { PricingModule } from '../../pricing/pricing.module';
   providers: [StoreProductService],
 })
 export class StoreProductModule {}
+

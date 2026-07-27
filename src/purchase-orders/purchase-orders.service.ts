@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
@@ -19,6 +20,7 @@ import {
   PurchaseOrderCommercialStatus,
   PurchaseOrderPaymentStatus,
 } from './entities/purchase-order.entity';
+import { TenantContextService } from '../multitenant/tenant-context.service';
 
 const TAX_RATE = 0.19;
 
@@ -28,7 +30,15 @@ export class PurchaseOrdersService {
     @InjectRepository(PurchaseOrder)
     private readonly purchaseOrderRepository: Repository<PurchaseOrder>,
     private readonly dataSource: DataSource,
+    @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
+
+  private runInTransaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return this.tenantContext
+      ? this.tenantContext.transaction(callback)
+      : this.dataSource.transaction(callback);
+  }
+
 
   private toMoney(value: number): number {
     return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -146,7 +156,7 @@ export class PurchaseOrdersService {
     const isThirdParty = dto.isThirdParty ?? false;
     const dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.runInTransaction(async (manager) => {
       const store = await manager.findOne(Store, {
         where: { storeID: dto.storeID },
       });
@@ -228,30 +238,34 @@ export class PurchaseOrdersService {
   }
 
   findAll(): Promise<PurchaseOrder[]> {
-    return this.purchaseOrderRepository.find({
-      relations: ['store', 'items', 'items.variation'],
-      order: { createdAt: 'DESC' },
-    });
+    return this.runInTransaction((manager) =>
+      manager.getRepository(PurchaseOrder).find({
+        relations: ['store', 'items', 'items.variation'],
+        order: { createdAt: 'DESC' },
+      }),
+    );
   }
 
   async findOne(id: string): Promise<PurchaseOrder> {
-    const purchaseOrder = await this.purchaseOrderRepository.findOne({
-      where: { purchaseOrderID: id },
-      relations: ['store', 'items', 'items.variation'],
+    return this.runInTransaction(async (manager) => {
+      const purchaseOrder = await manager.getRepository(PurchaseOrder).findOne({
+        where: { purchaseOrderID: id },
+        relations: ['store', 'items', 'items.variation'],
+      });
+
+      if (!purchaseOrder) {
+        throw new NotFoundException(`Orden de compra con ID ${id} no encontrada`);
+      }
+
+      return purchaseOrder;
     });
-
-    if (!purchaseOrder) {
-      throw new NotFoundException(`Orden de compra con ID ${id} no encontrada`);
-    }
-
-    return purchaseOrder;
   }
 
   async update(
     id: string,
     dto: UpdatePurchaseOrderDto,
   ): Promise<PurchaseOrder> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.runInTransaction(async (manager) => {
       const purchaseOrder = await manager.findOne(PurchaseOrder, {
         where: { purchaseOrderID: id },
         lock: { mode: 'pessimistic_write' },
@@ -294,7 +308,6 @@ export class PurchaseOrdersService {
       }
 
       if (dto.items) {
-        // Cargar items actuales para comparar
         const existingItems = await manager.find(PurchaseOrderItem, {
           where: { purchaseOrder: { purchaseOrderID: id } },
           relations: ['variation'],
@@ -311,16 +324,14 @@ export class PurchaseOrdersService {
           const existing = itemsMap.get(itemDto.variationID);
 
           if (existing) {
-            // Actualizar datos de pedido, manteniendo lo recibido
             existing.quantityRequested = itemDto.quantity;
             existing.unitPrice = itemDto.unitPrice;
             existing.subtotal = this.toMoney(
               itemDto.unitPrice * itemDto.quantity,
             );
             updatedItems.push(existing);
-            itemsMap.delete(itemDto.variationID); // Quitamos del mapa para no borrarlo
+            itemsMap.delete(itemDto.variationID);
           } else {
-            // Crear nuevo ítem
             const newItem = manager.create(PurchaseOrderItem, {
               purchaseOrder: { purchaseOrderID: id },
               variation: { variationID: itemDto.variationID },
@@ -333,7 +344,6 @@ export class PurchaseOrdersService {
           }
         }
 
-        // Los que queden en itemsMap ya no están en el nuevo pedido, se eliminan
         if (itemsMap.size > 0) {
           await manager.remove(Array.from(itemsMap.values()));
         }
@@ -399,7 +409,7 @@ export class PurchaseOrdersService {
     id: string,
     dto: UpdatePurchaseOrderStatusDto,
   ): Promise<PurchaseOrder> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.runInTransaction(async (manager) => {
       const purchaseOrder = await manager.findOne(PurchaseOrder, {
         where: { purchaseOrderID: id },
         lock: { mode: 'pessimistic_write' },
@@ -442,7 +452,7 @@ export class PurchaseOrdersService {
     id: string,
     dto: VerifyPurchaseOrderDto,
   ): Promise<{ summary: Record<string, number>; order: PurchaseOrder }> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.runInTransaction(async (manager) => {
       const purchaseOrder = await manager.findOne(PurchaseOrder, {
         where: { purchaseOrderID: id },
         lock: { mode: 'pessimistic_write' },
@@ -518,7 +528,6 @@ export class PurchaseOrdersService {
         }
       }
 
-      // Marcar faltantes de los no escaneados
       for (const item of itemsMap.values()) {
         if (!scannedVariations.has(item.variation.variationID)) {
           const missing = item.quantityRequested - (item.quantityReceived ?? 0);
@@ -554,3 +563,4 @@ export class PurchaseOrdersService {
     });
   }
 }
+

@@ -2,9 +2,10 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, SelectQueryBuilder } from 'typeorm';
+import { Repository, DataSource, SelectQueryBuilder, EntityManager } from 'typeorm';
 import { PriceHistory, PriceType } from './entities/price-history.entity';
 import { UpdatePriceDto } from './dto/update-price.dto';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
@@ -18,6 +19,7 @@ import { OfferService } from './offer.service';
 import { MarginValidator } from './validators/margin.validator';
 import { UserDiscountValidator } from './validators/user-discount.validator';
 import { PricingListQueryDto } from './dto/pricing-list.query.dto';
+import { TenantContextService } from '../multitenant/tenant-context.service';
 
 @Injectable()
 export class PricingService {
@@ -28,13 +30,21 @@ export class PricingService {
     private readonly offerService: OfferService,
     private readonly marginValidator: MarginValidator,
     private readonly userDiscountValidator: UserDiscountValidator,
+    @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
+
+  private runInTransaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return this.tenantContext
+      ? this.tenantContext.transaction(callback)
+      : this.dataSource.transaction(callback);
+  }
 
   async updatePrice(updatePriceDto: UpdatePriceDto): Promise<PriceHistory> {
     const { storeID, variationID, priceType, newPrice, reason, changedBy } =
       updatePriceDto;
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.runInTransaction(async (manager) => {
+
       let storeProduct = await manager.findOne(StoreProduct, {
         where: {
           store: { storeID },

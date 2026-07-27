@@ -5,9 +5,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { UserStore } from './entities/userstore.entity';
 import { UsersModule } from '../../users/users.module';
 import { StoresModule } from '../../stores/stores.module';
+import { MultitenantModule } from '../../multitenant/multitenant.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([UserStore]), UsersModule, StoresModule],
+  imports: [TypeOrmModule.forFeature([UserStore]), UsersModule, StoresModule, MultitenantModule],
   controllers: [UserstoresController],
   providers: [UserstoresService],
   exports: [UserstoresService],

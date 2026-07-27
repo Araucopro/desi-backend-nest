@@ -22,6 +22,9 @@ export class StoreTransferItem {
   @PrimaryGeneratedColumn('uuid')
   transferItemID!: string;
 
+  @Column({ type: 'uuid' })
+  tenantID!: string;
+
   @ManyToOne(() => StoreTransfer, (transfer) => transfer.items, {
     onDelete: 'CASCADE',
   })

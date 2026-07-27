@@ -17,6 +17,9 @@ export class StoreMonthlyTarget {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
+  @Column({ type: 'uuid' })
+  tenantID!: string;
+
   @ManyToOne('Store', 'monthlyTargets', {
     onDelete: 'CASCADE',
   })

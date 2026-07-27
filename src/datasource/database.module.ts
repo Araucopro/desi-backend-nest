@@ -14,7 +14,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
             type: 'postgres',
             url: databaseUrl,
             entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-            synchronize: true, // desactivar en producción
+            synchronize: false,
+            migrationsRun: false,
+            migrations: [__dirname + '/migrations/*{.ts,.js}'],
             //dropSchema: true, // ELIMINA TODAS LAS TABLAS - Solo para desarrollo
             autoLoadEntities: true,
           } as const;
@@ -24,11 +26,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
           type: 'postgres',
           host: process.env.PGHOST || 'localhost',
           port: Number(process.env.PGPORT || 5432),
-          username: process.env.PGUSER || 'postgres',
-          password: process.env.PGPASSWORD || 'postgres',
+          username: process.env.PG_RUNTIME_USER || process.env.PGUSER || 'postgres',
+          password: process.env.PG_RUNTIME_PASSWORD || process.env.PGPASSWORD || 'postgres',
           database: process.env.PGDATABASE || 'postgres',
           entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-          synchronize: true, // desactivar en producción
+          synchronize: false,
+          migrationsRun: false,
+          migrations: [__dirname + '/migrations/*{.ts,.js}'],
           //dropSchema: true, // ELIMINA TODAS LAS TABLAS - Solo para desarrollo
           autoLoadEntities: true,
         } as const;

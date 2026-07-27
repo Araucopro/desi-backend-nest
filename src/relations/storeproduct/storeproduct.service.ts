@@ -5,7 +5,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { StoreProduct } from './entities/storeproduct.entity';
 import { Product } from '../../products/entities/product.entity';
 import { DiscountType } from '../../pricing/entities/special-offer.entity';
@@ -15,6 +15,7 @@ import { UpdateStoreProductDto } from './dto/update-store-product.dto';
 import { ProductVariation } from '../../products/entities/product-variation.entity';
 import { Store } from '../../stores/entities/store.entity';
 import { PricingService } from '../../pricing/pricing.service';
+import { TenantContextService } from '../../multitenant/tenant-context.service';
 
 @Injectable()
 export class StoreProductService {
@@ -25,12 +26,19 @@ export class StoreProductService {
     private readonly productRepository: Repository<Product>,
     private readonly dataSource: DataSource,
     @Optional() private readonly pricingService?: PricingService,
+    @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
+
+  private runInTransaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return this.tenantContext
+      ? this.tenantContext.transaction(callback)
+      : this.dataSource.transaction(callback);
+  }
 
   async transferStock(transferStockDto: TransferStockDto): Promise<void> {
     const { targetStoreID, items } = transferStockDto;
 
-    await this.dataSource.transaction(async (manager) => {
+    await this.runInTransaction(async (manager) => {
       // 1. Verificar tienda destino
       const targetStore = await manager.findOne(Store, {
         where: { storeID: targetStoreID },

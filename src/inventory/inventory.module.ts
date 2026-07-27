@@ -3,11 +3,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { InventoryMovement } from './entities/inventory-movement.entity';
 import { InventoryService } from './inventory.service';
 import { InventoryController } from './inventory.controller';
+import { MultitenantModule } from '../multitenant/multitenant.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([InventoryMovement])],
+  imports: [MultitenantModule, TypeOrmModule.forFeature([InventoryMovement])],
   controllers: [InventoryController],
   providers: [InventoryService],
   exports: [TypeOrmModule, InventoryService],
 })
 export class InventoryModule {}
+

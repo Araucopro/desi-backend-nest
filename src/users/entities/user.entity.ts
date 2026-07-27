@@ -15,10 +15,13 @@ export enum UserRole {
   TERCERO = 'tercero',
 }
 
-@Entity({ name: 'Users', schema: 'public' })
+@Entity({ name: 'Users' })
 export class User {
   @PrimaryGeneratedColumn('uuid', { name: 'userID' })
   userID!: string;
+
+  @Column({ type: 'uuid' })
+  tenantID!: string;
 
   @Column({ type: 'varchar', length: 128, unique: true })
   email!: string;
@@ -37,6 +40,9 @@ export class User {
 
   @Column({ type: 'varchar', length: 255 })
   password!: string;
+
+  @Column({ type: 'int', default: 1 })
+  sessionVersion!: number;
 
   @OneToMany(() => UserStore, (userStore) => userStore.user)
   userStores!: UserStore[];

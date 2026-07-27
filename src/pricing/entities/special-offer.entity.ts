@@ -26,6 +26,9 @@ export class SpecialOffer {
   @PrimaryGeneratedColumn('uuid')
   offerID!: string;
 
+  @Column({ type: 'uuid' })
+  tenantID!: string;
+
   @ManyToOne(() => StoreProduct, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'storeProductID' })
   storeProduct!: StoreProduct;

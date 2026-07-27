@@ -19,6 +19,9 @@ export class PriceHistory {
   @PrimaryGeneratedColumn('uuid')
   historyID!: string;
 
+  @Column({ type: 'uuid' })
+  tenantID!: string;
+
   @ManyToOne(() => StoreProduct, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'storeProductID' })
   storeProduct!: StoreProduct;

@@ -1,5 +1,5 @@
 import {
-  ConflictException,
+  ConflictException, Optional,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -9,6 +9,7 @@ import { UserStore } from './entities/userstore.entity';
 import { CreateUserstoreDto } from './dto/create-userstore.dto';
 import { UsersService } from '../../users/users.service';
 import { StoresService } from '../../stores/stores.service';
+import { TenantContextService } from '../../multitenant/tenant-context.service';
 
 @Injectable()
 export class UserstoresService {
@@ -17,6 +18,7 @@ export class UserstoresService {
     private readonly userStoreRepo: Repository<UserStore>,
     private readonly usersService: UsersService,
     private readonly storesService: StoresService,
+    @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
   async create(dto: CreateUserstoreDto): Promise<UserStore> {
@@ -46,6 +48,7 @@ export class UserstoresService {
     const userStore = this.userStoreRepo.create({
       user,
       store,
+      ...(this.tenantContext ? { tenantID: this.tenantContext.getTenantId() } : {}),
     });
 
     return this.userStoreRepo.save(userStore);

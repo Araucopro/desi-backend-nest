@@ -7,9 +7,10 @@ import { SpecialOffer } from './entities/special-offer.entity';
 import { OfferService } from './offer.service';
 import { MarginValidator } from './validators/margin.validator';
 import { UserDiscountValidator } from './validators/user-discount.validator';
+import { MultitenantModule } from '../multitenant/multitenant.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([PriceHistory, SpecialOffer])],
+  imports: [MultitenantModule, TypeOrmModule.forFeature([PriceHistory, SpecialOffer])],
   controllers: [PricingController],
   providers: [
     PricingService,
@@ -20,3 +21,4 @@ import { UserDiscountValidator } from './validators/user-discount.validator';
   exports: [TypeOrmModule, PricingService, OfferService],
 })
 export class PricingModule {}
+

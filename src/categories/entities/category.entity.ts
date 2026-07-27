@@ -13,6 +13,9 @@ export class Category {
   @PrimaryGeneratedColumn('uuid')
   categoryID!: string;
 
+  @Column({ type: 'uuid' })
+  tenantID!: string;
+
   @Column({ type: 'uuid', nullable: true })
   parentID!: string;
 

@@ -31,6 +31,9 @@ export class PurchaseOrder {
   @PrimaryGeneratedColumn('uuid')
   purchaseOrderID!: string;
 
+  @Column({ type: 'uuid' })
+  tenantID!: string;
+
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 50, unique: true })
   folio!: string;

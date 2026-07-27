@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, EntityManager } from 'typeorm';
 import {
   DteDocument,
   DteDocumentStatus,
@@ -14,6 +14,7 @@ import {
   IncomeStatementMonthDto,
 } from './dto/income-statement.dto';
 import { ReportsSaleFilterDto } from './dto/report-salesFilter.dto';
+import { TenantContextService } from '../multitenant/tenant-context.service';
 
 type MonthlyAggregateRow = {
   month: string;
@@ -55,7 +56,16 @@ export class ReportsService {
     private readonly purchaseOrderRepository: Repository<PurchaseOrder>,
     @InjectRepository(Expense)
     private readonly expenseRepository: Repository<Expense>,
+    @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
+
+  private runInTransaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+    if (this.tenantContext) {
+      return this.tenantContext.transaction(callback);
+    }
+    return callback(this.dteDocumentRepository.manager);
+  }
+
 
   private getYearBounds(year: number) {
     return {
@@ -163,113 +173,119 @@ export class ReportsService {
   async getIncomeStatement(
     filter: IncomeStatementQueryDto,
   ): Promise<IncomeStatementDto> {
-    const year = filter.year ?? new Date().getFullYear();
-    const { start, end } = this.getYearBounds(year);
+    return this.runInTransaction(async (manager) => {
+      const year = filter.year ?? new Date().getFullYear();
+      const { start, end } = this.getYearBounds(year);
 
-    const [salesByMonth, purchaseOrdersByMonth, expenseRows] =
-      await Promise.all([
-        this.aggregateMonthlyTotal(
-          this.dteDocumentRepository,
-          'document',
-          'createdAt',
-          'total',
-          start,
-          end,
-          filter.storeId,
-          "document.status = 'EMITIDO'",
-        ),
-        this.aggregateMonthlyTotal(
-          this.purchaseOrderRepository,
-          'purchaseOrder',
-          'issueDate',
-          'total',
-          start,
-          end,
-          filter.storeId,
-          "purchaseOrder.paymentStatus = 'Pagado'",
-        ),
-        (() => {
-          const expenseQuery = this.expenseRepository
-            .createQueryBuilder('expense')
-            .select('EXTRACT(MONTH FROM expense.deductibleDate)', 'month')
-            .addSelect('expense.type', 'type')
-            .addSelect('COALESCE(SUM(expense.amount), 0)', 'total')
-            .where(
-              'expense.deductibleDate >= :start AND expense.deductibleDate < :end',
-              {
-                start: start.toISOString(),
-                end: end.toISOString(),
-              },
-            );
+      const dteRepo = manager.getRepository(DteDocument);
+      const poRepo = manager.getRepository(PurchaseOrder);
+      const expRepo = manager.getRepository(Expense);
 
-          if (filter.storeId) {
-            expenseQuery.andWhere('expense.storeID = :storeId', {
-              storeId: filter.storeId,
-            });
-          }
+      const [salesByMonth, purchaseOrdersByMonth, expenseRows] =
+        await Promise.all([
+          this.aggregateMonthlyTotal(
+            dteRepo,
+            'document',
+            'createdAt',
+            'total',
+            start,
+            end,
+            filter.storeId,
+            "document.status = 'EMITIDO'",
+          ),
+          this.aggregateMonthlyTotal(
+            poRepo,
+            'purchaseOrder',
+            'issueDate',
+            'total',
+            start,
+            end,
+            filter.storeId,
+            "purchaseOrder.paymentStatus = 'Pagado'",
+          ),
+          (() => {
+            const expenseQuery = expRepo
+              .createQueryBuilder('expense')
+              .select('EXTRACT(MONTH FROM expense.deductibleDate)', 'month')
+              .addSelect('expense.type', 'type')
+              .addSelect('COALESCE(SUM(expense.amount), 0)', 'total')
+              .where(
+                'expense.deductibleDate >= :start AND expense.deductibleDate < :end',
+                {
+                  start: start.toISOString(),
+                  end: end.toISOString(),
+                },
+              );
 
-          return expenseQuery
-            .groupBy('month')
-            .addGroupBy('expense.type')
-            .orderBy('month', 'ASC')
-            .addOrderBy('expense.type', 'ASC')
-            .getRawMany();
-        })(),
-      ]);
+            if (filter.storeId) {
+              expenseQuery.andWhere('expense.storeID = :storeId', {
+                storeId: filter.storeId,
+              });
+            }
 
-    const expensesByMonth = new Map<number, number>();
-    const expenseDetailByMonth = new Map<
-      number,
-      IncomeStatementExpenseDetailDto[]
-    >(
-      this.createMonthlySeries(year).map((month) => [
-        month.month,
-        this.createExpenseDetailSeries(),
-      ]),
-    );
+            return expenseQuery
+              .groupBy('month')
+              .addGroupBy('expense.type')
+              .orderBy('month', 'ASC')
+              .addOrderBy('expense.type', 'ASC')
+              .getRawMany();
+          })(),
+        ]);
 
-    for (const row of expenseRows as MonthlyExpenseDetailRow[]) {
-      const monthNumber = Number(row.month);
-      const amount = this.toNumber(row.total);
-
-      expensesByMonth.set(
-        monthNumber,
-        (expensesByMonth.get(monthNumber) ?? 0) + amount,
+      const expensesByMonth = new Map<number, number>();
+      const expenseDetailByMonth = new Map<
+        number,
+        IncomeStatementExpenseDetailDto[]
+      >(
+        this.createMonthlySeries(year).map((month) => [
+          month.month,
+          this.createExpenseDetailSeries(),
+        ]),
       );
 
-      const monthDetails = expenseDetailByMonth.get(monthNumber);
-      const typeDetail = monthDetails?.find((item) => item.type === row.type);
+      for (const row of expenseRows as MonthlyExpenseDetailRow[]) {
+        const monthNumber = Number(row.month);
+        const amount = this.toNumber(row.total);
 
-      if (typeDetail) {
-        typeDetail.total += amount;
+        expensesByMonth.set(
+          monthNumber,
+          (expensesByMonth.get(monthNumber) ?? 0) + amount,
+        );
+
+        const monthDetails = expenseDetailByMonth.get(monthNumber);
+        const typeDetail = monthDetails?.find((item) => item.type === row.type);
+
+        if (typeDetail) {
+          typeDetail.total += amount;
+        }
       }
-    }
 
-    const months = this.createMonthlySeries(year).map((month) => {
-      const salesIncome = salesByMonth.get(month.month) ?? 0;
-      const purchaseOrdersIncome = purchaseOrdersByMonth.get(month.month) ?? 0;
-      const expenses = expensesByMonth.get(month.month) ?? 0;
-      const expenseDetail =
-        expenseDetailByMonth.get(month.month) ??
-        this.createExpenseDetailSeries();
-      const net = salesIncome + purchaseOrdersIncome - expenses;
+      const months = this.createMonthlySeries(year).map((month) => {
+        const salesIncome = salesByMonth.get(month.month) ?? 0;
+        const purchaseOrdersIncome = purchaseOrdersByMonth.get(month.month) ?? 0;
+        const expenses = expensesByMonth.get(month.month) ?? 0;
+        const expenseDetail =
+          expenseDetailByMonth.get(month.month) ??
+          this.createExpenseDetailSeries();
+        const net = salesIncome + purchaseOrdersIncome - expenses;
+
+        return {
+          ...month,
+          salesIncome,
+          purchaseOrdersIncome,
+          expenses,
+          expenseDetail,
+          net,
+        };
+      });
 
       return {
-        ...month,
-        salesIncome,
-        purchaseOrdersIncome,
-        expenses,
-        expenseDetail,
-        net,
+        year,
+        storeId: filter.storeId,
+        months,
+        totals: this.buildTotals(months),
       };
     });
-
-    return {
-      year,
-      storeId: filter.storeId,
-      months,
-      totals: this.buildTotals(months),
-    };
   }
 
   private normalizeDates(from?: string, to?: string) {
@@ -300,11 +316,12 @@ export class ReportsService {
   }
 
   private async aggregateCountAndTotal(
+    repo: Repository<DteDocument>,
     startIso: string,
     endIso: string,
     storeId?: string,
   ) {
-    const qb = this.dteDocumentRepository
+    const qb = repo
       .createQueryBuilder('document')
       .select('COUNT(document.dteDocumentID)', 'count')
       .addSelect('COALESCE(SUM(document.total),0)', 'total')
@@ -350,133 +367,140 @@ export class ReportsService {
   }
 
   async getSalesReport(filter: ReportsSaleFilterDto) {
-    const { storeId, page = 1, limit = 50 } = filter;
-    const { from, to } = this.normalizeDates(filter.from, filter.to);
+    return this.runInTransaction(async (manager) => {
+      const dteRepo = manager.getRepository(DteDocument);
+      const { storeId, page = 1, limit = 50 } = filter;
+      const { from, to } = this.normalizeDates(filter.from, filter.to);
 
-    const paymentQuery = this.dteDocumentRepository
-      .createQueryBuilder('document')
-      .select('document.paymentType', 'key')
-      .addSelect('COUNT(document.dteDocumentID)', 'count')
-      .addSelect('SUM(document.total)', 'total')
-      .where('document.createdAt >= :from AND document.createdAt < :to', {
-        from,
-        to,
-      })
-      .andWhere("document.status = 'EMITIDO'");
+      const paymentQuery = dteRepo
+        .createQueryBuilder('document')
+        .select('document.paymentType', 'key')
+        .addSelect('COUNT(document.dteDocumentID)', 'count')
+        .addSelect('SUM(document.total)', 'total')
+        .where('document.createdAt >= :from AND document.createdAt < :to', {
+          from,
+          to,
+        })
+        .andWhere("document.status = 'EMITIDO'");
 
-    const statusQuery = this.dteDocumentRepository
-      .createQueryBuilder('document')
-      .select('document.status', 'key')
-      .addSelect('COUNT(document.dteDocumentID)', 'count')
-      .addSelect('SUM(document.total)', 'total')
-      .where('document.createdAt >= :from AND document.createdAt < :to', {
-        from,
-        to,
-      });
+      const statusQuery = dteRepo
+        .createQueryBuilder('document')
+        .select('document.status', 'key')
+        .addSelect('COUNT(document.dteDocumentID)', 'count')
+        .addSelect('SUM(document.total)', 'total')
+        .where('document.createdAt >= :from AND document.createdAt < :to', {
+          from,
+          to,
+        });
 
-    if (storeId) {
-      paymentQuery.andWhere('document.storeID = :storeId', { storeId });
-      statusQuery.andWhere('document.storeID = :storeId', { storeId });
-    }
+      if (storeId) {
+        paymentQuery.andWhere('document.storeID = :storeId', { storeId });
+        statusQuery.andWhere('document.storeID = :storeId', { storeId });
+      }
 
-    const [paymentRaw, statusRaw] = await Promise.all([
-      paymentQuery.groupBy('document.paymentType').getRawMany(),
-      statusQuery.groupBy('document.status').getRawMany(),
-    ]);
+      const [paymentRaw, statusRaw] = await Promise.all([
+        paymentQuery.groupBy('document.paymentType').getRawMany(),
+        statusQuery.groupBy('document.status').getRawMany(),
+      ]);
 
-    const groupedByPaymentType = paymentRaw.map((r) => ({
-      key: r.key,
-      count: Number(r.count),
-      total: Number(r.total),
-    }));
-    const groupedByStatus = statusRaw.map((r) => ({
-      key: r.key,
-      count: Number(r.count),
-      total: Number(r.total),
-    }));
+      const groupedByPaymentType = paymentRaw.map((r) => ({
+        key: r.key,
+        count: Number(r.count),
+        total: Number(r.total),
+      }));
+      const groupedByStatus = statusRaw.map((r) => ({
+        key: r.key,
+        count: Number(r.count),
+        total: Number(r.total),
+      }));
 
-    const now = new Date();
-    const todayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      0,
-      0,
-      0,
-      0,
-    );
-    const tomorrowStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate() + 1,
-      0,
-      0,
-      0,
-      0,
-    );
-    const yesterdayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate() - 1,
-      0,
-      0,
-      0,
-      0,
-    );
-    const monthStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      1,
-      0,
-      0,
-      0,
-      0,
-    );
+      const now = new Date();
+      const todayStart = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        0,
+        0,
+        0,
+        0,
+      );
+      const tomorrowStart = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1,
+        0,
+        0,
+        0,
+        0,
+      );
+      const yesterdayStart = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() - 1,
+        0,
+        0,
+        0,
+        0,
+      );
+      const monthStart = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        1,
+        0,
+        0,
+        0,
+        0,
+      );
 
-    const [todaySummary, yesterdaySummary, monthSummary] = await Promise.all([
-      this.aggregateCountAndTotal(
-        todayStart.toISOString(),
-        tomorrowStart.toISOString(),
-        storeId,
-      ),
-      this.aggregateCountAndTotal(
-        yesterdayStart.toISOString(),
-        todayStart.toISOString(),
-        storeId,
-      ),
-      this.aggregateCountAndTotal(
-        monthStart.toISOString(),
-        tomorrowStart.toISOString(),
-        storeId,
-      ),
-    ]);
+      const [todaySummary, yesterdaySummary, monthSummary] = await Promise.all([
+        this.aggregateCountAndTotal(
+          dteRepo,
+          todayStart.toISOString(),
+          tomorrowStart.toISOString(),
+          storeId,
+        ),
+        this.aggregateCountAndTotal(
+          dteRepo,
+          yesterdayStart.toISOString(),
+          todayStart.toISOString(),
+          storeId,
+        ),
+        this.aggregateCountAndTotal(
+          dteRepo,
+          monthStart.toISOString(),
+          tomorrowStart.toISOString(),
+          storeId,
+        ),
+      ]);
 
-    const listQuery = this.dteDocumentRepository
-      .createQueryBuilder('document')
-      .leftJoinAndSelect('document.store', 'store')
-      .where('document.createdAt >= :from AND document.createdAt < :to', {
-        from,
-        to,
-      });
+      const listQuery = dteRepo
+        .createQueryBuilder('document')
+        .leftJoinAndSelect('document.store', 'store')
+        .where('document.createdAt >= :from AND document.createdAt < :to', {
+          from,
+          to,
+        });
 
-    if (storeId) listQuery.andWhere('document.storeID = :storeId', { storeId });
+      if (storeId) listQuery.andWhere('document.storeID = :storeId', { storeId });
 
-    const [documents, total] = await listQuery
-      .orderBy('document.createdAt', 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getManyAndCount();
+      const [documents, total] = await listQuery
+        .orderBy('document.createdAt', 'DESC')
+        .skip((page - 1) * limit)
+        .take(limit)
+        .getManyAndCount();
 
-    return {
-      groupedByPaymentType,
-      groupedByStatus,
-      periodSummary: {
-        today: todaySummary,
-        yesterday: yesterdaySummary,
-        month: monthSummary,
-      },
-      sales: documents.map((document) => this.serializeDocument(document)),
-      meta: { page, limit, total },
-    };
+      return {
+        groupedByPaymentType,
+        groupedByStatus,
+        periodSummary: {
+          today: todaySummary,
+          yesterday: yesterdaySummary,
+          month: monthSummary,
+        },
+        sales: documents.map((document) => this.serializeDocument(document)),
+        meta: { page, limit, total },
+      };
+    });
   }
 }
+

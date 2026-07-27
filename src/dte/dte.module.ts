@@ -10,10 +10,12 @@ import { ProductVariation } from '../products/entities/product-variation.entity'
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { InventoryMovement } from '../inventory/entities/inventory-movement.entity';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
+import { MultitenantModule } from '../multitenant/multitenant.module';
 
 @Module({
   imports: [
     ConfigModule,
+    MultitenantModule,
     TypeOrmModule.forFeature([
       DteDocument,
       Store,
@@ -28,3 +30,4 @@ import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity
   providers: [DteService],
 })
 export class DteModule {}
+

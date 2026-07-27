@@ -27,6 +27,9 @@ export class InventoryMovement {
   @PrimaryGeneratedColumn('uuid')
   movementID!: string;
 
+  @Column({ type: 'uuid' })
+  tenantID!: string;
+
   @ManyToOne(() => Store, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'storeID' })
   store!: Store;

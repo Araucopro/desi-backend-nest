@@ -17,12 +17,15 @@ export enum StoreType {
   THIRD_PARTY = 'third_party',
 }
 
-@Entity({ name: 'Store', schema: 'public' })
+@Entity({ name: 'Store' })
 export class Store {
   @PrimaryGeneratedColumn('uuid', {
     name: 'storeID',
   })
   storeID!: string;
+
+  @Column({ type: 'uuid' })
+  tenantID!: string;
 
   @Column({ type: 'varchar', length: 255 })
   location!: string;

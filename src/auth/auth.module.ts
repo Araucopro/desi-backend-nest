@@ -1,12 +1,15 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { APP_GUARD } from '@nestjs/core';
 import { AuthGuard } from './guards/auth.guard';
 import { RolesGuard } from './guards/roles.guard';
+import { MultitenantModule } from '../multitenant/multitenant.module';
+import { Tenant } from '../multitenant/entities/tenant.entity';
 type Unit =
   | 'Years'
   | 'Year'
@@ -53,6 +56,8 @@ type StringValue =
       isGlobal: false,
     }),
     UsersModule,
+    MultitenantModule,
+    TypeOrmModule.forFeature([Tenant]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

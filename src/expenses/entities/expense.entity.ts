@@ -17,7 +17,7 @@ export enum ExpenseType {
   ADMINISTRATIVE = 'administrative',
 }
 
-@Entity({ name: 'Expense', schema: 'public' })
+@Entity({ name: 'Expense' })
 export class Expense {
   @ApiProperty({
     description: 'ID único del gasto',
@@ -25,6 +25,9 @@ export class Expense {
   })
   @PrimaryGeneratedColumn('uuid')
   id!: string;
+
+  @Column({ type: 'uuid' })
+  tenantID!: string;
 
   @ApiProperty({
     description: 'Nombre o descripción del gasto',

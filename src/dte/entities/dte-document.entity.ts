@@ -31,6 +31,9 @@ export class DteDocument {
   @PrimaryGeneratedColumn('uuid')
   dteDocumentID!: string;
 
+  @Column({ type: 'uuid' })
+  tenantID!: string;
+
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 128, nullable: true })
   idempotencyKey!: string | null;

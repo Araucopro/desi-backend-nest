@@ -16,6 +16,9 @@ export class PurchaseOrderItem {
   @PrimaryGeneratedColumn('uuid')
   purchaseOrderItemID!: string;
 
+  @Column({ type: 'uuid' })
+  tenantID!: string;
+
   @ManyToOne(() => PurchaseOrder, (order) => order.items, {
     onDelete: 'CASCADE',
   })
