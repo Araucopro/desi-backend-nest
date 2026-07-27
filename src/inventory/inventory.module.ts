@@ -12,4 +12,3 @@ import { MultitenantModule } from '../multitenant/multitenant.module';
   exports: [TypeOrmModule, InventoryService],
 })
 export class InventoryModule {}
-

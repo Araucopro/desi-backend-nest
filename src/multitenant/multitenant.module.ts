@@ -47,4 +47,3 @@ const JWT_MODULE = JwtModule.registerAsync({
   ],
 })
 export class MultitenantModule {}
-

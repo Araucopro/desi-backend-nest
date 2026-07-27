@@ -1,4 +1,8 @@
-import { EventSubscriber, EntitySubscriberInterface, InsertEvent } from 'typeorm';
+import {
+  EventSubscriber,
+  EntitySubscriberInterface,
+  InsertEvent,
+} from 'typeorm';
 import { TenantContextService } from './tenant-context.service';
 
 @EventSubscriber()

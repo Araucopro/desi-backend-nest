@@ -8,7 +8,12 @@ import { StoresModule } from '../../stores/stores.module';
 import { MultitenantModule } from '../../multitenant/multitenant.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([UserStore]), UsersModule, StoresModule, MultitenantModule],
+  imports: [
+    TypeOrmModule.forFeature([UserStore]),
+    UsersModule,
+    StoresModule,
+    MultitenantModule,
+  ],
   controllers: [UserstoresController],
   providers: [UserstoresService],
   exports: [UserstoresService],

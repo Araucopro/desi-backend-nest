@@ -20,7 +20,9 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "migration:run": "node --env-file=.env node_modules/typeorm/cli.js migration:run -d dist/datasource/data-source.js",
-    "migration:revert": "node --env-file=.env node_modules/typeorm/cli.js migration:revert -d dist/datasource/data-source.js"
+    "migration:revert": "node --env-file=.env node_modules/typeorm/cli.js migration:revert -d dist/datasource/data-source.js",
+    "migration:fresh": "pnpm schema:drop && pnpm migration:run",
+    "schema:drop": "node --env-file=.env node_modules/typeorm/cli.js schema:drop -d dist/datasource/data-source.js"
   },
   "dependencies": {
     "@fastify/static": "^8.3.0",

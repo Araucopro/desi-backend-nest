@@ -24,4 +24,3 @@ import { MultitenantModule } from '../multitenant/multitenant.module';
   providers: [PurchaseOrdersService],
 })
 export class PurchaseOrdersModule {}
-

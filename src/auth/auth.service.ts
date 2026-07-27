@@ -49,7 +49,8 @@ export class AuthService {
       }
 
       const isPasswordValid = await bcrypt.compare(password, user.password);
-      if (!isPasswordValid) throw new UnauthorizedException('Invalid credentials');
+      if (!isPasswordValid)
+        throw new UnauthorizedException('Invalid credentials');
 
       const payload: JwtPayload = {
         type: 'tenant',
@@ -72,7 +73,9 @@ export class AuthService {
         accessToken: await this.jwtService.signAsync(payload),
       };
     } catch (error) {
-      this.logger.error(`Login failed for email ${email}: ${(error as Error).message}`);
+      this.logger.error(
+        `Login failed for email ${email}: ${(error as Error).message}`,
+      );
       throw new UnauthorizedException('Invalid credentials');
     }
   }

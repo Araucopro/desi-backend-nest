@@ -1,6 +1,15 @@
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
-export enum MasterRole { SUPER_ADMIN = 'SUPER_ADMIN', SUPPORT = 'SUPPORT' }
+export enum MasterRole {
+  SUPER_ADMIN = 'SUPER_ADMIN',
+  SUPPORT = 'SUPPORT',
+}
 
 @Entity({ name: 'master_users' })
 export class MasterUser {

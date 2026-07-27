@@ -24,7 +24,9 @@ export class ProductsService {
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
-  private runInTransaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+  private runInTransaction<T>(
+    callback: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
     return this.tenantContext
       ? this.tenantContext.transaction(callback)
       : this.entityManager.transaction(callback);
@@ -68,7 +70,8 @@ export class ProductsService {
     return this.runInTransaction(async (manager) => {
       const { limit = 10, offset = 0 } = paginationDto;
 
-      const products = await manager.getRepository(Product)
+      const products = await manager
+        .getRepository(Product)
         .createQueryBuilder('product')
         .leftJoinAndSelect('product.category', 'category')
         .leftJoinAndSelect('product.variations', 'variations')
@@ -100,12 +103,15 @@ export class ProductsService {
                 (sp as any).activeOffer = result.discountDetails;
                 (sp as any).pricingBreakdown = result.breakdown;
               } catch (e: any) {
-                (sp as any).pricingError = e.message || 'Error calculando precio';
+                (sp as any).pricingError =
+                  e.message || 'Error calculando precio';
               }
             } else {
               const offers = sp['specialOffers'] || [];
               const activeOffer = offers.sort(
-                (a, b) => (b.startDate?.getTime?.() || 0) - (a.startDate?.getTime?.() || 0),
+                (a, b) =>
+                  (b.startDate?.getTime?.() || 0) -
+                  (a.startDate?.getTime?.() || 0),
               )[0];
 
               let finalPrice = sp.priceList || 0;
@@ -172,7 +178,10 @@ export class ProductsService {
     });
   }
 
-  async update(id: string, updateProductDto: UpdateProductDto): Promise<Product> {
+  async update(
+    id: string,
+    updateProductDto: UpdateProductDto,
+  ): Promise<Product> {
     const { variations, ...productData } = updateProductDto;
 
     return this.runInTransaction(async (transactionalEntityManager) => {
@@ -193,7 +202,9 @@ export class ProductsService {
           where: { isCentralStore: true },
         });
 
-        const existingVariationsMap = new Map(product.variations.map((v) => [v.sku, v]));
+        const existingVariationsMap = new Map(
+          product.variations.map((v) => [v.sku, v]),
+        );
 
         for (const vDto of variations) {
           let variation = existingVariationsMap.get(vDto.sku);
@@ -232,7 +243,8 @@ export class ProductsService {
               ...vDto,
               product: savedProduct,
             });
-            const savedVariation = await transactionalEntityManager.save(variation);
+            const savedVariation =
+              await transactionalEntityManager.save(variation);
 
             if (centralStore) {
               const sp = transactionalEntityManager.create(StoreProduct, {
@@ -252,22 +264,32 @@ export class ProductsService {
         }
       }
 
-      return transactionalEntityManager.findOne(Product, {
-        where: { productID: id },
-        relations: ['variations', 'variations.storeProducts', 'variations.storeProducts.store', 'category'],
-      }).then((res) => {
-        if (!res) throw new NotFoundException(`Producto con ID ${id} no encontrado`);
-        return res;
-      });
+      return transactionalEntityManager
+        .findOne(Product, {
+          where: { productID: id },
+          relations: [
+            'variations',
+            'variations.storeProducts',
+            'variations.storeProducts.store',
+            'category',
+          ],
+        })
+        .then((res) => {
+          if (!res)
+            throw new NotFoundException(`Producto con ID ${id} no encontrado`);
+          return res;
+        });
     });
   }
 
   async remove(id: string): Promise<void> {
     return this.runInTransaction(async (manager) => {
-      const product = await manager.getRepository(Product).findOne({ where: { productID: id } });
-      if (!product) throw new NotFoundException(`Producto con ID ${id} no encontrado`);
+      const product = await manager
+        .getRepository(Product)
+        .findOne({ where: { productID: id } });
+      if (!product)
+        throw new NotFoundException(`Producto con ID ${id} no encontrado`);
       await manager.getRepository(Product).remove(product);
     });
   }
 }
-

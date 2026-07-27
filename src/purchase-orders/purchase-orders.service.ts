@@ -33,12 +33,13 @@ export class PurchaseOrdersService {
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
-  private runInTransaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+  private runInTransaction<T>(
+    callback: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
     return this.tenantContext
       ? this.tenantContext.transaction(callback)
       : this.dataSource.transaction(callback);
   }
-
 
   private toMoney(value: number): number {
     return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -254,7 +255,9 @@ export class PurchaseOrdersService {
       });
 
       if (!purchaseOrder) {
-        throw new NotFoundException(`Orden de compra con ID ${id} no encontrada`);
+        throw new NotFoundException(
+          `Orden de compra con ID ${id} no encontrada`,
+        );
       }
 
       return purchaseOrder;
@@ -563,4 +566,3 @@ export class PurchaseOrdersService {
     });
   }
 }
-

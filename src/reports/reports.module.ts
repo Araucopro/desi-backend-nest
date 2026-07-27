@@ -8,10 +8,12 @@ import { Expense } from '../expenses/entities/expense.entity';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 
 @Module({
-  imports: [MultitenantModule, TypeOrmModule.forFeature([DteDocument, PurchaseOrder, Expense])],
+  imports: [
+    MultitenantModule,
+    TypeOrmModule.forFeature([DteDocument, PurchaseOrder, Expense]),
+  ],
   providers: [ReportsService],
   controllers: [ReportsController],
   exports: [ReportsService],
 })
 export class ReportsModule {}
-

@@ -18,7 +18,10 @@ export class TenantContextInterceptor implements NestInterceptor {
     private readonly reflector: Reflector,
   ) {}
 
-  intercept(executionContext: ExecutionContext, next: CallHandler): Observable<unknown> {
+  intercept(
+    executionContext: ExecutionContext,
+    next: CallHandler,
+  ): Observable<unknown> {
     // Rutas @Public() no necesitan tenant context
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       executionContext.getHandler(),
@@ -30,12 +33,20 @@ export class TenantContextInterceptor implements NestInterceptor {
     const payload = request.user;
 
     // Rutas master sin impersonación tampoco necesitan tenant
-    if (payload?.type === 'master' && !payload.impersonatingTenantId) return next.handle();
+    if (payload?.type === 'master' && !payload.impersonatingTenantId)
+      return next.handle();
 
-    const headerTenant = request.headers[TENANT_ID_HEADER] as string | undefined;
-    const tenantId = payload?.tenantId ?? payload?.impersonatingTenantId ?? headerTenant;
+    const headerTenant = request.headers[TENANT_ID_HEADER] as
+      | string
+      | undefined;
+    const tenantId =
+      payload?.tenantId ?? payload?.impersonatingTenantId ?? headerTenant;
     if (!tenantId) throw new ForbiddenException('X-Tenant-ID is required');
-    if (headerTenant && payload?.tenantId && headerTenant !== payload.tenantId) {
+    if (
+      headerTenant &&
+      payload?.tenantId &&
+      headerTenant !== payload.tenantId
+    ) {
       throw new ForbiddenException('Tenant mismatch');
     }
     request.tenantId = tenantId;
@@ -50,4 +61,3 @@ export class TenantContextInterceptor implements NestInterceptor {
     );
   }
 }
-

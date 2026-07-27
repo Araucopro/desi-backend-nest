@@ -4,12 +4,13 @@ Claude debe leer y seguir estas reglas al trabajar en este repositorio. La idea 
 
 ## Contexto rapido
 
-Backend NestJS 11 con Fastify, TypeORM/PostgreSQL, JWT, Swagger, DTOs con `class-validator`, interceptor global de respuesta y filtro global de errores.
+Backend NestJS 11 con Fastify, TypeORM/PostgreSQL con Row-Level Security (RLS), `synchronize: false` (migraciones versionadas), JWT, Swagger, DTOs con `class-validator`, interceptor global de respuesta, interceptor de contexto multitenant y filtro global de errores.
 
 Dominios principales:
 
-- Auth/JWT.
-- Usuarios, roles y tiendas.
+- Multitenant (`src/multitenant`): RLS, contexto `AsyncLocalStorage`, entidades master (`Tenant`, `MasterUser`, `AuditEvent`), guards/interceptors tenant y API master.
+- Auth/JWT (Tenant y Master).
+- Usuarios, roles y tiendas (con limites por tenant: 5 usuarios, 5 tiendas).
 - Productos, variaciones y stock por tienda.
 - Inventario por movimientos.
 - Precios, historial y ofertas.
@@ -115,15 +116,21 @@ Modules:
 
 Auth actual:
 
-- `POST /auth/login` publico.
+- `POST /auth/login` publico para usuarios de tenant.
+- `POST /master/login` publico para usuarios de plataforma (MASTER).
 - `GET /auth/check-status` con `AuthGuard`.
-- JWT payload: `{ id, email, role }`.
+- JWT payload Tenant: `{ id, email, role, tenantID }`.
+- JWT payload Master: `{ id, email, isMasterAdmin: true }`.
+- Header obligatorio para peticiones de tenant: `X-Tenant-ID` (debe coincidir con `tenantID` del JWT).
 - Decorators:
   - `@Public()`
   - `@Roles(...)`
   - `@GetUser()`
+  - `@MasterRoute()`
 - Guards:
   - `AuthGuard`
+  - `TenantContextGuard`
+  - `MasterAuthGuard`
   - `RolesGuard`
 
 Roles:
@@ -133,38 +140,56 @@ Roles:
 - `consignado`
 - `tercero`
 
-Para endpoints sensibles:
+Para endpoints sensibles de tenant:
 
 ```ts
 @UseGuards(AuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
 ```
 
+Para endpoints de plataforma/master (o seed):
+
+```ts
+@UseGuards(MasterAuthGuard)
+@MasterRoute()
+```
+
 Swagger con bearer global no protege rutas por si solo. La proteccion real debe estar en guards.
 
 ## Persistencia TypeORM
 
-Base de datos PostgreSQL. TypeORM esta con `synchronize: true`, asi que los cambios de entidades pueden tocar la DB automaticamente.
+Base de datos PostgreSQL. TypeORM esta con `synchronize: false`. **Queda prohibido usar `synchronize: true`**. Todos los cambios de entidad deben crearse via migraciones TypeORM en `src/datasource/migrations/`.
 
 Reglas:
 
+- Todas las entidades de negocio deben incluir `tenantID!: string;`.
 - No renombrar columnas/tablas sin plan.
-- Mantener IDs existentes con sufijo `ID`.
+- Mantener IDs existentes con sufijo `ID` y `tenantID`.
 - Usar `ColumnNumericTransformer` para `decimal` que deba llegar como `number`.
-- Usar relaciones e indices como en entidades cercanas.
-- Usar transacciones para mutaciones de varias tablas.
+- Usar relaciones e indices compuestos `(tenantID, pk)` como en entidades cercanas.
+- Usar transacciones envueltas en `TenantContextService` para mutaciones de negocio.
 
 Entidades clave:
 
-- `User` con `UserRole`.
-- `Store` con `StoreType` e `isCentralStore`.
-- `Product` y `ProductVariation`.
-- `StoreProduct`: tienda + variacion, stock/cache y precios.
-- `InventoryMovement`: historial logico de movimientos.
-- `SpecialOffer` y `PriceHistory`.
-- `PurchaseOrder` y `PurchaseOrderItem`.
-- `StoreTransfer` y `StoreTransferItem`.
-- `DteDocument`.
+- `Tenant` (master), `MasterUser` (master), `AuditEvent` (master).
+- `User` con `UserRole` y `tenantID`.
+- `Store` con `StoreType`, `isCentralStore` y `tenantID`.
+- `Product` y `ProductVariation` con `tenantID`.
+- `StoreProduct`: tienda + variacion, stock/cache, precios y `tenantID`.
+- `InventoryMovement`: historial logico de movimientos y `tenantID`.
+- `SpecialOffer` y `PriceHistory` con `tenantID`.
+- `PurchaseOrder` y `PurchaseOrderItem` con `tenantID`.
+- `StoreTransfer` y `StoreTransferItem` con `tenantID`.
+- `DteDocument` con `tenantID`.
+
+## Multitenant y Row-Level Security (RLS)
+
+El aislamiento entre organizaciones se realiza via PostgreSQL RLS con la variable de sesion `app.tenant_id`:
+
+- `TenantContextService.transaction(callback)` ejecuta `SELECT set_config('app.tenant_id', tenantId, true)` dentro de la conexion transaccional.
+- `TenantSubscriber` auto-asigna `tenantID` en operaciones `save` si existe contexto de tenant.
+- En la creacion de tiendas y usuarios, se aplican limites por tenant (`maxStores`: 5, `maxUsers`: 5) mediante transacciones con bloqueo pesimista en la entidad `Tenant`.
+- Nunca ejecutar queries directas a `DataSource.manager` sin pasar por el contexto tenant.
 
 ## Inventario
 
@@ -277,15 +302,16 @@ No loggear secretos completos. Mantener idempotencia en flujos reintentables.
 ## Checklist de implementacion
 
 - Lei modulo/servicio/DTO/entidad cercanos.
+- Inclui `tenantID!: string;` en las entidades de negocio.
+- Inyecte `@Optional() private readonly tenantContext?: TenantContextService` en el servicio y use `tenantContext.transaction(...)`.
+- Valide limites por tenant (`maxStores`, `maxUsers`) en creaciones si aplica.
 - Defini DTOs estrictos y Swagger.
-- Use guards/roles si no es publico.
+- Use guards/roles correspondientes (`AuthGuard`, `TenantContextGuard`, o `MasterAuthGuard` + `@MasterRoute()`).
 - Use service para reglas de negocio.
-- Use TypeORM repositories y transacciones donde corresponde.
 - Use `InventoryService` para movimientos de stock.
 - Use `PricingService` para precios/descuentos.
 - Lance excepciones Nest.
 - Respete wrapper global de respuesta.
 - Mantengo contratos compatibles con frontend.
+- Verifique la compilacion sin errores con `pnpm exec tsc --noEmit`.
 - Agregue tests para logica sensible.
-- Corri build/test aplicable o explique por que no.
-

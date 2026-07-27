@@ -1,4 +1,10 @@
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, Index } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+  Index,
+} from 'typeorm';
 
 @Entity({ name: 'audit_events' })
 @Index(['tenantID', 'createdAt'])

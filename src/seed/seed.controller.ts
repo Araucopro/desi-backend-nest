@@ -12,10 +12,11 @@ export class SeedController {
   constructor(private readonly seedService: SeedService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Ejecutar carga de datos masiva (Restringido a usuario MASTER)' })
+  @ApiOperation({
+    summary: 'Ejecutar carga de datos masiva (Restringido a usuario MASTER)',
+  })
   @ApiResponse({ status: 200, description: 'Datos cargados correctamente' })
   executeSeed() {
     return this.seedService.runSeed();
   }
 }
-

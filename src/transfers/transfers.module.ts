@@ -18,4 +18,3 @@ import { MultitenantModule } from '../multitenant/multitenant.module';
   exports: [TypeOrmModule, TransfersService],
 })
 export class TransfersModule {}
-

@@ -6,7 +6,7 @@ Este repositorio es el backend NestJS del ERP retail ARAUCO/D3SI. Expone API HTT
 
 - Framework: NestJS 11.
 - Servidor HTTP: Fastify con `@nestjs/platform-fastify`.
-- Base de datos: PostgreSQL con TypeORM.
+- Base de datos: PostgreSQL con TypeORM y Row-Level Security (RLS). `synchronize: false` (migraciones versionadas en `src/datasource/migrations/`).
 - Configuracion: `@nestjs/config`, variables desde entorno o `.env`.
 - Auth: JWT bearer con `@nestjs/jwt`.
 - Validacion: `class-validator` + `class-transformer`.
@@ -25,12 +25,13 @@ Scripts importantes:
 ## Estructura actual
 
 - `src/main.ts`: bootstrap, Fastify, CORS, pipes, interceptors, filters y Swagger.
-- `src/app.module.ts`: registra todos los modulos de dominio.
-- `src/datasource/database.module.ts`: conexion TypeORM/Postgres.
+- `src/app.module.ts`: registra todos los modulos de dominio e interceptores globales (`ResponseInterceptor`, `TenantContextInterceptor`).
+- `src/datasource/database.module.ts`: conexion TypeORM/Postgres con `synchronize: false`.
+- `src/multitenant`: modulo central multitenant (`TenantContextService`, `TenantContextGuard`, `TenantContextInterceptor`, `TenantSubscriber`, entidades master `Tenant`, `MasterUser`, `AuditEvent`, controladores/servicios master).
 - `src/common`: interceptores, filtros, DTOs comunes, decorators y transformers.
-- `src/auth`: login, JWT, guards, decorators y payload.
-- `src/users`: usuarios y roles.
-- `src/stores`: tiendas.
+- `src/auth`: login tenant/master, JWT, guards, decorators y payload.
+- `src/users`: usuarios, roles y limites por tenant.
+- `src/stores`: tiendas y limites por tenant.
 - `src/relations/userstores`: relacion usuario-tienda.
 - `src/products`: productos y variaciones.
 - `src/relations/storeproduct`: stock/precio por tienda y variacion.
@@ -43,7 +44,7 @@ Scripts importantes:
 - `src/expenses`: gastos.
 - `src/store-monthly-targets`: metas mensuales por tienda.
 - `src/categories`: categorias.
-- `src/seed`: carga inicial.
+- `src/seed`: carga inicial (protegida tras autenticacion Master).
 
 ## Bootstrap global
 
@@ -135,23 +136,32 @@ Por el `ValidationPipe` global, todo DTO debe ser estricto:
 
 Auth actual:
 
-- `POST /auth/login` es publico y devuelve `user` + `accessToken`.
+- `POST /auth/login` es publico para usuarios de tenant y devuelve `user` + `accessToken`.
+- `POST /master/login` es publico para administradores de plataforma (MASTER).
 - `GET /auth/check-status` usa `AuthGuard`.
-- JWT payload: `{ id, email, role }`.
+- JWT payload Tenant: `{ id, email, role, tenantID }`.
+- JWT payload Master: `{ id, email, isMasterAdmin: true }`.
+- Header obligatorio en peticiones tenant: `X-Tenant-ID` (debe coincidir con el `tenantID` del JWT).
 - Roles actuales en `UserRole`:
   - `admin`
   - `store_manager`
   - `consignado`
   - `tercero`
-- `@Public()` marca rutas publicas.
-- `@Roles(...roles)` define roles requeridos.
-- `AuthGuard` lee `Authorization: Bearer <token>`.
-- `RolesGuard` valida roles cuando se usa.
+- Decorators principales:
+  - `@Public()` marca rutas publicas.
+  - `@Roles(...roles)` define roles de tenant requeridos.
+  - `@MasterRoute()` marca rutas de plataforma MASTER.
+- Guards:
+  - `AuthGuard` valida el token Bearer.
+  - `TenantContextGuard` valida coincidencia de `X-Tenant-ID` y `tenantID`.
+  - `MasterAuthGuard` valida autenticacion master.
+  - `RolesGuard` valida roles cuando se usa.
 
 Reglas para endpoints nuevos:
 
 - No confiar en validaciones del frontend para permisos.
-- Si un endpoint lee o muta datos sensibles, proteger con `@UseGuards(AuthGuard)` y, si aplica, `@UseGuards(AuthGuard, RolesGuard)` + `@Roles(...)`.
+- Si un endpoint lee o muta datos sensibles de tenant, proteger con `@UseGuards(AuthGuard)` y la infraestructura de context tenant.
+- Si es un endpoint administrativo de plataforma/provisioning, usar `@UseGuards(MasterAuthGuard)` + `@MasterRoute()`.
 - Validar alcance por tienda en backend cuando el usuario no sea admin. El filtro de UI no es seguridad.
 - Usar `@GetUser()` para obtener datos del JWT si la accion depende del usuario.
 - Si se crea una ruta publica, debe estar justificada y marcada explicitamente con `@Public()`.
@@ -160,16 +170,55 @@ Nota importante: Swagger muestra bearer global, pero eso no significa que todos 
 
 ## Base de datos y entidades
 
-El proyecto usa TypeORM con `synchronize: true` actualmente. Tener mucho cuidado con cambios en entidades porque pueden impactar la base automaticamente.
+El proyecto usa TypeORM con `synchronize: false`. **Queda estrictamente prohibido activar `synchronize: true`**. Todos los cambios de modelo deben aplicarse mediante migraciones versionadas en `src/datasource/migrations/`.
 
 Reglas:
 
-- Mantener nombres existentes: `userID`, `storeID`, `productID`, `variationID`, `storeProductID`, `purchaseOrderID`, `dteDocumentID`.
-- No cambiar nombres de columnas/tablas sin plan de migracion.
+- Todas las entidades comerciales de negocio deben incluir `tenantID!: string;`.
+- Mantener nombres de columnas clave: `userID`, `storeID`, `productID`, `variationID`, `storeProductID`, `purchaseOrderID`, `dteDocumentID`, `tenantID`.
+- Las tablas comerciales cuentan con indices compuestos `(tenantID, pk)` para asegurar un filtrado eficiente y seguro junto a RLS.
 - Usar `ColumnNumericTransformer` para columnas `decimal` que deben llegar como `number`.
 - Definir relaciones con `@ManyToOne`, `@OneToMany`, `@OneToOne`, `@JoinColumn` siguiendo entidades cercanas.
-- Usar indices y constraints para unicidad real, no solo validacion de servicio.
-- Para operaciones que cambian varias tablas, usar transacciones.
+- Para operaciones que cambian varias tablas o mutan datos de negocio, envolver en la infraestructura de transaccion multitenant (`TenantContextService`).
+
+## Arquitectura Multitenant y Row-Level Security (RLS)
+
+El aislamiento entre tenants se garantiza en la capa de base de datos PostgreSQL mediante **Row-Level Security (RLS)** asistido por el runtime NestJS.
+
+### Funcionamiento de RLS
+
+- El usuario de base de datos en runtime (`app_runtime`) no tiene privilegios `BYPASSRLS`. RLS esta activado y forzado en todas las tablas de negocio (`FORCE ROW LEVEL SECURITY`).
+- Las tablas master (`tenants`, `master_users`, `audit_events`) son de administracion global y tienen RLS desactivado.
+- Cada query sobre tablas comerciales exige que la variable de sesion PostgreSQL `app.tenant_id` este establecida. Si no esta establecida o no coincide, PostgreSQL no devolvera filas (0 resultados).
+
+### Patron de ejecucion en Servicios (`TenantContextService`)
+
+Todo servicio de negocio debe inyectar `TenantContextService` opcionalmente y envolver sus consultas/transacciones:
+
+```ts
+@Injectable()
+export class MiDominioService {
+  constructor(
+    @InjectRepository(MiEntidad) private readonly repo: Repository<MiEntidad>,
+    @Optional() private readonly tenantContext?: TenantContextService,
+  ) {}
+
+  private runInTransaction<T>(cb: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return this.tenantContext
+      ? this.tenantContext.transaction(cb)   // Ejecuta SELECT set_config('app.tenant_id', tenantId, true) dentro de la transaccion
+      : this.repo.manager.transaction(cb);   // Fallback para tests unitarios/seed sin contexto tenant
+  }
+}
+```
+
+### Reglas clave de Multitenant:
+
+1. **Auto-inyeccion de `tenantID`**: `TenantSubscriber` asigna automaticamente `tenantID` en operaciones `save`/`insert` cuando la peticion se ejecuta dentro del contexto tenant.
+2. **Limites por Tenant**:
+   - Maximo 5 tiendas por tenant (`maxStores`).
+   - Maximo 5 usuarios por tenant (`maxUsers`).
+   - Al crear tiendas o usuarios, el servicio debe bloquear de forma pesimista el registro de `Tenant` (`lock: { mode: 'pessimistic_write' }`) y validar los conteos actuales antes de guardar.
+3. **No realizar queries directas a `DataSource.manager` sin contexto tenant**: Siempre preferir el wrapper `tenantContext.transaction(...)`.
 
 ## Reglas de negocio sensibles
 
@@ -348,13 +397,15 @@ No hardcodear secretos ni URLs productivas nuevas.
 ## Checklist para implementar una feature
 
 - Lei modulo, entidad, DTO y servicio cercanos.
+- Verifique que la entidad incluya `tenantID!: string;` si pertenece al dominio de negocio.
+- Inyecte `@Optional() private readonly tenantContext?: TenantContextService` en el servicio y use `tenantContext.transaction(...)` para mutaciones/queries.
+- Respete los limites por tenant (`maxStores`, `maxUsers`) usando bloqueo pesimista cuando corresponda.
 - Revise impacto en frontend y nombres esperados por contratos actuales.
 - Cree/actualice DTOs con validadores y Swagger.
-- Agregue guards/roles si el endpoint no debe ser publico.
-- Use transaccion para stock/dinero/estado multiple.
+- Agregue guards/roles si el endpoint no debe ser publico (`AuthGuard`, `TenantContextGuard`, o `MasterAuthGuard` con `@MasterRoute()`).
 - Use `InventoryService` o movimientos para cambios de stock.
 - Use `PricingService` para precio final/descuentos.
 - Lance excepciones Nest, no respuestas manuales de error.
 - Mantuve respuesta compatible con interceptor global.
+- Corri `pnpm exec tsc --noEmit` para verificar la ausencia de errores TypeScript.
 - Agregue o actualice tests si la logica es sensible.
-- Corri build/test aplicable o deje indicado por que no.

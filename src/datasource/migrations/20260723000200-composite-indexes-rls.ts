@@ -57,9 +57,7 @@ export class CompositeIndexesRls20260723000200 implements MigrationInterface {
 
   async down(queryRunner: QueryRunner): Promise<void> {
     for (const { table } of this.businessTables) {
-      await queryRunner.query(
-        `DROP INDEX IF EXISTS "${table}_tenant_pk_idx"`,
-      );
+      await queryRunner.query(`DROP INDEX IF EXISTS "${table}_tenant_pk_idx"`);
     }
     // Restaurar RLS en tablas master (estado previo de la migración 0100)
     await queryRunner.query(`ALTER TABLE tenants ENABLE ROW LEVEL SECURITY`);

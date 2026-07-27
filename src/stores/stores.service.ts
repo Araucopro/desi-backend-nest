@@ -17,28 +17,56 @@ export class StoresService {
   ) {}
 
   async create(dto: CreateStoreDto): Promise<Store> {
-    if (!this.tenantContext) return this.storeRepo.save(this.storeRepo.create(dto));
+    if (!this.tenantContext)
+      return this.storeRepo.save(this.storeRepo.create(dto));
     return this.tenantContext.transaction(async (manager) => {
-      const tenant = await manager.getRepository(Tenant).findOne({ where: { tenantID: this.tenantContext!.getTenantId() }, lock: { mode: 'pessimistic_write' } });
+      const tenant = await manager
+        .getRepository(Tenant)
+        .findOne({
+          where: { tenantID: this.tenantContext!.getTenantId() },
+          lock: { mode: 'pessimistic_write' },
+        });
       if (!tenant) throw new NotFoundException('Tenant not found');
-      const count = await manager.getRepository(Store).count({ where: { tenantID: tenant.tenantID } });
-      if (count >= tenant.maxStores) throw new Error(`Tenant store limit (${tenant.maxStores}) exceeded`);
-      return manager.getRepository(Store).save(manager.getRepository(Store).create({ ...dto, tenantID: tenant.tenantID }));
+      const count = await manager
+        .getRepository(Store)
+        .count({ where: { tenantID: tenant.tenantID } });
+      if (count >= tenant.maxStores)
+        throw new Error(`Tenant store limit (${tenant.maxStores}) exceeded`);
+      return manager
+        .getRepository(Store)
+        .save(
+          manager
+            .getRepository(Store)
+            .create({ ...dto, tenantID: tenant.tenantID }),
+        );
     });
   }
 
   async findAll(): Promise<Store[]> {
-    return this.tenantContext ? this.tenantContext.transaction((manager) => manager.getRepository(Store).find()) : this.storeRepo.find();
+    return this.tenantContext
+      ? this.tenantContext.transaction((manager) =>
+          manager.getRepository(Store).find(),
+        )
+      : this.storeRepo.find();
   }
 
   async findOne(id: string): Promise<Store> {
-    const store = await (this.tenantContext ? this.tenantContext.transaction((manager) => manager.getRepository(Store).findOne({ where: { storeID: id } })) : this.storeRepo.findOne({ where: { storeID: id } }));
+    const store = await (this.tenantContext
+      ? this.tenantContext.transaction((manager) =>
+          manager.getRepository(Store).findOne({ where: { storeID: id } }),
+        )
+      : this.storeRepo.findOne({ where: { storeID: id } }));
     if (!store) throw new NotFoundException(`Store with ID ${id} not found`);
     return store;
   }
 
   async findUsersByStoreId(id: string): Promise<any> {
-    const find = this.tenantContext ? (options: any) => this.tenantContext!.transaction((manager) => manager.getRepository(Store).findOne(options)) : (options: any) => this.storeRepo.findOne(options);
+    const find = this.tenantContext
+      ? (options: any) =>
+          this.tenantContext!.transaction((manager) =>
+            manager.getRepository(Store).findOne(options),
+          )
+      : (options: any) => this.storeRepo.findOne(options);
     const store = await find({
       where: { storeID: id },
       relations: ['userStores', 'userStores.user'],
@@ -54,12 +82,19 @@ export class StoresService {
   async update(id: string, dto: UpdateStoreDto): Promise<Store> {
     const store = await this.findOne(id);
     Object.assign(store, dto);
-    return this.tenantContext ? this.tenantContext.transaction((manager) => manager.getRepository(Store).save(store)) : this.storeRepo.save(store);
+    return this.tenantContext
+      ? this.tenantContext.transaction((manager) =>
+          manager.getRepository(Store).save(store),
+        )
+      : this.storeRepo.save(store);
   }
 
   async remove(id: string): Promise<void> {
     const store = await this.findOne(id);
-    if (this.tenantContext) await this.tenantContext.transaction((manager) => manager.getRepository(Store).remove(store));
+    if (this.tenantContext)
+      await this.tenantContext.transaction((manager) =>
+        manager.getRepository(Store).remove(store),
+      );
     else await this.storeRepo.remove(store);
   }
 }

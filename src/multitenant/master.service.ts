@@ -1,4 +1,11 @@
-import { ConflictException, Injectable, NotFoundException, UnauthorizedException, OnModuleInit, Logger } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+  OnModuleInit,
+  Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -16,8 +23,10 @@ export class MasterService implements OnModuleInit {
 
   constructor(
     @InjectRepository(Tenant) private readonly tenants: Repository<Tenant>,
-    @InjectRepository(MasterUser) private readonly masterUsers: Repository<MasterUser>,
-    @InjectRepository(AuditEvent) private readonly audit: Repository<AuditEvent>,
+    @InjectRepository(MasterUser)
+    private readonly masterUsers: Repository<MasterUser>,
+    @InjectRepository(AuditEvent)
+    private readonly audit: Repository<AuditEvent>,
     private readonly jwt: JwtService,
     private readonly configService: ConfigService,
   ) {}
@@ -30,8 +39,14 @@ export class MasterService implements OnModuleInit {
     try {
       const count = await this.masterUsers.count();
       if (count === 0) {
-        const defaultEmail = this.configService.get<string>('MASTER_ADMIN_EMAIL', 'admin@master.local');
-        const defaultPassword = this.configService.get<string>('MASTER_ADMIN_PASSWORD', 'Admin123!');
+        const defaultEmail = this.configService.get<string>(
+          'MASTER_ADMIN_EMAIL',
+          'soporte@araucopro.com',
+        );
+        const defaultPassword = this.configService.get<string>(
+          'MASTER_ADMIN_PASSWORD',
+          '@Araucopro1',
+        );
         const passwordHash = await bcrypt.hash(defaultPassword, 10);
         await this.masterUsers.save(
           this.masterUsers.create({
@@ -41,16 +56,23 @@ export class MasterService implements OnModuleInit {
             sessionVersion: 1,
           }),
         );
-        this.logger.log(`Default MASTER user bootstrapped with email: ${defaultEmail}`);
+        this.logger.log(
+          `Default MASTER user bootstrapped with email: ${defaultEmail}`,
+        );
       }
     } catch (error) {
-      this.logger.warn(`Master user bootstrap check skipped or postponed: ${(error as Error).message}`);
+      this.logger.warn(
+        `Master user bootstrap check skipped or postponed: ${(error as Error).message}`,
+      );
     }
   }
 
   async loginMaster(dto: LoginMasterDto) {
-    const masterUser = await this.masterUsers.findOne({ where: { email: dto.email } });
-    if (!masterUser) throw new UnauthorizedException('Invalid master credentials');
+    const masterUser = await this.masterUsers.findOne({
+      where: { email: dto.email },
+    });
+    if (!masterUser)
+      throw new UnauthorizedException('Invalid master credentials');
 
     const isMatch = await bcrypt.compare(dto.password, masterUser.password);
     if (!isMatch) throw new UnauthorizedException('Invalid master credentials');
@@ -73,12 +95,14 @@ export class MasterService implements OnModuleInit {
   }
 
   private generateSlugBase(text: string): string {
-    return text
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'tenant';
+    return (
+      text
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'tenant'
+    );
   }
 
   private async generateUniqueSlug(baseText: string): Promise<string> {
@@ -110,20 +134,50 @@ export class MasterService implements OnModuleInit {
     return this.tenants.save(tenant);
   }
 
-  async setStatus(tenantID: string, status: TenantStatus, masterUserID: string) {
+  async setStatus(
+    tenantID: string,
+    status: TenantStatus,
+    masterUserID: string,
+  ) {
     const tenant = await this.tenants.findOne({ where: { tenantID } });
     if (!tenant) throw new NotFoundException('Tenant not found');
     tenant.status = status;
     const result = await this.tenants.save(tenant);
-    await this.audit.save(this.audit.create({ tenantID, masterUserID, action: 'STATUS', endpoint: 'master/tenants', result: status, reason: 'master status change' }));
+    await this.audit.save(
+      this.audit.create({
+        tenantID,
+        masterUserID,
+        action: 'STATUS',
+        endpoint: 'master/tenants',
+        result: status,
+        reason: 'master status change',
+      }),
+    );
     return result;
   }
 
   async impersonate(tenantID: string, masterUserID: string, reason?: string) {
-    const tenant = await this.tenants.findOne({ where: { tenantID, status: TenantStatus.ACTIVE } });
+    const tenant = await this.tenants.findOne({
+      where: { tenantID, status: TenantStatus.ACTIVE },
+    });
     if (!tenant) throw new NotFoundException('Tenant not found or inactive');
-    await this.audit.save(this.audit.create({ tenantID, masterUserID, action: 'IMPERSONATE', endpoint: 'master/impersonate', result: 'ISSUED', reason: reason ?? 'N/A' }));
-    return this.jwt.signAsync({ type: 'master', masterUserId: masterUserID, role: 'SUPPORT', sessionVersion: 1, impersonatingTenantId: tenantID, impersonatedBy: masterUserID });
+    await this.audit.save(
+      this.audit.create({
+        tenantID,
+        masterUserID,
+        action: 'IMPERSONATE',
+        endpoint: 'master/impersonate',
+        result: 'ISSUED',
+        reason: reason ?? 'N/A',
+      }),
+    );
+    return this.jwt.signAsync({
+      type: 'master',
+      masterUserId: masterUserID,
+      role: 'SUPPORT',
+      sessionVersion: 1,
+      impersonatingTenantId: tenantID,
+      impersonatedBy: masterUserID,
+    });
   }
 }
-

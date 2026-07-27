@@ -59,13 +59,14 @@ export class ReportsService {
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
-  private runInTransaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+  private runInTransaction<T>(
+    callback: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
     if (this.tenantContext) {
       return this.tenantContext.transaction(callback);
     }
     return callback(this.dteDocumentRepository.manager);
   }
-
 
   private getYearBounds(year: number) {
     return {
@@ -262,7 +263,8 @@ export class ReportsService {
 
       const months = this.createMonthlySeries(year).map((month) => {
         const salesIncome = salesByMonth.get(month.month) ?? 0;
-        const purchaseOrdersIncome = purchaseOrdersByMonth.get(month.month) ?? 0;
+        const purchaseOrdersIncome =
+          purchaseOrdersByMonth.get(month.month) ?? 0;
         const expenses = expensesByMonth.get(month.month) ?? 0;
         const expenseDetail =
           expenseDetailByMonth.get(month.month) ??
@@ -481,7 +483,8 @@ export class ReportsService {
           to,
         });
 
-      if (storeId) listQuery.andWhere('document.storeID = :storeId', { storeId });
+      if (storeId)
+        listQuery.andWhere('document.storeID = :storeId', { storeId });
 
       const [documents, total] = await listQuery
         .orderBy('document.createdAt', 'DESC')
@@ -503,4 +506,3 @@ export class ReportsService {
     });
   }
 }
-

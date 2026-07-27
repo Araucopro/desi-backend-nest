@@ -5,7 +5,12 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, SelectQueryBuilder, EntityManager } from 'typeorm';
+import {
+  Repository,
+  DataSource,
+  SelectQueryBuilder,
+  EntityManager,
+} from 'typeorm';
 import { PriceHistory, PriceType } from './entities/price-history.entity';
 import { UpdatePriceDto } from './dto/update-price.dto';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
@@ -33,7 +38,9 @@ export class PricingService {
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
-  private runInTransaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+  private runInTransaction<T>(
+    callback: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
     return this.tenantContext
       ? this.tenantContext.transaction(callback)
       : this.dataSource.transaction(callback);
@@ -44,7 +51,6 @@ export class PricingService {
       updatePriceDto;
 
     return this.runInTransaction(async (manager) => {
-
       let storeProduct = await manager.findOne(StoreProduct, {
         where: {
           store: { storeID },

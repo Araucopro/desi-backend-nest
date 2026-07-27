@@ -30,4 +30,3 @@ import { MultitenantModule } from '../multitenant/multitenant.module';
   providers: [DteService],
 })
 export class DteModule {}
-

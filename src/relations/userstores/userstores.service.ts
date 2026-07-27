@@ -1,5 +1,6 @@
 import {
-  ConflictException, Optional,
+  ConflictException,
+  Optional,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -48,7 +49,9 @@ export class UserstoresService {
     const userStore = this.userStoreRepo.create({
       user,
       store,
-      ...(this.tenantContext ? { tenantID: this.tenantContext.getTenantId() } : {}),
+      ...(this.tenantContext
+        ? { tenantID: this.tenantContext.getTenantId() }
+        : {}),
     });
 
     return this.userStoreRepo.save(userStore);

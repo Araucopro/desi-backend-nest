@@ -24,4 +24,3 @@ import { MultitenantModule } from '../multitenant/multitenant.module';
   providers: [SeedService],
 })
 export class SeedModule {}
-

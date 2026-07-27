@@ -18,7 +18,9 @@ export class InventoryService {
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
-  private runInTransaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+  private runInTransaction<T>(
+    callback: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
     return this.tenantContext
       ? this.tenantContext.transaction(callback)
       : this.dataSource.transaction(callback);
@@ -103,4 +105,3 @@ export class InventoryService {
     );
   }
 }
-

@@ -10,7 +10,10 @@ import { UserDiscountValidator } from './validators/user-discount.validator';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 
 @Module({
-  imports: [MultitenantModule, TypeOrmModule.forFeature([PriceHistory, SpecialOffer])],
+  imports: [
+    MultitenantModule,
+    TypeOrmModule.forFeature([PriceHistory, SpecialOffer]),
+  ],
   controllers: [PricingController],
   providers: [
     PricingService,
@@ -21,4 +24,3 @@ import { MultitenantModule } from '../multitenant/multitenant.module';
   exports: [TypeOrmModule, PricingService, OfferService],
 })
 export class PricingModule {}
-

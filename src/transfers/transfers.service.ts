@@ -30,7 +30,9 @@ export class TransfersService {
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
-  private runInTransaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+  private runInTransaction<T>(
+    callback: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
     return this.tenantContext
       ? this.tenantContext.transaction(callback)
       : this.dataSource.transaction(callback);
@@ -151,7 +153,8 @@ export class TransfersService {
         limit = 20,
       } = filters;
 
-      const query = manager.getRepository(StoreTransfer)
+      const query = manager
+        .getRepository(StoreTransfer)
         .createQueryBuilder('transfer')
         .leftJoinAndSelect('transfer.originStore', 'originStore')
         .leftJoinAndSelect('transfer.destinationStore', 'destinationStore')
@@ -160,7 +163,9 @@ export class TransfersService {
         .orderBy('transfer.createdAt', 'DESC');
 
       if (originStoreID) {
-        query.andWhere('originStore.storeID = :originStoreID', { originStoreID });
+        query.andWhere('originStore.storeID = :originStoreID', {
+          originStoreID,
+        });
       }
       if (destinationStoreID) {
         query.andWhere('destinationStore.storeID = :destinationStoreID', {
@@ -185,4 +190,3 @@ export class TransfersService {
     });
   }
 }
-

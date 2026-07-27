@@ -1,4 +1,12 @@
-import { Body, Controller, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { MasterService } from './master.service';
 import { MasterAuthGuard } from '../auth/guards/master-auth.guard';
 import { MasterRoute } from '../auth/decorators/master.decorator';
@@ -17,7 +25,10 @@ export class MasterController {
   @Public()
   @Post('login')
   @ApiOperation({ summary: 'Iniciar sesión como usuario MASTER de plataforma' })
-  @ApiResponse({ status: 200, description: 'Token de acceso de plataforma de tipo master' })
+  @ApiResponse({
+    status: 200,
+    description: 'Token de acceso de plataforma de tipo master',
+  })
   login(@Body() dto: LoginMasterDto) {
     return this.service.loginMaster(dto);
   }
@@ -34,15 +45,22 @@ export class MasterController {
   @Patch('tenants/:id/status')
   @UseGuards(MasterAuthGuard)
   @MasterRoute()
-  status(@Param('id') id: string, @Body() body: { status: TenantStatus }, @Req() request: any) {
+  status(
+    @Param('id') id: string,
+    @Body() body: { status: TenantStatus },
+    @Req() request: any,
+  ) {
     return this.service.setStatus(id, body.status, request.user.masterUserId);
   }
 
   @Post('tenants/:id/impersonate')
   @UseGuards(MasterAuthGuard)
   @MasterRoute()
-  impersonate(@Param('id') id: string, @Body() dto: ImpersonateTenantDto, @Req() request: any) {
+  impersonate(
+    @Param('id') id: string,
+    @Body() dto: ImpersonateTenantDto,
+    @Req() request: any,
+  ) {
     return this.service.impersonate(id, request.user.masterUserId, dto?.reason);
   }
 }
-

@@ -11,4 +11,3 @@ import { MultitenantModule } from '../multitenant/multitenant.module';
   providers: [CategoriesService],
 })
 export class CategoriesModule {}
-

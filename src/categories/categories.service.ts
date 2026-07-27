@@ -74,4 +74,3 @@ export class CategoriesService {
     return this.categoryRepository.delete(id);
   }
 }
-

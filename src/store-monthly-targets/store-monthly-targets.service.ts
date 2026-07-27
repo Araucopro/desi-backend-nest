@@ -22,13 +22,14 @@ export class StoreMonthlyTargetsService {
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
-  private runInTransaction<T>(callback: (manager: EntityManager) => Promise<T>): Promise<T> {
+  private runInTransaction<T>(
+    callback: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
     if (this.tenantContext) {
       return this.tenantContext.transaction(callback);
     }
     return callback(this.targetRepository.manager);
   }
-
 
   private normalizePeriod(period: string | Date): Date {
     const input = typeof period === 'string' ? new Date(period) : period;
@@ -69,12 +70,14 @@ export class StoreMonthlyTargetsService {
       }
 
       const normalizedPeriod = this.normalizePeriod(period);
-      const existingTarget = await manager.getRepository(StoreMonthlyTarget).findOne({
-        where: {
-          store: { storeID },
-          period: normalizedPeriod,
-        },
-      });
+      const existingTarget = await manager
+        .getRepository(StoreMonthlyTarget)
+        .findOne({
+          where: {
+            store: { storeID },
+            period: normalizedPeriod,
+          },
+        });
 
       if (existingTarget) {
         throw new BadRequestException(
@@ -128,7 +131,9 @@ export class StoreMonthlyTargetsService {
     period?: string,
   ): Promise<number> {
     return this.runInTransaction(async (manager) => {
-      const store = await manager.getRepository(Store).findOne({ where: { storeID } });
+      const store = await manager
+        .getRepository(Store)
+        .findOne({ where: { storeID } });
       if (!store) {
         throw new NotFoundException(`Tienda con ID ${storeID} no encontrada`);
       }
@@ -169,7 +174,9 @@ export class StoreMonthlyTargetsService {
     upsertDto: { period?: string; targetAmount: number },
   ): Promise<StoreMonthlyTarget> {
     return this.runInTransaction(async (manager) => {
-      const store = await manager.getRepository(Store).findOne({ where: { storeID } });
+      const store = await manager
+        .getRepository(Store)
+        .findOne({ where: { storeID } });
       if (!store) {
         throw new NotFoundException(`Tienda con ID ${storeID} no encontrada`);
       }
@@ -205,8 +212,12 @@ export class StoreMonthlyTargetsService {
   ): Promise<StoreMonthlyTarget> {
     return this.runInTransaction(async (manager) => {
       const repo = manager.getRepository(StoreMonthlyTarget);
-      const target = await repo.findOne({ where: { id }, relations: ['store'] });
-      if (!target) throw new NotFoundException(`Meta mensual con ID ${id} no encontrada`);
+      const target = await repo.findOne({
+        where: { id },
+        relations: ['store'],
+      });
+      if (!target)
+        throw new NotFoundException(`Meta mensual con ID ${id} no encontrada`);
       this.assertEditable(this.normalizePeriod(target.period));
 
       if (updateStoreMonthlyTargetDto.targetAmount !== undefined) {
@@ -221,10 +232,10 @@ export class StoreMonthlyTargetsService {
     return this.runInTransaction(async (manager) => {
       const repo = manager.getRepository(StoreMonthlyTarget);
       const target = await repo.findOne({ where: { id } });
-      if (!target) throw new NotFoundException(`Meta mensual con ID ${id} no encontrada`);
+      if (!target)
+        throw new NotFoundException(`Meta mensual con ID ${id} no encontrada`);
       this.assertEditable(this.normalizePeriod(target.period));
       await repo.remove(target);
     });
   }
 }
-

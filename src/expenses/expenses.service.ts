@@ -34,7 +34,9 @@ export class ExpensesService {
   async create(createExpenseDto: CreateExpenseDto) {
     const run = (cb: (repo: Repository<Expense>) => Promise<Expense>) =>
       this.tenantContext
-        ? this.tenantContext.transaction((manager) => cb(manager.getRepository(Expense)))
+        ? this.tenantContext.transaction((manager) =>
+            cb(manager.getRepository(Expense)),
+          )
         : cb(this.expenseRepository);
 
     try {
@@ -182,7 +184,9 @@ export class ExpensesService {
     };
 
     if (this.tenantContext) {
-      return this.tenantContext.transaction((manager) => runQuery(manager.getRepository(Expense)));
+      return this.tenantContext.transaction((manager) =>
+        runQuery(manager.getRepository(Expense)),
+      );
     }
     return runQuery(this.expenseRepository);
   }
@@ -190,7 +194,9 @@ export class ExpensesService {
   async findOne(id: string) {
     if (this.tenantContext) {
       const expense = await this.tenantContext.transaction((manager) =>
-        manager.getRepository(Expense).findOne({ where: { id }, relations: ['store'] }),
+        manager
+          .getRepository(Expense)
+          .findOne({ where: { id }, relations: ['store'] }),
       );
       if (!expense) throw new NotFoundException('Expense not found');
       return expense;
@@ -207,7 +213,10 @@ export class ExpensesService {
     if (this.tenantContext) {
       return this.tenantContext.transaction(async (manager) => {
         const repo = manager.getRepository(Expense);
-        const expense = await repo.findOne({ where: { id }, relations: ['store'] });
+        const expense = await repo.findOne({
+          where: { id },
+          relations: ['store'],
+        });
         if (!expense) throw new NotFoundException('Expense not found');
         const updatedExpense = Object.assign(expense, updateExpenseDto);
         return repo.save(updatedExpense);
@@ -231,4 +240,3 @@ export class ExpensesService {
     return await this.expenseRepository.remove(expense);
   }
 }
-

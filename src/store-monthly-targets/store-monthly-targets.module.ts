@@ -7,9 +7,11 @@ import { Store } from '../stores/entities/store.entity';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 
 @Module({
-  imports: [MultitenantModule, TypeOrmModule.forFeature([StoreMonthlyTarget, Store])],
+  imports: [
+    MultitenantModule,
+    TypeOrmModule.forFeature([StoreMonthlyTarget, Store]),
+  ],
   controllers: [StoreMonthlyTargetsController],
   providers: [StoreMonthlyTargetsService],
 })
 export class StoreMonthlyTargetsModule {}
-
