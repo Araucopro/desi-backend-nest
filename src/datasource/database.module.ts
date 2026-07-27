@@ -26,8 +26,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
           type: 'postgres',
           host: process.env.PGHOST || 'localhost',
           port: Number(process.env.PGPORT || 5432),
-          username: process.env.PG_RUNTIME_USER || process.env.PGUSER || 'postgres',
-          password: process.env.PG_RUNTIME_PASSWORD || process.env.PGPASSWORD || 'postgres',
+          username:
+            process.env.PG_RUNTIME_USER || process.env.PGUSER || 'postgres',
+          password:
+            process.env.PG_RUNTIME_PASSWORD ||
+            process.env.PGPASSWORD ||
+            'postgres',
           database: process.env.PGDATABASE || 'postgres',
           entities: [__dirname + '/../**/*.entity{.ts,.js}'],
           synchronize: false,
