@@ -11,11 +11,13 @@ import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.en
 import { InventoryMovement } from '../inventory/entities/inventory-movement.entity';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { MultitenantModule } from '../multitenant/multitenant.module';
+import { UserstoresModule } from '../relations/userstores/userstores.module';
 
 @Module({
   imports: [
     ConfigModule,
     MultitenantModule,
+    UserstoresModule,
     TypeOrmModule.forFeature([
       DteDocument,
       Store,

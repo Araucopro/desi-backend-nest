@@ -39,6 +39,9 @@ export class ProductVariation {
   @Column({ type: 'varchar', length: 100, nullable: true })
   size?: string;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  supplierSku?: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

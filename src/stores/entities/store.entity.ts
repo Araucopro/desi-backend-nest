@@ -75,6 +75,34 @@ export class Store {
   })
   isCentralStore!: boolean;
 
+  @Column({
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  giro?: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  acteco?: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
+  cdgSIISucur?: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  businessName?: string | null;
+
   @OneToMany('UserStore', 'store')
   userStores!: UserStore[];
 
