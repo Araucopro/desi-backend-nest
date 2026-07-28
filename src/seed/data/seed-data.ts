@@ -27,6 +27,10 @@ interface SeedStore {
   rut: string;
   city: string;
   type: StoreType;
+  giro?: string;
+  acteco?: string;
+  cdgSIISucur?: string;
+  businessName?: string;
 }
 
 export const initialData = {
@@ -38,9 +42,13 @@ export const initialData = {
       email: 'contacto@d3si.cl',
       isCentralStore: true,
       location: 'Centro',
-      rut: '76.123.456-1',
+      rut: '76123456-1',
       city: 'Purén',
       type: StoreType.CENTRAL,
+      giro: 'VENTA AL POR MENOR DE ROPA',
+      acteco: '477100',
+      cdgSIISucur: '0',
+      businessName: 'D3SI AVOCCORP SPA',
     },
     {
       name: 'Mall Plaza',
@@ -49,9 +57,13 @@ export const initialData = {
       email: 'mallplaza@desi.cl',
       isCentralStore: false,
       location: 'Mall Plaza Vespucio',
-      rut: '76.123.456-2',
+      rut: '76123456-2',
       city: 'La Florida',
       type: StoreType.FRANCHISE,
+      giro: 'VENTA AL POR MENOR EN TIENDAS ESPECIALIZADAS',
+      acteco: '477100',
+      cdgSIISucur: '81303347',
+      businessName: 'FRANQUICIAS D3SI SPA',
     },
     {
       name: 'Central Ahumada',

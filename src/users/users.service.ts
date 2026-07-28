@@ -79,6 +79,10 @@ export class UsersService {
           type: StoreType.CENTRAL,
           isCentralStore: true,
           tenantID: tenantId,
+          giro: 'VENTA AL POR MENOR GENERAL',
+          acteco: '479100',
+          cdgSIISucur: '0',
+          businessName: `COMERCIAL ${dto.name.toUpperCase()} SPA`,
         });
 
         const savedStore = await storeRepository.save(centralStore);
