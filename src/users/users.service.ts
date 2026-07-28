@@ -1,5 +1,10 @@
 import * as bcrypt from 'bcrypt';
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
@@ -31,12 +36,10 @@ export class UsersService {
     return run(async (manager: any) => {
       const userRepository = manager.getRepository(User);
       const tenant = tenantId
-        ? await manager
-            .getRepository(Tenant)
-            .findOne({
-              where: { tenantID: tenantId },
-              lock: { mode: 'pessimistic_write' },
-            })
+        ? await manager.getRepository(Tenant).findOne({
+            where: { tenantID: tenantId },
+            lock: { mode: 'pessimistic_write' },
+          })
         : null;
       if (tenantId && !tenant) throw new NotFoundException('Tenant not found');
       const hasUsers = await userRepository
@@ -47,7 +50,9 @@ export class UsersService {
           where: { tenantID: tenant.tenantID },
         });
         if (userCount >= tenant.maxUsers)
-          throw new Error(`Tenant user limit (${tenant.maxUsers}) exceeded`);
+          throw new ForbiddenException(
+            `Tenant user limit (${tenant.maxUsers}) exceeded`,
+          );
       }
 
       const user = userRepository.create({

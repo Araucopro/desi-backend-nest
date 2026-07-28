@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Req,
@@ -13,6 +15,8 @@ import { MasterRoute } from '../auth/decorators/master.decorator';
 import { TenantStatus } from './entities/tenant.entity';
 import { LoginMasterDto } from './dto/login-master.dto';
 import { CreateTenantDto } from './dto/create-tenant.dto';
+import { ProvisionTenantDto } from './dto/provision-tenant.dto';
+import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { ImpersonateTenantDto } from './dto/impersonate-tenant.dto';
 import { Public } from '../auth/decorators/public.decorator';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
@@ -42,11 +46,59 @@ export class MasterController {
     return this.service.createTenant(dto);
   }
 
+  @Post('tenants/:id/provision')
+  @UseGuards(MasterAuthGuard)
+  @MasterRoute()
+  @ApiOperation({
+    summary:
+      'Provisionar tienda central, usuario admin y datos base para un tenant',
+  })
+  @ApiResponse({ status: 201, description: 'Tenant provisionado exitosamente' })
+  provision(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ProvisionTenantDto,
+    @Req() request: any,
+  ) {
+    return this.service.provisionTenant(id, dto, request.user.masterUserId);
+  }
+
+  @Get('tenants/:id/metrics')
+  @UseGuards(MasterAuthGuard)
+  @MasterRoute()
+  @ApiOperation({
+    summary: 'Obtener métricas de uso y telemetría de un tenant',
+  })
+  metrics(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.getTenantMetrics(id);
+  }
+
+  @Patch('tenants/:id/subscription')
+  @UseGuards(MasterAuthGuard)
+  @MasterRoute()
+  @ApiOperation({
+    summary: 'Actualizar tipo de plan y vencimiento de suscripción',
+  })
+  subscription(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateSubscriptionDto,
+    @Req() request: any,
+  ) {
+    return this.service.updateSubscription(id, dto, request.user.masterUserId);
+  }
+
+  @Get('tenants/:id/export')
+  @UseGuards(MasterAuthGuard)
+  @MasterRoute()
+  @ApiOperation({ summary: 'Exportar respaldo completo de datos de un tenant' })
+  exportData(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.exportTenantData(id);
+  }
+
   @Patch('tenants/:id/status')
   @UseGuards(MasterAuthGuard)
   @MasterRoute()
   status(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() body: { status: TenantStatus },
     @Req() request: any,
   ) {
@@ -57,7 +109,7 @@ export class MasterController {
   @UseGuards(MasterAuthGuard)
   @MasterRoute()
   impersonate(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ImpersonateTenantDto,
     @Req() request: any,
   ) {

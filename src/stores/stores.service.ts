@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Store } from './entities/store.entity';
@@ -20,18 +25,18 @@ export class StoresService {
     if (!this.tenantContext)
       return this.storeRepo.save(this.storeRepo.create(dto));
     return this.tenantContext.transaction(async (manager) => {
-      const tenant = await manager
-        .getRepository(Tenant)
-        .findOne({
-          where: { tenantID: this.tenantContext!.getTenantId() },
-          lock: { mode: 'pessimistic_write' },
-        });
+      const tenant = await manager.getRepository(Tenant).findOne({
+        where: { tenantID: this.tenantContext!.getTenantId() },
+        lock: { mode: 'pessimistic_write' },
+      });
       if (!tenant) throw new NotFoundException('Tenant not found');
       const count = await manager
         .getRepository(Store)
         .count({ where: { tenantID: tenant.tenantID } });
       if (count >= tenant.maxStores)
-        throw new Error(`Tenant store limit (${tenant.maxStores}) exceeded`);
+        throw new ForbiddenException(
+          `Tenant store limit (${tenant.maxStores}) exceeded`,
+        );
       return manager
         .getRepository(Store)
         .save(
