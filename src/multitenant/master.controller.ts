@@ -6,6 +6,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -18,6 +19,8 @@ import { CreateTenantDto } from './dto/create-tenant.dto';
 import { ProvisionTenantDto } from './dto/provision-tenant.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { ImpersonateTenantDto } from './dto/impersonate-tenant.dto';
+import { QueryTenantsDto } from './dto/query-tenants.dto';
+import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { Public } from '../auth/decorators/public.decorator';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
@@ -37,6 +40,24 @@ export class MasterController {
     return this.service.loginMaster(dto);
   }
 
+  @Get('tenants')
+  @UseGuards(MasterAuthGuard)
+  @MasterRoute()
+  @ApiOperation({ summary: 'Obtener lista paginada de tenants con filtros' })
+  @ApiResponse({ status: 200, description: 'Lista paginada de tenants' })
+  findAll(@Query() query: QueryTenantsDto) {
+    return this.service.findAllTenants(query);
+  }
+
+  @Get('tenants/:id')
+  @UseGuards(MasterAuthGuard)
+  @MasterRoute()
+  @ApiOperation({ summary: 'Obtener detalle de un tenant por su ID' })
+  @ApiResponse({ status: 200, description: 'Detalles del tenant' })
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.findTenantById(id);
+  }
+
   @Post('tenants')
   @UseGuards(MasterAuthGuard)
   @MasterRoute()
@@ -44,6 +65,22 @@ export class MasterController {
   @ApiResponse({ status: 201, description: 'Tenant creado exitosamente' })
   create(@Body() dto: CreateTenantDto) {
     return this.service.createTenant(dto);
+  }
+
+  @Patch('tenants/:id')
+  @UseGuards(MasterAuthGuard)
+  @MasterRoute()
+  @ApiOperation({
+    summary:
+      'Actualizar propiedades de un tenant (maxStores, maxUsers, status, etc.)',
+  })
+  @ApiResponse({ status: 200, description: 'Tenant actualizado exitosamente' })
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateTenantDto,
+    @Req() request: any,
+  ) {
+    return this.service.updateTenant(id, dto, request.user.masterUserId);
   }
 
   @Post('tenants/:id/provision')

@@ -18,6 +18,8 @@ import { LoginMasterDto } from './dto/login-master.dto';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { ProvisionTenantDto } from './dto/provision-tenant.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
+import { QueryTenantsDto } from './dto/query-tenants.dto';
+import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { TenantContextService } from './tenant-context.service';
 import { Store, StoreType } from '../stores/entities/store.entity';
 import { User, UserRole } from '../users/entities/user.entity';
@@ -141,6 +143,71 @@ export class MasterService implements OnModuleInit {
     });
 
     return this.tenants.save(tenant);
+  }
+
+  async findAllTenants(query: QueryTenantsDto) {
+    const { limit = 10, offset = 0, status, search } = query;
+
+    const queryBuilder = this.tenants.createQueryBuilder('tenant');
+
+    if (status) {
+      queryBuilder.andWhere('tenant.status = :status', { status });
+    }
+
+    if (search) {
+      queryBuilder.andWhere(
+        '(tenant.name ILIKE :search OR tenant.slug ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
+    queryBuilder.orderBy('tenant.createdAt', 'DESC').take(limit).skip(offset);
+
+    const [items, total] = await queryBuilder.getManyAndCount();
+
+    return {
+      items,
+      total,
+      limit,
+      offset,
+    };
+  }
+
+  async findTenantById(tenantID: string) {
+    const tenant = await this.tenants.findOne({ where: { tenantID } });
+    if (!tenant) throw new NotFoundException('Tenant not found');
+    return tenant;
+  }
+
+  async updateTenant(
+    tenantID: string,
+    dto: UpdateTenantDto,
+    masterUserID: string,
+  ) {
+    const tenant = await this.tenants.findOne({ where: { tenantID } });
+    if (!tenant) throw new NotFoundException('Tenant not found');
+
+    if (dto.name !== undefined) tenant.name = dto.name;
+    if (dto.status !== undefined) tenant.status = dto.status;
+    if (dto.maxStores !== undefined) tenant.maxStores = dto.maxStores;
+    if (dto.maxUsers !== undefined) tenant.maxUsers = dto.maxUsers;
+    if (dto.timeZone !== undefined) tenant.timeZone = dto.timeZone;
+    if (dto.locale !== undefined) tenant.locale = dto.locale;
+
+    const updatedTenant = await this.tenants.save(tenant);
+
+    await this.audit.save(
+      this.audit.create({
+        tenantID,
+        masterUserID,
+        action: 'UPDATE_TENANT',
+        endpoint: 'master/tenants',
+        result: 'SUCCESS',
+        reason: 'Master tenant update',
+      }),
+    );
+
+    return updatedTenant;
   }
 
   async setStatus(
