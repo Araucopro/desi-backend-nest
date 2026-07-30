@@ -1,56 +1,23 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { ValidateNested } from 'class-validator';
+import { CreateStoreDto } from '../../stores/dto/create-store.dto';
+import { CreateUserDto } from '../../users/dto/create-user.dto';
 
 export class ProvisionTenantDto {
   @ApiProperty({
-    example: 'admin@empresa.com',
-    description: 'Email del usuario administrador inicial del tenant',
+    type: CreateUserDto,
+    description: 'Datos completos del usuario administrador inicial del tenant',
   })
-  @IsEmail()
-  adminEmail!: string;
+  @ValidateNested()
+  @Type(() => CreateUserDto)
+  user!: CreateUserDto;
 
   @ApiProperty({
-    example: 'Password123!',
-    description: 'Contraseña del usuario administrador inicial',
+    type: CreateStoreDto,
+    description: 'Datos completos de la tienda inicial del tenant',
   })
-  @IsString()
-  @MinLength(6)
-  adminPassword!: string;
-
-  @ApiProperty({
-    example: 'Juan',
-    description: 'Nombre del usuario administrador',
-  })
-  @IsString()
-  adminFirstName!: string;
-
-  @ApiProperty({
-    example: 'Pérez',
-    description: 'Apellido del usuario administrador',
-  })
-  @IsString()
-  adminLastName!: string;
-
-  @ApiProperty({
-    example: 'Tienda Central Matriz',
-    description: 'Nombre de la tienda central inicial',
-  })
-  @IsString()
-  centralStoreName!: string;
-
-  @ApiPropertyOptional({
-    example: 'Av. Providencia 1234',
-    description: 'Dirección de la tienda central',
-  })
-  @IsOptional()
-  @IsString()
-  centralStoreAddress?: string;
-
-  @ApiPropertyOptional({
-    example: 'STORE-CENTRAL-01',
-    description: 'Código interno de la tienda central',
-  })
-  @IsOptional()
-  @IsString()
-  centralStoreCode?: string;
+  @ValidateNested()
+  @Type(() => CreateStoreDto)
+  store!: CreateStoreDto;
 }

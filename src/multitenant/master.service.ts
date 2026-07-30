@@ -268,32 +268,25 @@ export class MasterService implements OnModuleInit {
       throw new ConflictException('Tenant is already active and provisioned');
     }
 
-    const passwordHash = await bcrypt.hash(dto.adminPassword, 10);
+    const passwordHash = await bcrypt.hash(dto.user.password, 10);
 
     return this.tenantContext.run(
       { tenantId: tenantID, masterUserId: masterUserID, impersonating: false },
       () =>
         this.tenantContext.transaction(async (manager) => {
           const store = manager.create(Store, {
+            ...dto.store,
             tenantID,
-            name: dto.centralStoreName,
-            location: dto.centralStoreName,
-            address: dto.centralStoreAddress ?? 'Dirección Matriz',
-            rut: '11111111-1',
-            phone: '+56900000000',
-            city: 'Santiago',
-            email: `central@${tenant.slug}.com`,
-            type: StoreType.CENTRAL,
-            isCentralStore: true,
           });
           const savedStore = await manager.save(Store, store);
 
           const user = manager.create(User, {
             tenantID,
-            email: dto.adminEmail,
-            name: `${dto.adminFirstName} ${dto.adminLastName}`,
+            email: dto.user.email,
+            name: dto.user.name,
             password: passwordHash,
-            role: UserRole.ADMIN,
+            role: dto.user.role,
+            userImg: dto.user.userImg ?? null,
             sessionVersion: 1,
           });
           const savedUser = await manager.save(User, user);
