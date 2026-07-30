@@ -16,11 +16,6 @@ import {
 import { ReportsSaleFilterDto } from './dto/report-salesFilter.dto';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 
-type MonthlyAggregateRow = {
-  month: string;
-  total: string | number | null;
-};
-
 type MonthlyExpenseDetailRow = {
   month: string | number;
   type: ExpenseType;

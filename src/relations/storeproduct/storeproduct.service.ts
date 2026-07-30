@@ -9,7 +9,6 @@ import { DataSource, EntityManager, Repository } from 'typeorm';
 import { StoreProduct } from './entities/storeproduct.entity';
 import { Product } from '../../products/entities/product.entity';
 import { DiscountType } from '../../pricing/entities/special-offer.entity';
-import { LessThanOrEqual, MoreThanOrEqual, IsNull } from 'typeorm';
 import { TransferStockDto } from './dto/transfer-stock.dto';
 import { UpdateStoreProductDto } from './dto/update-store-product.dto';
 import { ProductVariation } from '../../products/entities/product-variation.entity';

@@ -6,7 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -28,12 +28,12 @@ export class UsersService {
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(dto.password, saltRounds);
 
-    const run = <T>(cb: (manager: any) => Promise<T>): Promise<T> =>
+    const run = <T>(cb: (manager: EntityManager) => Promise<T>): Promise<T> =>
       this.tenantContext
         ? this.tenantContext.transaction(cb)
         : this.dataSource.transaction(cb);
     const tenantId = this.tenantContext?.get(false)?.tenantId;
-    return run(async (manager: any) => {
+    return run(async (manager: EntityManager) => {
       const userRepository = manager.getRepository(User);
       const tenant = tenantId
         ? await manager.getRepository(Tenant).findOne({

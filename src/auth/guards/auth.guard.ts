@@ -9,6 +9,11 @@ import { JwtService } from '@nestjs/jwt';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { ConfigService } from '@nestjs/config';
+import { FastifyRequest } from 'fastify';
+
+export interface AuthenticatedRequest extends FastifyRequest {
+  user?: any;
+}
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -21,7 +26,7 @@ export class AuthGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
@@ -48,16 +53,14 @@ export class AuthGuard implements CanActivate {
         secret: this.configService.get<string>('JWT_SECRET'),
       });
       if (payload.type === 'master') {
-        request['user'] = payload;
+        request.user = payload;
       } else if (payload.type !== 'tenant' || !payload.tenantId) {
         throw new UnauthorizedException('Tenant token required');
       } else {
-        request['user'] = payload;
+        request.user = payload;
       }
 
-      // We're assigning the payload to the request object here
-      // so that we can access it in our route handlers
-      request['user'] = payload;
+      request.user = payload;
       this.logger.log(`Autenticación OK | ${request.method} ${request.url}`);
     } catch {
       this.logger.warn(
@@ -69,8 +72,9 @@ export class AuthGuard implements CanActivate {
     return true;
   }
 
-  private extractTokenFromHeader(request: any): string | undefined {
-    const [type, token] = request.headers.authorization?.split(' ') ?? [];
+  private extractTokenFromHeader(request: FastifyRequest): string | undefined {
+    const authorization = request.headers.authorization;
+    const [type, token] = authorization?.split(' ') ?? [];
     return type === 'Bearer' ? token : undefined;
   }
 }
