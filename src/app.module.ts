@@ -20,6 +20,7 @@ import { StoreMonthlyTargetsModule } from './store-monthly-targets/store-monthly
 import { DteModule } from './dte/dte.module';
 import { MultitenantModule } from './multitenant/multitenant.module';
 import { TenantContextInterceptor } from './multitenant/tenant-context.interceptor';
+import { SiiCodesModule } from './sii-codes/sii-codes.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { TenantContextInterceptor } from './multitenant/tenant-context.intercept
     StoreMonthlyTargetsModule,
     DteModule,
     MultitenantModule,
+    SiiCodesModule,
   ],
   providers: [
     {
