@@ -1,5 +1,6 @@
 import { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { apiReference } from '@scalar/nestjs-api-reference';
 import { RawServerDefault } from 'fastify';
 
 export const swaggerConfig = (
@@ -27,7 +28,27 @@ export const swaggerConfig = (
   // Esto evita tener que poner @ApiBearerAuth() en cada controlador
   document.security = [{ 'access-token': [] }];
 
-  SwaggerModule.setup('docs', app, document, {
+  // UI tradicional de Swagger UI en /swagger
+  SwaggerModule.setup('swagger', app, document, {
     jsonDocumentUrl: 'docs-json',
   });
+
+  // UI moderna con Scalar Reference en /reference
+  app.use(
+    '/docs',
+    apiReference({
+      theme: 'bluePlanet',
+      withFastify: true,
+      showDeveloperTools: 'never',
+      spec: {
+        content: document,
+      },
+      agent: {
+        disabled: true,
+      },
+      mcp: {
+        disabled: true,
+      },
+    }),
+  );
 };
