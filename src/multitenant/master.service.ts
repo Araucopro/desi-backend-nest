@@ -145,6 +145,33 @@ export class MasterService implements OnModuleInit {
     return this.tenants.save(tenant);
   }
 
+  private async getTenantUsersAndStores(tenantID: string) {
+    return this.tenantContext.run(
+      { tenantId: tenantID, impersonating: false },
+      () =>
+        this.tenantContext.transaction(async (manager) => {
+          const users = await manager.find(User, {
+            where: { tenantID },
+            select: [
+              'userID',
+              'tenantID',
+              'email',
+              'name',
+              'role',
+              'userImg',
+              'sessionVersion',
+              'createdAt',
+              'updatedAt',
+            ],
+          });
+          const stores = await manager.find(Store, {
+            where: { tenantID },
+          });
+          return { users, stores };
+        }),
+    );
+  }
+
   async findAllTenants(query: QueryTenantsDto) {
     const { limit = 10, offset = 0, status, search } = query;
 
@@ -163,7 +190,20 @@ export class MasterService implements OnModuleInit {
 
     queryBuilder.orderBy('tenant.createdAt', 'DESC').take(limit).skip(offset);
 
-    const [items, total] = await queryBuilder.getManyAndCount();
+    const [tenantsList, total] = await queryBuilder.getManyAndCount();
+
+    const items = await Promise.all(
+      tenantsList.map(async (tenant) => {
+        const { users, stores } = await this.getTenantUsersAndStores(
+          tenant.tenantID,
+        );
+        return {
+          ...tenant,
+          users,
+          stores,
+        };
+      }),
+    );
 
     return {
       items,
@@ -176,7 +216,14 @@ export class MasterService implements OnModuleInit {
   async findTenantById(tenantID: string) {
     const tenant = await this.tenants.findOne({ where: { tenantID } });
     if (!tenant) throw new NotFoundException('Tenant not found');
-    return tenant;
+
+    const { users, stores } = await this.getTenantUsersAndStores(tenantID);
+
+    return {
+      ...tenant,
+      users,
+      stores,
+    };
   }
 
   async updateTenant(

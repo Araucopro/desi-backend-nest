@@ -33,8 +33,7 @@ describe('SiiCodesService', () => {
   it('debe filtrar por glosa desordenada e insensible a mayúsculas y acentos', () => {
     // Ejemplo pedido: "administración de condominios" -> "Consejo de administración de edificios y condominios"
     const res = service.findAll({ search: 'administración de condominios' });
-    expect(res.total).toBeUndefined?.() ||
-      expect(res.meta.total).toBeGreaterThan(0);
+    expect(res.meta.total).toBeGreaterThan(0);
     const found = res.items.some(
       (item) =>
         item.glosa_actual.toLowerCase().includes('condominios') ||

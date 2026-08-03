@@ -14,6 +14,8 @@ import { UserStore } from './entities/userstore.entity';
 import { AuthGuard } from '../../auth/guards/auth.guard';
 import { GetUser } from '../../auth/decorators/get-user.decorator';
 import type { JwtPayload } from '../../auth/interfaces/jwt-payload.interface';
+import { Roles } from '../../auth/decorators/roles.decorator';
+import { UserRole } from '../../users/entities/user.entity';
 
 @ApiTags('Usuarios de las Tiendas')
 @Controller('userstores')
@@ -21,6 +23,7 @@ export class UserstoresController {
   constructor(private readonly userstoresService: UserstoresService) {}
 
   @Post()
+  @Roles(UserRole.ADMIN)
   @ApiOperation({
     summary: 'Asignar un usuario a una tienda',
     description:
@@ -37,6 +40,7 @@ export class UserstoresController {
   }
 
   @Get()
+  @Roles(UserRole.ADMIN)
   @ApiOperation({
     summary: 'Obtener todas las relaciones usuario-tienda',
     description:
@@ -91,6 +95,7 @@ export class UserstoresController {
   }
 
   @Delete(':id')
+  @Roles(UserRole.ADMIN)
   @ApiOperation({
     summary: 'Eliminar asignación usuario-tienda',
     description:

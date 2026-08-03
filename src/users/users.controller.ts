@@ -15,7 +15,8 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { Store } from '../stores/entities/store.entity';
 import { CustomMessage } from '../common/decorators/response-message';
-import { User } from './entities/user.entity';
+import { User, UserRole } from './entities/user.entity';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @ApiTags('Usuarios')
 @Controller('users')
@@ -23,6 +24,7 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Crear un nuevo usuario' })
   @ApiResponse({
@@ -37,6 +39,7 @@ export class UsersController {
   }
 
   @Get()
+  @Roles(UserRole.ADMIN)
   @CustomMessage('Lista de usuarios obtenida exitosamente')
   @ApiOperation({ summary: 'Obtener todos los usuarios' })
   @ApiResponse({
@@ -66,6 +69,7 @@ export class UsersController {
   }
 
   @Get(':email')
+  @Roles(UserRole.ADMIN)
   @CustomMessage('Usuario encontrado exitosamente')
   @ApiOperation({ summary: 'Buscar un usuario por su email' })
   @ApiParam({
@@ -80,6 +84,7 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Actualizar un usuario por su ID' })
   @ApiParam({
     name: 'id',
@@ -97,6 +102,7 @@ export class UsersController {
   }
 
   @Delete(':id')
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Eliminar un usuario por su ID' })
   @ApiParam({

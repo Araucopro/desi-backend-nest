@@ -7,8 +7,8 @@ export const swaggerConfig = (
   app: NestFastifyApplication<RawServerDefault>,
 ) => {
   const config = new DocumentBuilder()
-    .setTitle('D3SI API')
-    .setDescription('Backend API para la aplicación D3SI')
+    .setTitle('Sistema ERP')
+    .setDescription('Backend API creado con Typescript y NestJS')
     .setVersion('1.0')
     .addBearerAuth(
       {
@@ -37,6 +37,7 @@ export const swaggerConfig = (
   app.use(
     '/docs',
     apiReference({
+      title: 'Documentación Backend',
       theme: 'bluePlanet',
       withFastify: true,
       showDeveloperTools: 'never',

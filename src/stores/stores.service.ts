@@ -48,24 +48,34 @@ export class StoresService {
   }
 
   async findAll(): Promise<Store[]> {
+    const tenantId = this.tenantContext?.get(false)?.tenantId;
+    const where = tenantId ? { tenantID: tenantId } : {};
     return this.tenantContext
       ? this.tenantContext.transaction((manager) =>
-          manager.getRepository(Store).find(),
+          manager.getRepository(Store).find({ where }),
         )
-      : this.storeRepo.find();
+      : this.storeRepo.find({ where });
   }
 
   async findOne(id: string): Promise<Store> {
+    const tenantId = this.tenantContext?.get(false)?.tenantId;
+    const where = tenantId
+      ? { storeID: id, tenantID: tenantId }
+      : { storeID: id };
     const store = await (this.tenantContext
       ? this.tenantContext.transaction((manager) =>
-          manager.getRepository(Store).findOne({ where: { storeID: id } }),
+          manager.getRepository(Store).findOne({ where }),
         )
-      : this.storeRepo.findOne({ where: { storeID: id } }));
+      : this.storeRepo.findOne({ where }));
     if (!store) throw new NotFoundException(`Store with ID ${id} not found`);
     return store;
   }
 
   async findUsersByStoreId(id: string): Promise<any> {
+    const tenantId = this.tenantContext?.get(false)?.tenantId;
+    const where = tenantId
+      ? { storeID: id, tenantID: tenantId }
+      : { storeID: id };
     const find = this.tenantContext
       ? (options: any) =>
           this.tenantContext!.transaction((manager) =>
@@ -73,7 +83,7 @@ export class StoresService {
           )
       : (options: any) => this.storeRepo.findOne(options);
     const store = await find({
-      where: { storeID: id },
+      where,
       relations: ['userStores', 'userStores.user'],
     });
 

@@ -8,6 +8,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { MASTER_ROUTE } from '../decorators/master.decorator';
 import { ConfigService } from '@nestjs/config';
 import { FastifyRequest } from 'fastify';
 
@@ -39,6 +40,18 @@ export class AuthGuard implements CanActivate {
       return true;
     }
 
+    const isMaster = this.reflector.getAllAndOverride<boolean>(MASTER_ROUTE, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+
+    if (isMaster) {
+      this.logger.log(
+        `Ruta master delegada a MasterAuthGuard | ${request.method} ${request.url}`,
+      );
+      return true;
+    }
+
     const token = this.extractTokenFromHeader(request);
 
     if (!token) {
@@ -60,9 +73,11 @@ export class AuthGuard implements CanActivate {
         request.user = payload;
       }
 
-      request.user = payload;
       this.logger.log(`Autenticación OK | ${request.method} ${request.url}`);
-    } catch {
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
       this.logger.warn(
         `401 por token inválido o expirado | ${request.method} ${request.url}`,
       );

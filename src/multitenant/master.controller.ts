@@ -44,7 +44,10 @@ export class MasterController {
   @UseGuards(MasterAuthGuard)
   @MasterRoute()
   @ApiOperation({ summary: 'Obtener lista paginada de tenants con filtros' })
-  @ApiResponse({ status: 200, description: 'Lista paginada de tenants' })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista paginada de tenants incluyendo sus usuarios y tiendas',
+  })
   findAll(@Query() query: QueryTenantsDto) {
     return this.service.findAllTenants(query);
   }
@@ -53,7 +56,10 @@ export class MasterController {
   @UseGuards(MasterAuthGuard)
   @MasterRoute()
   @ApiOperation({ summary: 'Obtener detalle de un tenant por su ID' })
-  @ApiResponse({ status: 200, description: 'Detalles del tenant' })
+  @ApiResponse({
+    status: 200,
+    description: 'Detalles del tenant incluyendo sus usuarios y tiendas',
+  })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findTenantById(id);
   }

@@ -1,8 +1,12 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { UsersModule } from './users/users.module';
 import { DatabaseModule } from './datasource/database.module';
-import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuthModule } from './auth/auth.module';
+import { AuthGuard } from './auth/guards/auth.guard';
+import { RolesGuard } from './auth/guards/roles.guard';
+import { TenantContextGuard } from './multitenant/tenant-context.guard';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { StoresModule } from './stores/stores.module';
 import { UserstoresModule } from './relations/userstores/userstores.module';
@@ -24,6 +28,9 @@ import { SiiCodesModule } from './sii-codes/sii-codes.module';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
     DatabaseModule,
     AuthModule,
     UsersModule,
@@ -45,6 +52,9 @@ import { SiiCodesModule } from './sii-codes/sii-codes.module';
     SiiCodesModule,
   ],
   providers: [
+    { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: TenantContextGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
     {
       provide: APP_INTERCEPTOR,
       useClass: ResponseInterceptor,

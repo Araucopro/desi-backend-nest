@@ -10,10 +10,11 @@ import {
 import { StoresService } from './stores.service';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
-import { User } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { Store } from './entities/store.entity';
 import { CustomMessage } from '../common/decorators/response-message';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @ApiTags('Tiendas')
 @Controller('stores')
@@ -21,6 +22,7 @@ export class StoresController {
   constructor(private readonly storesService: StoresService) {}
 
   @Post()
+  @Roles(UserRole.ADMIN)
   @ApiOperation({
     summary: 'Crear una nueva tienda',
     description:
@@ -93,6 +95,7 @@ export class StoresController {
   }
 
   @Patch(':id')
+  @Roles(UserRole.ADMIN)
   @ApiOperation({
     summary: 'Actualizar información de una tienda',
     description:
@@ -114,6 +117,7 @@ export class StoresController {
   }
 
   @Delete(':id')
+  @Roles(UserRole.ADMIN)
   @ApiOperation({
     summary: 'Eliminar una tienda',
     description: 'Elimina permanentemente una tienda del sistema.',

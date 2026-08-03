@@ -74,19 +74,7 @@ type StringValue =
     }),
   ],
   controllers: [AuthController],
-  providers: [
-    AuthService,
-    AuthGuard,
-    RolesGuard,
-    {
-      provide: APP_GUARD,
-      useClass: AuthGuard,
-    },
-    {
-      provide: APP_GUARD,
-      useClass: RolesGuard,
-    },
-  ],
+  providers: [AuthService, AuthGuard, RolesGuard],
   exports: [AuthService, AuthGuard, RolesGuard, JwtModule],
 })
 export class AuthModule {}

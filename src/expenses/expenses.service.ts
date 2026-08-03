@@ -55,12 +55,15 @@ export class ExpensesService {
   }
 
   async findAll() {
+    const tenantId = this.tenantContext?.get(false)?.tenantId;
+    const where = tenantId ? { tenantID: tenantId } : {};
     if (this.tenantContext) {
       return this.tenantContext.transaction((manager) =>
-        manager.getRepository(Expense).find({ relations: ['store'] }),
+        manager.getRepository(Expense).find({ where, relations: ['store'] }),
       );
     }
     return await this.expenseRepository.find({
+      where,
       relations: ['store'],
     });
   }

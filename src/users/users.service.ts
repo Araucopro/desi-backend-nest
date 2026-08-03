@@ -101,35 +101,47 @@ export class UsersService {
   }
 
   async findAll(): Promise<User[]> {
+    const tenantId = this.tenantContext?.get(false)?.tenantId;
+    const where = tenantId ? { tenantID: tenantId } : {};
     return this.tenantContext
       ? this.tenantContext.transaction((manager) =>
-          manager.getRepository(User).find(),
+          manager.getRepository(User).find({ where }),
         )
-      : this.userRepo.find();
+      : this.userRepo.find({ where });
   }
 
   async findOneByEmail(email: string): Promise<User> {
+    const tenantId = this.tenantContext?.get(false)?.tenantId;
+    const where = tenantId ? { email, tenantID: tenantId } : { email };
     const user = await (this.tenantContext
       ? this.tenantContext.transaction((manager) =>
-          manager.getRepository(User).findOne({ where: { email } }),
+          manager.getRepository(User).findOne({ where }),
         )
-      : this.userRepo.findOne({ where: { email } }));
+      : this.userRepo.findOne({ where }));
     if (!user)
       throw new NotFoundException(`User with email ${email} not found`);
     return user;
   }
 
   async findOneById(id: string): Promise<User> {
+    const tenantId = this.tenantContext?.get(false)?.tenantId;
+    const where = tenantId
+      ? { userID: id, tenantID: tenantId }
+      : { userID: id };
     const user = await (this.tenantContext
       ? this.tenantContext.transaction((manager) =>
-          manager.getRepository(User).findOne({ where: { userID: id } }),
+          manager.getRepository(User).findOne({ where }),
         )
-      : this.userRepo.findOne({ where: { userID: id } }));
+      : this.userRepo.findOne({ where }));
     if (!user) throw new NotFoundException(`User with ID ${id} not found`);
     return user;
   }
 
   async findStoresByUserId(id: string): Promise<any> {
+    const tenantId = this.tenantContext?.get(false)?.tenantId;
+    const where = tenantId
+      ? { userID: id, tenantID: tenantId }
+      : { userID: id };
     const find = this.tenantContext
       ? (options: any) =>
           this.tenantContext!.transaction((manager) =>
@@ -137,7 +149,7 @@ export class UsersService {
           )
       : (options: any) => this.userRepo.findOne(options);
     const user = await find({
-      where: { userID: id },
+      where,
       relations: ['userStores', 'userStores.store'],
     });
 
