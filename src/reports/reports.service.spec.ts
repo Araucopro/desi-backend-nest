@@ -54,6 +54,17 @@ function createRepositoryMock(
           return this;
         },
         getRawMany: async () => rowsByAlias[alias] ?? [],
+        getRawOne: async () => ({ count: '0', total: '0' }),
+        leftJoinAndSelect() {
+          return this;
+        },
+        skip() {
+          return this;
+        },
+        take() {
+          return this;
+        },
+        getManyAndCount: async () => [[], 0],
       };
 
       return builder;
@@ -62,6 +73,17 @@ function createRepositoryMock(
   };
 
   return repository;
+}
+
+function movementRow(overrides: Record<string, unknown>) {
+  return {
+    direction: 'EGRESO',
+    taxCredit: false,
+    acceptedForTax: true,
+    total: '0',
+    taxTotal: '0',
+    ...overrides,
+  };
 }
 
 describe('ReportsService', () => {
@@ -76,27 +98,56 @@ describe('ReportsService', () => {
     jest.useRealTimers();
   });
 
-  it('builds the monthly income statement with zero-filled months and totals', async () => {
-    const documentsRepo = createRepositoryMock({
-      document: [
-        { month: '1', total: '100.50' },
-        { month: '3', total: '75.25' },
-      ],
-    });
-    const purchaseOrdersRepo = createRepositoryMock({
-      purchaseOrder: [{ month: '1', total: '20.00' }],
-    });
-    const expensesRepo = createRepositoryMock({
-      expense: [
-        { month: '3', type: ExpenseType.OPERATIONAL, total: '6.00' },
-        { month: '3', type: ExpenseType.ADMINISTRATIVE, total: '4.00' },
+  it('builds the monthly income statement from the financial ledger', async () => {
+    const documentsRepo = createRepositoryMock({ document: [] });
+    const movementsRepo = createRepositoryMock({
+      movement: [
+        movementRow({
+          month: '1',
+          category: 'VENTA',
+          direction: 'INGRESO',
+          total: '100.50',
+          taxTotal: '19.10',
+        }),
+        movementRow({
+          month: '1',
+          category: 'COSTO_VENTA',
+          total: '60.00',
+        }),
+        movementRow({
+          month: '1',
+          category: 'COMPRA',
+          taxCredit: true,
+          total: '200.00',
+          taxTotal: '38.00',
+        }),
+        movementRow({
+          month: '1',
+          category: 'GASTO_OPERACIONAL',
+          taxCredit: true,
+          total: '10.00',
+          taxTotal: '1.90',
+        }),
+        movementRow({
+          month: '1',
+          category: 'GASTO_ADMINISTRATIVO',
+          acceptedForTax: false,
+          total: '5.00',
+          taxTotal: '0.95',
+        }),
+        movementRow({
+          month: '3',
+          category: 'VENTA',
+          direction: 'INGRESO',
+          total: '75.25',
+          taxTotal: '14.30',
+        }),
       ],
     });
 
     const service = new ReportsService(
       documentsRepo as any,
-      purchaseOrdersRepo as any,
-      expensesRepo as any,
+      movementsRepo as any,
     );
 
     const result = await service.getIncomeStatement({ year: 2026 });
@@ -107,51 +158,163 @@ describe('ReportsService', () => {
       month: 1,
       label: 'Enero',
       salesIncome: 100.5,
-      purchaseOrdersIncome: 20,
-      expenses: 0,
+      salesTax: 19.1,
+      cogs: 60,
+      grossProfit: 40.5,
+      expenses: 10,
+      rejectedExpenses: 5,
+      purchases: 200,
+      creditTax: 39.9,
       expenseDetail: [
-        { type: ExpenseType.FINANCIAL, total: 0 },
-        { type: ExpenseType.OPERATIONAL, total: 0 },
-        { type: ExpenseType.ADMINISTRATIVE, total: 0 },
+        { type: ExpenseType.FINANCIAL, accepted: 0, rejected: 0 },
+        { type: ExpenseType.OPERATIONAL, accepted: 10, rejected: 0 },
+        { type: ExpenseType.ADMINISTRATIVE, accepted: 0, rejected: 5 },
       ],
-      net: 120.5,
+      net: 30.5,
     });
     expect(result.months[1]).toMatchObject({
       month: 2,
       salesIncome: 0,
-      purchaseOrdersIncome: 0,
+      cogs: 0,
       expenses: 0,
       net: 0,
     });
     expect(result.months[2]).toMatchObject({
       month: 3,
       salesIncome: 75.25,
-      purchaseOrdersIncome: 0,
-      expenses: 10,
-      expenseDetail: [
-        { type: ExpenseType.FINANCIAL, total: 0 },
-        { type: ExpenseType.OPERATIONAL, total: 6 },
-        { type: ExpenseType.ADMINISTRATIVE, total: 4 },
-      ],
-      net: 65.25,
+      salesTax: 14.3,
+      net: 75.25,
     });
     expect(result.totals).toEqual({
       salesIncome: 175.75,
-      purchaseOrdersIncome: 20,
+      salesTax: 33.4,
+      cogs: 60,
+      grossProfit: 115.75,
       expenses: 10,
-      net: 185.75,
+      rejectedExpenses: 5,
+      purchases: 200,
+      creditTax: 39.9,
+      net: 105.75,
     });
   });
 
-  it('applies the store filter to every source', async () => {
+  it('does not treat paid purchase orders as income', async () => {
     const documentsRepo = createRepositoryMock({ document: [] });
-    const purchaseOrdersRepo = createRepositoryMock({ purchaseOrder: [] });
-    const expensesRepo = createRepositoryMock({ expense: [] });
+    const movementsRepo = createRepositoryMock({
+      movement: [
+        movementRow({
+          month: '1',
+          category: 'COMPRA',
+          taxCredit: true,
+          total: '500.00',
+          taxTotal: '95.00',
+        }),
+      ],
+    });
 
     const service = new ReportsService(
       documentsRepo as any,
-      purchaseOrdersRepo as any,
-      expensesRepo as any,
+      movementsRepo as any,
+    );
+    const result = await service.getIncomeStatement({ year: 2026 });
+
+    expect(result.months[0].salesIncome).toBe(0);
+    expect(result.months[0].purchases).toBe(500);
+    expect(result.months[0].creditTax).toBe(95);
+    expect(result.months[0].net).toBe(0);
+  });
+
+  it('subtracts nota de crédito (documentType 61) from sales income', async () => {
+    const documentsRepo = createRepositoryMock({ document: [] });
+    const movementsRepo = createRepositoryMock({
+      movement: [
+        movementRow({
+          month: '1',
+          category: 'VENTA',
+          direction: 'INGRESO',
+          total: '-20.00',
+          taxTotal: '-3.80',
+        }),
+      ],
+    });
+
+    const service = new ReportsService(
+      documentsRepo as any,
+      movementsRepo as any,
+    );
+    const result = await service.getIncomeStatement({ year: 2026 });
+
+    expect(result.months[0].salesIncome).toBe(-20);
+    expect(result.months[0].salesTax).toBe(-3.8);
+    expect(result.months[0].net).toBe(-20);
+  });
+
+  it('keeps rejected expenses out of net but reports them separately', async () => {
+    const documentsRepo = createRepositoryMock({ document: [] });
+    const movementsRepo = createRepositoryMock({
+      movement: [
+        movementRow({
+          month: '1',
+          category: 'GASTO_ADMINISTRATIVO',
+          acceptedForTax: false,
+          total: '5.00',
+        }),
+      ],
+    });
+
+    const service = new ReportsService(
+      documentsRepo as any,
+      movementsRepo as any,
+    );
+    const result = await service.getIncomeStatement({ year: 2026 });
+
+    expect(result.months[0].expenses).toBe(0);
+    expect(result.months[0].rejectedExpenses).toBe(5);
+    expect(result.months[0].net).toBe(0);
+    expect(result.months[0].expenseDetail).toEqual([
+      { type: ExpenseType.FINANCIAL, accepted: 0, rejected: 0 },
+      { type: ExpenseType.OPERATIONAL, accepted: 0, rejected: 0 },
+      { type: ExpenseType.ADMINISTRATIVE, accepted: 0, rejected: 5 },
+    ]);
+  });
+
+  it('only accumulates credit tax when taxCredit is true', async () => {
+    const documentsRepo = createRepositoryMock({ document: [] });
+    const movementsRepo = createRepositoryMock({
+      movement: [
+        movementRow({
+          month: '1',
+          category: 'COMPRA',
+          taxCredit: false,
+          total: '100.00',
+          taxTotal: '38.00',
+        }),
+        movementRow({
+          month: '1',
+          category: 'GASTO_OPERACIONAL',
+          taxCredit: true,
+          total: '10.00',
+          taxTotal: '1.90',
+        }),
+      ],
+    });
+
+    const service = new ReportsService(
+      documentsRepo as any,
+      movementsRepo as any,
+    );
+    const result = await service.getIncomeStatement({ year: 2026 });
+
+    expect(result.months[0].creditTax).toBe(1.9);
+  });
+
+  it('applies the store filter to the ledger query', async () => {
+    const documentsRepo = createRepositoryMock({ document: [] });
+    const movementsRepo = createRepositoryMock({ movement: [] });
+
+    const service = new ReportsService(
+      documentsRepo as any,
+      movementsRepo as any,
     );
 
     await service.getIncomeStatement({
@@ -159,127 +322,50 @@ describe('ReportsService', () => {
       storeId: 'store-1',
     });
 
-    for (const builder of [
-      documentsRepo.builders[0],
-      purchaseOrdersRepo.builders[0],
-      expensesRepo.builders[0],
-    ]) {
-      expect(builder.wheres[1]).toEqual({
-        expr: `${builder.alias}.storeID = :storeId`,
-        params: { storeId: 'store-1' },
-      });
-    }
+    expect(movementsRepo.builders[0].wheres[1]).toEqual({
+      expr: 'movement.storeID = :storeId',
+      params: { storeId: 'store-1' },
+    });
   });
 
-  it('filters only emitted documents and paid purchase orders', async () => {
+  it('queries the ledger date, amount and grouping columns', async () => {
     const documentsRepo = createRepositoryMock({ document: [] });
-    const purchaseOrdersRepo = createRepositoryMock({ purchaseOrder: [] });
-    const expensesRepo = createRepositoryMock({ expense: [] });
+    const movementsRepo = createRepositoryMock({ movement: [] });
 
     const service = new ReportsService(
       documentsRepo as any,
-      purchaseOrdersRepo as any,
-      expensesRepo as any,
+      movementsRepo as any,
     );
 
     await service.getIncomeStatement({ year: 2026 });
 
-    expect(documentsRepo.builders[0].wheres).toContainEqual({
-      expr: "document.status = 'EMITIDO'",
-      params: undefined,
+    const builder = movementsRepo.builders[0];
+    expect(builder.selects[0]).toEqual({
+      expr: 'EXTRACT(MONTH FROM movement.date)',
+      as: 'month',
     });
-    expect(purchaseOrdersRepo.builders[0].wheres).toContainEqual({
-      expr: "purchaseOrder.paymentStatus = 'Pagado'",
-      params: undefined,
+    expect(builder.selects[5]).toEqual({
+      expr: 'COALESCE(SUM(movement.amount), 0)',
+      as: 'total',
     });
+    expect(builder.selects[6]).toEqual({
+      expr: 'COALESCE(SUM(movement.taxAmount), 0)',
+      as: 'taxTotal',
+    });
+    expect(builder.groupByValue).toBe('month');
   });
 
   it('defaults to the current year when year is omitted', async () => {
     const documentsRepo = createRepositoryMock({ document: [] });
-    const purchaseOrdersRepo = createRepositoryMock({ purchaseOrder: [] });
-    const expensesRepo = createRepositoryMock({ expense: [] });
+    const movementsRepo = createRepositoryMock({ movement: [] });
 
     const service = new ReportsService(
       documentsRepo as any,
-      purchaseOrdersRepo as any,
-      expensesRepo as any,
+      movementsRepo as any,
     );
 
     const result = await service.getIncomeStatement({});
 
     expect(result.year).toBe(2026);
-  });
-
-  it('queries the expected date and amount columns', async () => {
-    const documentsRepo = createRepositoryMock({ document: [] });
-    const purchaseOrdersRepo = createRepositoryMock({ purchaseOrder: [] });
-    const expensesRepo = createRepositoryMock({ expense: [] });
-
-    const service = new ReportsService(
-      documentsRepo as any,
-      purchaseOrdersRepo as any,
-      expensesRepo as any,
-    );
-
-    await service.getIncomeStatement({ year: 2026 });
-
-    expect(documentsRepo.builders[0].selects[0]).toEqual({
-      expr: 'EXTRACT(MONTH FROM document.createdAt)',
-      as: 'month',
-    });
-    expect(documentsRepo.builders[0].selects[1]).toEqual({
-      expr: 'COALESCE(SUM(document.total), 0)',
-      as: 'total',
-    });
-
-    expect(purchaseOrdersRepo.builders[0].selects[0]).toEqual({
-      expr: 'EXTRACT(MONTH FROM purchaseOrder.issueDate)',
-      as: 'month',
-    });
-    expect(purchaseOrdersRepo.builders[0].selects[1]).toEqual({
-      expr: 'COALESCE(SUM(purchaseOrder.total), 0)',
-      as: 'total',
-    });
-
-    expect(expensesRepo.builders[0].selects[0]).toEqual({
-      expr: 'EXTRACT(MONTH FROM expense.deductibleDate)',
-      as: 'month',
-    });
-    expect(expensesRepo.builders[0].selects[1]).toEqual({
-      expr: 'expense.type',
-      as: 'type',
-    });
-    expect(expensesRepo.builders[0].selects[2]).toEqual({
-      expr: 'COALESCE(SUM(expense.amount), 0)',
-      as: 'total',
-    });
-    expect(expensesRepo.builders[0].groupByValue).toBe('month');
-  });
-
-  it('aggregates expense detail by month and type', async () => {
-    const documentsRepo = createRepositoryMock({ document: [] });
-    const purchaseOrdersRepo = createRepositoryMock({ purchaseOrder: [] });
-    const expensesRepo = createRepositoryMock({
-      expense: [
-        { month: '1', type: ExpenseType.FINANCIAL, total: '12.50' },
-        { month: '1', type: ExpenseType.FINANCIAL, total: '2.50' },
-        { month: '1', type: ExpenseType.OPERATIONAL, total: '5.00' },
-      ],
-    });
-
-    const service = new ReportsService(
-      documentsRepo as any,
-      purchaseOrdersRepo as any,
-      expensesRepo as any,
-    );
-
-    const result = await service.getIncomeStatement({ year: 2026 });
-
-    expect(result.months[0].expenses).toBe(20);
-    expect(result.months[0].expenseDetail).toEqual([
-      { type: ExpenseType.FINANCIAL, total: 15 },
-      { type: ExpenseType.OPERATIONAL, total: 5 },
-      { type: ExpenseType.ADMINISTRATIVE, total: 0 },
-    ]);
   });
 });

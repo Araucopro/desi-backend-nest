@@ -21,6 +21,7 @@ import {
   PurchaseOrderPaymentStatus,
 } from './entities/purchase-order.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
+import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
 
 const TAX_RATE = 0.19;
 
@@ -30,6 +31,7 @@ export class PurchaseOrdersService {
     @InjectRepository(PurchaseOrder)
     private readonly purchaseOrderRepository: Repository<PurchaseOrder>,
     private readonly dataSource: DataSource,
+    private readonly financialMovementsService: FinancialMovementsService,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
@@ -365,6 +367,7 @@ export class PurchaseOrdersService {
               previousStatus === PurchaseOrderPaymentStatus.ANULADO)
           ) {
             await this.applyStockForOrder(manager, purchaseOrder, 1);
+            purchaseOrder.paidAt = new Date();
           }
 
           if (
@@ -373,6 +376,11 @@ export class PurchaseOrdersService {
               nextStatus === PurchaseOrderPaymentStatus.ANULADO)
           ) {
             await this.applyStockForOrder(manager, purchaseOrder, -1);
+            purchaseOrder.paidAt = null;
+            await this.financialMovementsService.removePurchaseOrder(
+              manager,
+              purchaseOrder.purchaseOrderID,
+            );
           }
         }
 
@@ -393,6 +401,15 @@ export class PurchaseOrdersService {
       );
 
       await manager.save(purchaseOrder);
+
+      if (purchaseOrder.paymentStatus === PurchaseOrderPaymentStatus.PAGADO) {
+        await this.financialMovementsService.recordPurchaseOrder(
+          manager,
+          purchaseOrder,
+          purchaseOrder.paidAt ?? purchaseOrder.issueDate,
+        );
+      }
+
       const result = await manager.findOne(PurchaseOrder, {
         where: { purchaseOrderID: id },
         relations: ['store', 'items', 'items.variation'],
@@ -562,6 +579,15 @@ export class PurchaseOrdersService {
           `Orden de compra con ID ${id} no encontrada`,
         );
       }
+
+      if (order.paymentStatus === PurchaseOrderPaymentStatus.PAGADO) {
+        await this.financialMovementsService.recordPurchaseOrder(
+          manager,
+          order,
+          order.paidAt ?? order.issueDate,
+        );
+      }
+
       return { summary, order };
     });
   }

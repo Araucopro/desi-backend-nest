@@ -182,6 +182,11 @@ describe('UsersService', () => {
         name: 'Tienda de Central User',
         type: StoreType.CENTRAL,
         isCentralStore: true,
+        tenantID: undefined,
+        giro: 'VENTA AL POR MENOR GENERAL',
+        acteco: '479100',
+        cdgSIISucur: '0',
+        businessName: 'COMERCIAL CENTRAL USER SPA',
       });
       expect(mockUserStoreTxRepository.create).toHaveBeenCalledWith({
         user: savedUser,

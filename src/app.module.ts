@@ -25,6 +25,7 @@ import { DteModule } from './dte/dte.module';
 import { MultitenantModule } from './multitenant/multitenant.module';
 import { TenantContextInterceptor } from './multitenant/tenant-context.interceptor';
 import { SiiCodesModule } from './sii-codes/sii-codes.module';
+import { FinancialMovementsModule } from './financial-movements/financial-movements.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { SiiCodesModule } from './sii-codes/sii-codes.module';
     StoreMonthlyTargetsModule,
     DteModule,
     MultitenantModule,
+    FinancialMovementsModule,
     SiiCodesModule,
   ],
   providers: [

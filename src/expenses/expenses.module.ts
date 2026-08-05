@@ -4,9 +4,14 @@ import { ExpensesController } from './expenses.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Expense } from './entities/expense.entity';
 import { MultitenantModule } from '../multitenant/multitenant.module';
+import { FinancialMovementsModule } from '../financial-movements/financial-movements.module';
 
 @Module({
-  imports: [MultitenantModule, TypeOrmModule.forFeature([Expense])],
+  imports: [
+    MultitenantModule,
+    FinancialMovementsModule,
+    TypeOrmModule.forFeature([Expense]),
+  ],
   controllers: [ExpensesController],
   providers: [ExpensesService],
   exports: [ExpensesService],

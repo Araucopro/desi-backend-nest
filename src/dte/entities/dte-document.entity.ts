@@ -86,6 +86,33 @@ export class DteDocument {
   })
   total!: number;
 
+  @Column('decimal', {
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: new ColumnNumericTransformer(),
+  })
+  netTotal!: number;
+
+  @Column('decimal', {
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: new ColumnNumericTransformer(),
+  })
+  taxTotal!: number;
+
+  @Column('decimal', {
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: new ColumnNumericTransformer(),
+  })
+  cogsTotal!: number;
+
+  @Column({ type: 'date' })
+  issueDate!: Date;
+
   @Column({ type: 'jsonb' })
   payloadRaw!: Record<string, unknown>;
 

@@ -1,12 +1,21 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager } from 'typeorm';
+import {
+  EntityManager,
+  EntityTarget,
+  ObjectLiteral,
+  Repository,
+} from 'typeorm';
 import {
   DteDocument,
   DteDocumentStatus,
 } from '../dte/entities/dte-document.entity';
-import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { Expense, ExpenseType } from '../expenses/entities/expense.entity';
+import {
+  FinancialMovement,
+  FinancialMovementCategory,
+  FinancialMovementDirection,
+} from '../financial-movements/entities/financial-movement.entity';
 import { IncomeStatementQueryDto } from './dto/income-statement-query.dto';
 import {
   IncomeStatementExpenseDetailDto,
@@ -16,10 +25,14 @@ import {
 import { ReportsSaleFilterDto } from './dto/report-salesFilter.dto';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 
-type MonthlyExpenseDetailRow = {
+type FinancialMovementRow = {
   month: string | number;
-  type: ExpenseType;
+  category: FinancialMovementCategory;
+  direction: FinancialMovementDirection;
+  taxCredit: boolean;
+  acceptedForTax: boolean;
   total: string | number | null;
+  taxTotal: string | number | null;
 };
 
 type DteDocumentListItem = {
@@ -47,10 +60,8 @@ export class ReportsService {
   constructor(
     @InjectRepository(DteDocument)
     private readonly dteDocumentRepository: Repository<DteDocument>,
-    @InjectRepository(PurchaseOrder)
-    private readonly purchaseOrderRepository: Repository<PurchaseOrder>,
-    @InjectRepository(Expense)
-    private readonly expenseRepository: Repository<Expense>,
+    @InjectRepository(FinancialMovement)
+    private readonly financialMovementRepository: Repository<FinancialMovement>,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
@@ -60,7 +71,18 @@ export class ReportsService {
     if (this.tenantContext) {
       return this.tenantContext.transaction(callback);
     }
-    return callback(this.dteDocumentRepository.manager);
+    const manager = {
+      getRepository: <T extends ObjectLiteral>(target: EntityTarget<T>) => {
+        if (target === FinancialMovement) {
+          return this.financialMovementRepository;
+        }
+        if (target === DteDocument) {
+          return this.dteDocumentRepository;
+        }
+        throw new Error('Repositorio no disponible fuera de contexto tenant');
+      },
+    } as unknown as EntityManager;
+    return callback(manager);
   }
 
   private getYearBounds(year: number) {
@@ -91,6 +113,10 @@ export class ReportsService {
     return Number(value ?? 0);
   }
 
+  private toMoney(value: number): number {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
   private createMonthlySeries(year: number): IncomeStatementMonthDto[] {
     const monthLabels = this.getMonthLabels();
     return monthLabels.map((label, index) => ({
@@ -98,8 +124,13 @@ export class ReportsService {
       label,
       year,
       salesIncome: 0,
-      purchaseOrdersIncome: 0,
+      salesTax: 0,
+      cogs: 0,
+      grossProfit: 0,
       expenses: 0,
+      rejectedExpenses: 0,
+      purchases: 0,
+      creditTax: 0,
       expenseDetail: this.createExpenseDetailSeries(),
       net: 0,
     }));
@@ -108,59 +139,91 @@ export class ReportsService {
   private createExpenseDetailSeries(): IncomeStatementExpenseDetailDto[] {
     return (Object.values(ExpenseType) as ExpenseType[]).map((type) => ({
       type,
-      total: 0,
+      accepted: 0,
+      rejected: 0,
     }));
   }
 
-  private async aggregateMonthlyTotal<T>(
-    repository: Repository<any>,
-    alias: string,
-    dateColumn: string,
-    amountColumn: string,
+  private async aggregateMovements(
+    repo: Repository<FinancialMovement>,
     start: Date,
     end: Date,
     storeId?: string,
-    extraWhere?: string,
-  ) {
-    const qb = repository
-      .createQueryBuilder(alias)
-      .select(`EXTRACT(MONTH FROM ${alias}.${dateColumn})`, 'month')
-      .addSelect(`COALESCE(SUM(${alias}.${amountColumn}), 0)`, 'total')
-      .where(
-        `${alias}.${dateColumn} >= :start AND ${alias}.${dateColumn} < :end`,
-        {
-          start: start.toISOString(),
-          end: end.toISOString(),
-        },
-      );
+  ): Promise<FinancialMovementRow[]> {
+    const qb = repo
+      .createQueryBuilder('movement')
+      .select('EXTRACT(MONTH FROM movement.date)', 'month')
+      .addSelect('movement.category', 'category')
+      .addSelect('movement.direction', 'direction')
+      .addSelect('movement.taxCredit', 'taxCredit')
+      .addSelect('movement.acceptedForTax', 'acceptedForTax')
+      .addSelect('COALESCE(SUM(movement.amount), 0)', 'total')
+      .addSelect('COALESCE(SUM(movement.taxAmount), 0)', 'taxTotal')
+      .where('movement.date >= :start AND movement.date < :end', {
+        start: start.toISOString(),
+        end: end.toISOString(),
+      });
 
     if (storeId) {
-      qb.andWhere(`${alias}.storeID = :storeId`, { storeId });
+      qb.andWhere('movement.storeID = :storeId', { storeId });
     }
 
-    if (extraWhere) {
-      qb.andWhere(extraWhere);
-    }
+    return qb
+      .groupBy('month')
+      .addGroupBy('movement.category')
+      .addGroupBy('movement.direction')
+      .addGroupBy('movement.taxCredit')
+      .addGroupBy('movement.acceptedForTax')
+      .getRawMany();
+  }
 
-    const rows = await qb.groupBy('month').getRawMany();
-    return new Map<number, number>(
-      rows.map((row) => [Number(row.month), this.toNumber(row.total)]),
+  private isExpenseCategory(category: FinancialMovementCategory): boolean {
+    return (
+      category === FinancialMovementCategory.GASTO_OPERACIONAL ||
+      category === FinancialMovementCategory.GASTO_ADMINISTRATIVO ||
+      category === FinancialMovementCategory.GASTO_FINANCIERO
     );
+  }
+
+  private expenseTypeForCategory(
+    category: FinancialMovementCategory,
+  ): ExpenseType {
+    switch (category) {
+      case FinancialMovementCategory.GASTO_OPERACIONAL:
+        return ExpenseType.OPERATIONAL;
+      case FinancialMovementCategory.GASTO_ADMINISTRATIVO:
+        return ExpenseType.ADMINISTRATIVE;
+      case FinancialMovementCategory.GASTO_FINANCIERO:
+        return ExpenseType.FINANCIAL;
+      default:
+        throw new Error(`Categoría ${category} no es un gasto`);
+    }
   }
 
   private buildTotals(series: IncomeStatementMonthDto[]) {
     return series.reduce(
       (acc, month) => ({
-        salesIncome: acc.salesIncome + month.salesIncome,
-        purchaseOrdersIncome:
-          acc.purchaseOrdersIncome + month.purchaseOrdersIncome,
-        expenses: acc.expenses + month.expenses,
-        net: acc.net + month.net,
+        salesIncome: this.toMoney(acc.salesIncome + month.salesIncome),
+        salesTax: this.toMoney(acc.salesTax + month.salesTax),
+        cogs: this.toMoney(acc.cogs + month.cogs),
+        grossProfit: this.toMoney(acc.grossProfit + month.grossProfit),
+        expenses: this.toMoney(acc.expenses + month.expenses),
+        rejectedExpenses: this.toMoney(
+          acc.rejectedExpenses + month.rejectedExpenses,
+        ),
+        purchases: this.toMoney(acc.purchases + month.purchases),
+        creditTax: this.toMoney(acc.creditTax + month.creditTax),
+        net: this.toMoney(acc.net + month.net),
       }),
       {
         salesIncome: 0,
-        purchaseOrdersIncome: 0,
+        salesTax: 0,
+        cogs: 0,
+        grossProfit: 0,
         expenses: 0,
+        rejectedExpenses: 0,
+        purchases: 0,
+        creditTax: 0,
         net: 0,
       },
     );
@@ -173,62 +236,21 @@ export class ReportsService {
       const year = filter.year ?? new Date().getFullYear();
       const { start, end } = this.getYearBounds(year);
 
-      const dteRepo = manager.getRepository(DteDocument);
-      const poRepo = manager.getRepository(PurchaseOrder);
-      const expRepo = manager.getRepository(Expense);
+      const movementRepo = manager.getRepository(FinancialMovement);
+      const rows = await this.aggregateMovements(
+        movementRepo,
+        start,
+        end,
+        filter.storeId,
+      );
 
-      const [salesByMonth, purchaseOrdersByMonth, expenseRows] =
-        await Promise.all([
-          this.aggregateMonthlyTotal(
-            dteRepo,
-            'document',
-            'createdAt',
-            'total',
-            start,
-            end,
-            filter.storeId,
-            "document.status = 'EMITIDO'",
-          ),
-          this.aggregateMonthlyTotal(
-            poRepo,
-            'purchaseOrder',
-            'issueDate',
-            'total',
-            start,
-            end,
-            filter.storeId,
-            "purchaseOrder.paymentStatus = 'Pagado'",
-          ),
-          (() => {
-            const expenseQuery = expRepo
-              .createQueryBuilder('expense')
-              .select('EXTRACT(MONTH FROM expense.deductibleDate)', 'month')
-              .addSelect('expense.type', 'type')
-              .addSelect('COALESCE(SUM(expense.amount), 0)', 'total')
-              .where(
-                'expense.deductibleDate >= :start AND expense.deductibleDate < :end',
-                {
-                  start: start.toISOString(),
-                  end: end.toISOString(),
-                },
-              );
-
-            if (filter.storeId) {
-              expenseQuery.andWhere('expense.storeID = :storeId', {
-                storeId: filter.storeId,
-              });
-            }
-
-            return expenseQuery
-              .groupBy('month')
-              .addGroupBy('expense.type')
-              .orderBy('month', 'ASC')
-              .addOrderBy('expense.type', 'ASC')
-              .getRawMany();
-          })(),
-        ]);
-
+      const salesIncomeByMonth = new Map<number, number>();
+      const salesTaxByMonth = new Map<number, number>();
+      const cogsByMonth = new Map<number, number>();
       const expensesByMonth = new Map<number, number>();
+      const rejectedExpensesByMonth = new Map<number, number>();
+      const purchasesByMonth = new Map<number, number>();
+      const creditTaxByMonth = new Map<number, number>();
       const expenseDetailByMonth = new Map<
         number,
         IncomeStatementExpenseDetailDto[]
@@ -239,40 +261,79 @@ export class ReportsService {
         ]),
       );
 
-      for (const row of expenseRows as MonthlyExpenseDetailRow[]) {
+      for (const row of rows) {
         const monthNumber = Number(row.month);
         const amount = this.toNumber(row.total);
+        const taxAmount = this.toNumber(row.taxTotal);
+        const category = row.category;
+        const add = (map: Map<number, number>, value: number) =>
+          map.set(monthNumber, (map.get(monthNumber) ?? 0) + value);
 
-        expensesByMonth.set(
-          monthNumber,
-          (expensesByMonth.get(monthNumber) ?? 0) + amount,
-        );
+        if (category === FinancialMovementCategory.VENTA) {
+          add(salesIncomeByMonth, amount);
+          add(salesTaxByMonth, taxAmount);
+          continue;
+        }
 
-        const monthDetails = expenseDetailByMonth.get(monthNumber);
-        const typeDetail = monthDetails?.find((item) => item.type === row.type);
+        if (category === FinancialMovementCategory.COSTO_VENTA) {
+          add(cogsByMonth, amount);
+          continue;
+        }
 
-        if (typeDetail) {
-          typeDetail.total += amount;
+        if (category === FinancialMovementCategory.COMPRA) {
+          add(purchasesByMonth, amount);
+          if (row.taxCredit) {
+            add(creditTaxByMonth, taxAmount);
+          }
+          continue;
+        }
+
+        if (this.isExpenseCategory(category)) {
+          const type = this.expenseTypeForCategory(category);
+          const monthDetails =
+            expenseDetailByMonth.get(monthNumber) ??
+            this.createExpenseDetailSeries();
+          const typeDetail = monthDetails.find((item) => item.type === type);
+
+          if (row.acceptedForTax) {
+            add(expensesByMonth, amount);
+            if (typeDetail) typeDetail.accepted += amount;
+          } else {
+            add(rejectedExpensesByMonth, amount);
+            if (typeDetail) typeDetail.rejected += amount;
+          }
+
+          if (row.taxCredit) {
+            add(creditTaxByMonth, taxAmount);
+          }
         }
       }
 
       const months = this.createMonthlySeries(year).map((month) => {
-        const salesIncome = salesByMonth.get(month.month) ?? 0;
-        const purchaseOrdersIncome =
-          purchaseOrdersByMonth.get(month.month) ?? 0;
+        const salesIncome = salesIncomeByMonth.get(month.month) ?? 0;
+        const salesTax = salesTaxByMonth.get(month.month) ?? 0;
+        const cogs = cogsByMonth.get(month.month) ?? 0;
         const expenses = expensesByMonth.get(month.month) ?? 0;
-        const expenseDetail =
-          expenseDetailByMonth.get(month.month) ??
-          this.createExpenseDetailSeries();
-        const net = salesIncome + purchaseOrdersIncome - expenses;
+        const rejectedExpenses = rejectedExpensesByMonth.get(month.month) ?? 0;
+        const purchases = purchasesByMonth.get(month.month) ?? 0;
+        const creditTax = creditTaxByMonth.get(month.month) ?? 0;
+        const grossProfit = salesIncome - cogs;
+        const net = salesIncome - cogs - expenses;
 
         return {
           ...month,
-          salesIncome,
-          purchaseOrdersIncome,
-          expenses,
-          expenseDetail,
-          net,
+          salesIncome: this.toMoney(salesIncome),
+          salesTax: this.toMoney(salesTax),
+          cogs: this.toMoney(cogs),
+          grossProfit: this.toMoney(grossProfit),
+          expenses: this.toMoney(expenses),
+          rejectedExpenses: this.toMoney(rejectedExpenses),
+          purchases: this.toMoney(purchases),
+          creditTax: this.toMoney(creditTax),
+          expenseDetail:
+            expenseDetailByMonth.get(month.month) ??
+            this.createExpenseDetailSeries(),
+          net: this.toMoney(net),
         };
       });
 

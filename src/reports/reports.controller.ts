@@ -14,7 +14,7 @@ export class ReportsController {
   @ApiOperation({
     summary: 'Estado de resultados mensual',
     description:
-      'Devuelve la serie mensual del año consultado con ingresos por ventas y purchase orders pagadas, egresos por gastos, detalle de gastos por tipo y neto acumulado.',
+      'Devuelve la serie mensual del año consultado sobre el ledger financiero (devengo): ventas netas, IVA, COGS, gastos aceptados/rechazados, compras y crédito fiscal.',
   })
   @ApiQuery({
     name: 'year',

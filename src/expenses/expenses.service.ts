@@ -8,7 +8,7 @@ import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Expense, ExpenseType } from './entities/expense.entity';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import {
   ExpenseSummaryDto,
   ExpenseMonthlySummaryMonthDto,
@@ -16,6 +16,7 @@ import {
 } from './dto/expense-summary.dto';
 import { ExpenseSummaryQueryDto } from './dto/expense-summary-query.dto';
 import { TenantContextService } from '../multitenant/tenant-context.service';
+import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
 
 type ExpenseSummaryRow = {
   month: string | number;
@@ -28,25 +29,35 @@ export class ExpensesService {
   constructor(
     @InjectRepository(Expense)
     private readonly expenseRepository: Repository<Expense>,
+    private readonly financialMovementsService: FinancialMovementsService,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
-  async create(createExpenseDto: CreateExpenseDto) {
-    const run = (cb: (repo: Repository<Expense>) => Promise<Expense>) =>
-      this.tenantContext
-        ? this.tenantContext.transaction((manager) =>
-            cb(manager.getRepository(Expense)),
-          )
-        : cb(this.expenseRepository);
+  private runInTransaction<T>(
+    callback: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    if (this.tenantContext) {
+      return this.tenantContext.transaction(callback);
+    }
+    const manager = {
+      getRepository: () => this.expenseRepository,
+    } as unknown as EntityManager;
+    return callback(manager);
+  }
 
+  async create(createExpenseDto: CreateExpenseDto) {
     try {
       const { storeID, ...expenseData } = createExpenseDto;
-      return await run((repo) => {
+      return await this.runInTransaction(async (manager) => {
+        const repo = manager.getRepository(Expense);
         const expense = repo.create({
           ...expenseData,
+          amount: expenseData.netAmount + expenseData.taxAmount,
           store: { storeID },
         });
-        return repo.save(expense);
+        const saved = await repo.save(expense);
+        await this.financialMovementsService.recordExpense(manager, saved);
+        return saved;
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Database error';
@@ -213,33 +224,38 @@ export class ExpensesService {
   }
 
   async update(id: string, updateExpenseDto: UpdateExpenseDto) {
-    if (this.tenantContext) {
-      return this.tenantContext.transaction(async (manager) => {
-        const repo = manager.getRepository(Expense);
-        const expense = await repo.findOne({
-          where: { id },
-          relations: ['store'],
-        });
-        if (!expense) throw new NotFoundException('Expense not found');
-        const updatedExpense = Object.assign(expense, updateExpenseDto);
-        return repo.save(updatedExpense);
+    return this.runInTransaction(async (manager) => {
+      const repo = manager.getRepository(Expense);
+      const expense = await repo.findOne({
+        where: { id },
+        relations: ['store'],
       });
-    }
-    const expense = await this.findOne(id);
-    const updatedExpense = Object.assign(expense, updateExpenseDto);
-    return await this.expenseRepository.save(updatedExpense);
+      if (!expense) throw new NotFoundException('Expense not found');
+
+      const hasAmountFields =
+        updateExpenseDto.netAmount !== undefined ||
+        updateExpenseDto.taxAmount !== undefined;
+      const updatedExpense = Object.assign(expense, updateExpenseDto);
+      if (hasAmountFields) {
+        updatedExpense.amount =
+          (updatedExpense.netAmount ?? 0) + (updatedExpense.taxAmount ?? 0);
+      }
+
+      const saved = await repo.save(updatedExpense);
+      await this.financialMovementsService.recordExpense(manager, saved);
+      return saved;
+    });
   }
 
   async remove(id: string) {
-    if (this.tenantContext) {
-      return this.tenantContext.transaction(async (manager) => {
-        const repo = manager.getRepository(Expense);
-        const expense = await repo.findOne({ where: { id } });
-        if (!expense) throw new NotFoundException('Expense not found');
-        return repo.remove(expense);
-      });
-    }
-    const expense = await this.findOne(id);
-    return await this.expenseRepository.remove(expense);
+    return this.runInTransaction(async (manager) => {
+      const repo = manager.getRepository(Expense);
+      const expense = await repo.findOne({ where: { id } });
+      if (!expense) throw new NotFoundException('Expense not found');
+
+      const removed = await repo.remove(expense);
+      await this.financialMovementsService.removeExpense(manager, expense.id);
+      return removed;
+    });
   }
 }

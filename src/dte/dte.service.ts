@@ -30,6 +30,7 @@ import {
   DteDocumentStatus,
 } from './entities/dte-document.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
+import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
 
 type NormalizedDteItem = {
   NroLinDet: number;
@@ -37,6 +38,8 @@ type NormalizedDteItem = {
   QtyItem: number;
   PrcItem: number;
   MontoItem: number;
+  costPrice: number;
+  costTotal: number;
   variationID: string;
   sku?: string;
   productName?: string;
@@ -57,6 +60,7 @@ export class DteService {
     private readonly dteDocumentRepository: Repository<DteDocument>,
     private readonly configService: ConfigService,
     private readonly dataSource: DataSource,
+    private readonly financialMovementsService: FinancialMovementsService,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
@@ -70,6 +74,11 @@ export class DteService {
 
   private toMoney(value: number): number {
     return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private toDateOnly(value: string): Date {
+    const date = new Date(`${value}T12:00:00`);
+    return Number.isNaN(date.getTime()) ? new Date() : date;
   }
 
   private buildToken(): string {
@@ -118,6 +127,7 @@ export class DteService {
       net: number;
       tax: number;
       total: number;
+      cogsTotal: number;
     };
   }> {
     const store = await manager.findOne(Store, {
@@ -155,11 +165,16 @@ export class DteService {
         QtyItem: quantity,
         PrcItem: this.toMoney(unitPrice),
         MontoItem: amount,
+        costPrice: 0,
+        costTotal: 0,
         variationID: variation.variationID,
         sku: variation.sku,
         productName: variation.product?.name,
       });
     }
+
+    const { items: normalizedItemsWithCosts, cogsTotal } =
+      await this.snapshotItemCosts(manager, store.storeID, normalizedItems);
 
     const net = this.toMoney(dto.dte.Encabezado.Totales?.MntNeto ?? subtotal);
     const tax = this.toMoney(dto.dte.Encabezado.Totales?.IVA ?? 0);
@@ -168,15 +183,41 @@ export class DteService {
     );
 
     return {
-      normalizedItems,
+      normalizedItems: normalizedItemsWithCosts,
       store,
       totals: {
         subtotal: this.toMoney(subtotal),
         net,
         tax,
         total,
+        cogsTotal,
       },
     };
+  }
+
+  private async snapshotItemCosts(
+    manager: EntityManager,
+    storeID: string,
+    items: NormalizedDteItem[],
+  ): Promise<{ items: NormalizedDteItem[]; cogsTotal: number }> {
+    let cogsTotal = 0;
+
+    for (const item of items) {
+      const storeProduct = await manager.findOne(StoreProduct, {
+        where: {
+          store: { storeID },
+          variation: { variationID: item.variationID },
+        },
+      });
+
+      const costPrice = this.toMoney(Number(storeProduct?.priceCost ?? 0));
+      const costTotal = this.toMoney(costPrice * item.QtyItem);
+      item.costPrice = costPrice;
+      item.costTotal = costTotal;
+      cogsTotal = this.toMoney(cogsTotal + costTotal);
+    }
+
+    return { items, cogsTotal };
   }
 
   private buildResponse(document: DteDocument): DteDocumentResponseDto {
@@ -298,7 +339,13 @@ export class DteService {
     dto: CreateDteDocumentDto,
     store: Store,
     normalizedItems: NormalizedDteItem[],
-    totals: { subtotal: number; net: number; tax: number; total: number },
+    totals: {
+      subtotal: number;
+      net: number;
+      tax: number;
+      total: number;
+      cogsTotal: number;
+    },
     token: string,
     folio: number,
     paymentType: DteDocumentPaymentType,
@@ -310,6 +357,7 @@ export class DteService {
       status,
       paymentType,
       total: totals.total,
+      cogsTotal: totals.cogsTotal,
       purchaseOrderID: dto.purchaseOrderID ?? null,
       store: {
         storeID: store.storeID,
@@ -462,6 +510,10 @@ export class DteService {
         documentType: dto.dte.Encabezado.IdDoc.TipoDTE ?? null,
         paymentType,
         total: totals.total,
+        netTotal: totals.net,
+        taxTotal: totals.tax,
+        cogsTotal: totals.cogsTotal,
+        issueDate: this.toDateOnly(dto.dte.Encabezado.IdDoc.FchEmis),
         payloadRaw: dto as unknown as Record<string, unknown>,
         payloadNormalized: this.buildNormalizedPayload(
           dto,
@@ -483,6 +535,10 @@ export class DteService {
         normalizedItems,
         saved.dteDocumentID,
       );
+
+      if (status === DteDocumentStatus.EMITIDO) {
+        await this.financialMovementsService.recordDte(manager, saved);
+      }
 
       this.logger.log(
         `Documento DTE guardado | dteDocumentID=${saved.dteDocumentID} | folio=${saved.folio} | status=${saved.status} | storeID=${saved.storeID}`,

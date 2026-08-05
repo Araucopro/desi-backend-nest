@@ -12,12 +12,14 @@ import { InventoryMovement } from '../inventory/entities/inventory-movement.enti
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 import { UserstoresModule } from '../relations/userstores/userstores.module';
+import { FinancialMovementsModule } from '../financial-movements/financial-movements.module';
 
 @Module({
   imports: [
     ConfigModule,
     MultitenantModule,
     UserstoresModule,
+    FinancialMovementsModule,
     TypeOrmModule.forFeature([
       DteDocument,
       Store,

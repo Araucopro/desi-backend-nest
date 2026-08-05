@@ -3,11 +3,13 @@ import {
   IsEnum,
   IsNotEmpty,
   IsNumber,
-  IsPositive,
+  IsBoolean,
+  IsOptional,
+  Min,
   IsString,
   IsUUID,
 } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ExpenseType } from '../entities/expense.entity';
 
 export class CreateExpenseDto {
@@ -28,12 +30,46 @@ export class CreateExpenseDto {
   deductibleDate!: string; // IsDateString validates ISO 8601 strings
 
   @ApiProperty({
-    description: 'Monto del gasto',
-    example: 1500.5,
+    description: 'Monto neto del gasto (sin IVA)',
+    example: 1000,
   })
   @IsNumber()
-  @IsPositive()
-  amount!: number;
+  @Min(0)
+  netAmount!: number;
+
+  @ApiProperty({
+    description: 'IVA del gasto',
+    example: 190,
+  })
+  @IsNumber()
+  @Min(0)
+  taxAmount!: number;
+
+  @ApiPropertyOptional({
+    description: 'Aceptado para efectos tributarios (Art. 31 LIR)',
+    example: true,
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  acceptedForTax?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'IVA con derecho a crédito fiscal',
+    example: true,
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  taxCredit?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Documento de respaldo (ej. factura de proveedor)',
+    example: 'F-1234',
+  })
+  @IsOptional()
+  @IsString()
+  supportDocument?: string;
 
   @ApiProperty({
     description: 'Tipo de gasto',

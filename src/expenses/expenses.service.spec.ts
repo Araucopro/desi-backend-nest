@@ -4,6 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Expense, ExpenseType } from './entities/expense.entity';
 import { Repository } from 'typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
 
 describe('ExpensesService', () => {
   let service: ExpensesService;
@@ -28,11 +29,23 @@ describe('ExpensesService', () => {
     createQueryBuilder: jest.fn(),
   };
 
+  const mockFinancialMovementsService = {
+    recordExpense: jest.fn().mockResolvedValue(undefined),
+    removeExpense: jest.fn().mockResolvedValue(undefined),
+    recordDte: jest.fn().mockResolvedValue(undefined),
+    recordPurchaseOrder: jest.fn().mockResolvedValue(undefined),
+    removePurchaseOrder: jest.fn().mockResolvedValue(undefined),
+  };
+
   const mockExpense: Partial<Expense> = {
     id: 'expense-uuid-1',
     name: 'Office Rent',
     deductibleDate: new Date('2023-10-27T00:00:00Z'),
     amount: 1500.5,
+    netAmount: 1000,
+    taxAmount: 500.5,
+    acceptedForTax: true,
+    taxCredit: true,
     type: ExpenseType.ADMINISTRATIVE,
     store: { storeID: 'store-uuid-1' } as any,
     createdAt: new Date(),
@@ -73,6 +86,10 @@ describe('ExpensesService', () => {
           provide: getRepositoryToken(Expense),
           useValue: mockExpenseRepository,
         },
+        {
+          provide: FinancialMovementsService,
+          useValue: mockFinancialMovementsService,
+        },
       ],
     }).compile();
 
@@ -91,27 +108,42 @@ describe('ExpensesService', () => {
   });
 
   describe('create', () => {
-    it('should create an expense', async () => {
+    it('should create an expense with net + tax and sync the ledger', async () => {
       const createDto = {
         name: 'Office Supplies',
         deductibleDate: '2023-11-01T00:00:00Z',
-        amount: 250.0,
+        netAmount: 250,
+        taxAmount: 47.5,
         type: ExpenseType.OPERATIONAL,
         storeID: 'store-uuid-1',
       };
 
-      mockExpenseRepository.create.mockReturnValue({ ...createDto });
+      mockExpenseRepository.create.mockReturnValue({
+        ...createDto,
+        amount: 297.5,
+      });
       mockExpenseRepository.save.mockResolvedValue({
         id: 'new-expense-uuid',
         ...createDto,
+        amount: 297.5,
+        store: { storeID: 'store-uuid-1' },
       });
 
       const result = await service.create(createDto);
 
       expect(mockExpenseRepository.create).toHaveBeenCalledWith(
-        expect.objectContaining({ store: { storeID: 'store-uuid-1' } }),
+        expect.objectContaining({
+          netAmount: 250,
+          taxAmount: 47.5,
+          amount: 297.5,
+          store: { storeID: 'store-uuid-1' },
+        }),
       );
       expect(mockExpenseRepository.save).toHaveBeenCalled();
+      expect(mockFinancialMovementsService.recordExpense).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ id: 'new-expense-uuid' }),
+      );
       expect(result).toHaveProperty('id', 'new-expense-uuid');
     });
 
@@ -119,7 +151,8 @@ describe('ExpensesService', () => {
       const createDto = {
         name: 'Bad Expense',
         deductibleDate: '2023-11-01T00:00:00Z',
-        amount: 100,
+        netAmount: 100,
+        taxAmount: 19,
         type: ExpenseType.FINANCIAL,
         storeID: 'store-uuid-1',
       };
@@ -141,6 +174,7 @@ describe('ExpensesService', () => {
 
       expect(result).toEqual([mockExpense]);
       expect(mockExpenseRepository.find).toHaveBeenCalledWith({
+        where: {},
         relations: ['store'],
       });
     });
@@ -266,7 +300,7 @@ describe('ExpensesService', () => {
   });
 
   describe('update', () => {
-    it('should update an expense', async () => {
+    it('should update an expense and resync the ledger', async () => {
       mockExpenseRepository.findOne.mockResolvedValue({ ...mockExpense });
       mockExpenseRepository.save.mockResolvedValue({
         ...mockExpense,
@@ -279,6 +313,28 @@ describe('ExpensesService', () => {
 
       expect(result.name).toBe('Updated Office Rent');
       expect(mockExpenseRepository.save).toHaveBeenCalled();
+      expect(mockFinancialMovementsService.recordExpense).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ id: 'expense-uuid-1' }),
+      );
+    });
+
+    it('recomputes amount when netAmount or taxAmount changes', async () => {
+      mockExpenseRepository.findOne.mockResolvedValue({ ...mockExpense });
+      mockExpenseRepository.save.mockImplementation(async (entity) => entity);
+
+      const result = await service.update('expense-uuid-1', {
+        netAmount: 1200,
+      });
+
+      expect(result.amount).toBe(1700.5);
+      expect(mockExpenseRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          netAmount: 1200,
+          taxAmount: 500.5,
+          amount: 1700.5,
+        }),
+      );
     });
 
     it('should throw NotFoundException if expense to update not found', async () => {
@@ -291,13 +347,17 @@ describe('ExpensesService', () => {
   });
 
   describe('remove', () => {
-    it('should remove an expense', async () => {
+    it('should remove an expense and its ledger movement', async () => {
       mockExpenseRepository.findOne.mockResolvedValue(mockExpense);
       mockExpenseRepository.remove.mockResolvedValue(mockExpense);
 
       await service.remove('expense-uuid-1');
 
       expect(mockExpenseRepository.remove).toHaveBeenCalledWith(mockExpense);
+      expect(mockFinancialMovementsService.removeExpense).toHaveBeenCalledWith(
+        expect.anything(),
+        'expense-uuid-1',
+      );
     });
 
     it('should throw NotFoundException if expense to remove not found', async () => {

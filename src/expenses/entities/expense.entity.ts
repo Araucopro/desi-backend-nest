@@ -54,6 +54,31 @@ export class Expense {
   })
   amount!: number;
 
+  @Column('decimal', {
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: new ColumnNumericTransformer(),
+  })
+  netAmount!: number;
+
+  @Column('decimal', {
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: new ColumnNumericTransformer(),
+  })
+  taxAmount!: number;
+
+  @Column({ type: 'boolean', default: true })
+  acceptedForTax!: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  taxCredit!: boolean;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  supportDocument!: string | null;
+
   @ApiProperty({
     description: 'Categoría del gasto',
     enum: ExpenseType,

@@ -38,6 +38,7 @@ describe('ProductsService', () => {
     delete: jest.fn(),
     find: jest.fn(),
     remove: jest.fn(),
+    getRepository: jest.fn().mockReturnValue(mockProductRepository),
   };
 
   beforeEach(async () => {
@@ -77,6 +78,9 @@ describe('ProductsService', () => {
   describe('findAll', () => {
     it('should return an array of products with pagination', async () => {
       const result: Product[] = [];
+      mockEntityManager.transaction.mockImplementation(async (cb) =>
+        cb(mockEntityManager as any),
+      );
 
       // Mock a query builder chain used by the service
       const queryBuilderMock: any = {

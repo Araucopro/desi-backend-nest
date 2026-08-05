@@ -65,6 +65,9 @@ export class PurchaseOrder {
   @Column({ type: 'date', nullable: true })
   dueDate!: Date | null;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  paidAt!: Date | null;
+
   @Column('int', { default: 0 })
   totalProducts!: number;
 

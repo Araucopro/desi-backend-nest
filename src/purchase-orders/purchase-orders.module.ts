@@ -8,10 +8,12 @@ import { ProductVariation } from '../products/entities/product-variation.entity'
 import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { MultitenantModule } from '../multitenant/multitenant.module';
+import { FinancialMovementsModule } from '../financial-movements/financial-movements.module';
 
 @Module({
   imports: [
     MultitenantModule,
+    FinancialMovementsModule,
     TypeOrmModule.forFeature([
       PurchaseOrder,
       PurchaseOrderItem,

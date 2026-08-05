@@ -111,6 +111,7 @@ describe('UserstoresService', () => {
 
       expect(result).toEqual([mockUserStore]);
       expect(mockUserStoreRepository.find).toHaveBeenCalledWith({
+        where: {},
         relations: ['user', 'store'],
       });
     });
