@@ -1,7 +1,6 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
-  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -12,7 +11,6 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsUUID } from 'class-validator';
 
 export enum DteResponseValue {
   TOKEN = 'TOKEN',
@@ -20,7 +18,6 @@ export enum DteResponseValue {
   STATUS = 'STATUS',
   PDF = 'PDF',
   XML = 'XML',
-  SELF_SERVICE = 'SELF_SERVICE',
 }
 
 class DteIdDocDto {
@@ -30,13 +27,13 @@ class DteIdDocDto {
   @IsInt()
   TipoDTE?: number;
 
-  @ApiPropertyOptional({ description: 'Folio del documento', example: 26005 })
+  @ApiPropertyOptional({ description: 'Folio del documento', example: 0 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   Folio?: number;
 
-  @ApiProperty({ description: 'Fecha de emisión', example: '2025-03-23' })
+  @ApiProperty({ description: 'Fecha de emisión', example: '2026-08-03' })
   @IsDateString()
   FchEmis!: string;
 
@@ -143,14 +140,14 @@ class DteReceptorDto {
   @IsString()
   DirRecep?: string;
 
-  @ApiPropertyOptional({ description: 'Comuna receptor', example: 'Curicó' })
+  @ApiPropertyOptional({ description: 'Comuna receptor', example: 'Temuco' })
   @IsOptional()
   @IsString()
   CmnaRecep?: string;
 }
 
 class DteTotalesDto {
-  @ApiPropertyOptional({ description: 'Monto neto', example: 10600 })
+  @ApiPropertyOptional({ description: 'Monto neto', example: 21008 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -161,25 +158,25 @@ class DteTotalesDto {
   @IsString()
   TasaIVA?: string;
 
-  @ApiPropertyOptional({ description: 'IVA', example: 2014 })
+  @ApiPropertyOptional({ description: 'IVA', example: 3992 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   IVA?: number;
 
-  @ApiPropertyOptional({ description: 'Monto total', example: 12614 })
+  @ApiPropertyOptional({ description: 'Monto total', example: 25000 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   MntTotal?: number;
 
-  @ApiPropertyOptional({ description: 'Monto del período', example: 12614 })
+  @ApiPropertyOptional({ description: 'Monto del período', example: 25000 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   MontoPeriodo?: number;
 
-  @ApiPropertyOptional({ description: 'Valor a pagar', example: 12614 })
+  @ApiPropertyOptional({ description: 'Valor a pagar', example: 25000 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -194,7 +191,7 @@ class DteCodigoItemDto {
 
   @ApiPropertyOptional({
     description: 'Valor del código',
-    example: '101122146100',
+    example: '10001',
   })
   @IsOptional()
   @IsString()
@@ -209,7 +206,7 @@ class DteDetalleItemDto {
 
   @ApiProperty({
     description: 'Nombre del ítem',
-    example: 'Cama para Perros William',
+    example: 'Producto Demo',
   })
   @IsString()
   @IsNotEmpty()
@@ -220,22 +217,17 @@ class DteDetalleItemDto {
   @IsNumber()
   QtyItem!: number;
 
-  @ApiPropertyOptional({ description: 'Precio unitario', example: 39990 })
+  @ApiPropertyOptional({ description: 'Precio unitario NETO', example: 21008 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   PrcItem?: number;
 
-  @ApiPropertyOptional({ description: 'Monto del ítem', example: 39990 })
+  @ApiPropertyOptional({ description: 'Monto del ítem NETO', example: 21008 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   MontoItem?: number;
-
-  @ApiPropertyOptional({ description: 'Indica exento', example: '1' })
-  @IsOptional()
-  @IsString()
-  IndExe?: string;
 
   @ApiPropertyOptional({ type: DteCodigoItemDto })
   @IsOptional()
@@ -250,10 +242,11 @@ class DteEncabezadoDto {
   @Type(() => DteIdDocDto)
   IdDoc!: DteIdDocDto;
 
-  @ApiProperty({ type: DteEmisorDto })
+  @ApiPropertyOptional({ type: DteEmisorDto })
+  @IsOptional()
   @ValidateNested()
   @Type(() => DteEmisorDto)
-  Emisor!: DteEmisorDto;
+  Emisor?: DteEmisorDto;
 
   @ApiProperty({ type: DteReceptorDto })
   @ValidateNested()
@@ -358,36 +351,12 @@ class DteDocumentReferenceDto {
   date?: string;
 }
 
-class DteSelfServiceDto {
-  @ApiProperty({ description: 'Emite boleta automáticamente', example: true })
-  @IsBoolean()
-  issueBoleta!: boolean;
-
-  @ApiProperty({ description: 'Permite convertir a factura', example: true })
-  @IsBoolean()
-  allowFactura!: boolean;
-
-  @ApiPropertyOptional({ type: DteDocumentReferenceDto })
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => DteDocumentReferenceDto)
-  documentReference?: DteDocumentReferenceDto;
-}
-
 export class CreateDteDocumentDto {
-  @ApiPropertyOptional({
-    description: 'ID de la orden de compra aceptada que origina el DTE',
-    example: '123e4567-e89b-12d3-a456-426614174000',
-  })
-  @IsOptional()
-  @IsUUID()
-  purchaseOrderID?: string;
-
   @ApiProperty({
     description: 'Campos de salida que solicita el cliente',
     isArray: true,
     enum: DteResponseValue,
-    example: ['FOLIO', 'SELF_SERVICE'],
+    example: ['FOLIO', 'PDF', 'STATUS'],
   })
   @IsArray()
   @IsEnum(DteResponseValue, { each: true })
@@ -409,11 +378,6 @@ export class CreateDteDocumentDto {
   @ValidateNested()
   @Type(() => DteCustomizePageDto)
   customizePage?: DteCustomizePageDto;
-
-  @ApiProperty({ type: DteSelfServiceDto })
-  @ValidateNested()
-  @Type(() => DteSelfServiceDto)
-  selfService!: DteSelfServiceDto;
 }
 
 export type DteDocumentInput = CreateDteDocumentDto;

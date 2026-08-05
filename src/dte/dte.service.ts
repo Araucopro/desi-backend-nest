@@ -57,6 +57,8 @@ type NormalizedDteItem = {
 type OpenfacturaDocumentResponse = {
   TOKEN?: string;
   FOLIO?: number;
+  PDF?: number;
+  XML?: number;
   token?: string;
   folio?: number;
   status?: string;
@@ -235,13 +237,36 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (
+      dto.dte.Encabezado.Emisor?.RUTEmisor &&
       this.normalizeRut(dto.dte.Encabezado.Emisor.RUTEmisor) !==
-      this.normalizeRut(store.rut)
+        this.normalizeRut(store.rut)
     ) {
       throw new BadRequestException(
         `El RUTEmisor del payload no coincide con el RUT de la tienda de sesión`,
       );
     }
+
+    // Auto-completar/construir datos del Emisor a partir de la tienda (Store)
+    dto.dte.Encabezado.Emisor = {
+      RUTEmisor: store.rut,
+      RznSoc: store.businessName || store.name,
+      GiroEmis:
+        store.giro ||
+        dto.dte.Encabezado.Emisor?.GiroEmis ||
+        'VENTA AL POR MENOR',
+      Acteco: store.acteco
+        ? store.acteco.split(',').map((a) => a.trim())
+        : dto.dte.Encabezado.Emisor?.Acteco || ['479100'],
+      DirOrigen:
+        store.address || dto.dte.Encabezado.Emisor?.DirOrigen || 'DIRECCION',
+      CmnaOrigen:
+        store.city || dto.dte.Encabezado.Emisor?.CmnaOrigen || 'SANTIAGO',
+      Telefono: store.phone || dto.dte.Encabezado.Emisor?.Telefono || '0 0',
+      CdgSIISucur:
+        store.cdgSIISucur ||
+        dto.dte.Encabezado.Emisor?.CdgSIISucur ||
+        undefined,
+    };
 
     const nameFallbackStats = { count: 0 };
     const normalizedItems: NormalizedDteItem[] = [];
@@ -335,43 +360,9 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     return { items, cogsTotal };
   }
 
-  private async validatePurchaseOrder(
-    manager: EntityManager,
-    dto: CreateDteDocumentDto,
-    storeID: string,
-  ): Promise<PurchaseOrder | null> {
-    if (!dto.purchaseOrderID) return null;
-
-    const purchaseOrder = await manager.findOne(PurchaseOrder, {
-      where: { purchaseOrderID: dto.purchaseOrderID },
-      relations: ['store'],
-    });
-
-    if (!purchaseOrder) {
-      throw new NotFoundException(
-        `Orden de compra con ID ${dto.purchaseOrderID} no encontrada`,
-      );
-    }
-
-    if (purchaseOrder.status !== PurchaseOrderCommercialStatus.ACEPTADO) {
-      throw new BadRequestException(
-        `La orden de compra ${dto.purchaseOrderID} debe estar en estado Aceptado para emitir un DTE`,
-      );
-    }
-
-    if (purchaseOrder.store?.storeID !== storeID) {
-      throw new BadRequestException(
-        `La orden de compra ${dto.purchaseOrderID} no pertenece a la misma tienda del DTE`,
-      );
-    }
-
-    return purchaseOrder;
-  }
-
   private async findExistingDocument(
     manager: EntityManager,
     idempotencyKey: string | undefined,
-    purchaseOrderID: string | undefined,
   ): Promise<DteDocument | null> {
     if (idempotencyKey) {
       const byKey = await manager.findOne(DteDocument, {
@@ -379,14 +370,6 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       });
       if (byKey) return byKey;
     }
-
-    if (purchaseOrderID) {
-      const byPurchaseOrder = await manager.findOne(DteDocument, {
-        where: { purchaseOrderID },
-      });
-      if (byPurchaseOrder) return byPurchaseOrder;
-    }
-
     return null;
   }
 
@@ -403,12 +386,34 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     return Array.isArray(items) ? (items as NormalizedDteItem[]) : [];
   }
 
-  private buildResponse(document: DteDocument): DteDocumentResponseDto {
-    return {
+  private buildResponse(
+    document: DteDocument,
+    extraPayload?: OpenfacturaDocumentResponse,
+  ): DteDocumentResponseDto {
+    const base: DteDocumentResponseDto = {
       TOKEN: document.token,
       FOLIO: document.folio,
-      status: document.status,
+      STATUS: document.status,
     };
+
+    if (extraPayload) {
+      if (extraPayload.PDF) base.PDF = String(extraPayload.PDF);
+      if (extraPayload.XML) base.XML = String(extraPayload.XML);
+      if (Array.isArray(extraPayload.WARNING))
+        base.WARNING = extraPayload.WARNING;
+      // Copiar cualquier otra clave devuelta por Openfactura
+      for (const [key, value] of Object.entries(extraPayload)) {
+        if (
+          !['TOKEN', 'FOLIO', 'status', 'STATUS', 'token', 'folio'].includes(
+            key,
+          )
+        ) {
+          base[key] = value;
+        }
+      }
+    }
+
+    return base;
   }
 
   private normalizeStatus(status?: string): DteDocumentStatus {
@@ -442,7 +447,6 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       paymentType,
       total: totals.total,
       cogsTotal: totals.cogsTotal,
-      purchaseOrderID: dto.purchaseOrderID ?? null,
       store: {
         storeID: store.storeID,
         rut: store.rut,
@@ -452,7 +456,6 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       dte: dto.dte,
       customer: dto.customer ?? null,
       customizePage: dto.customizePage ?? null,
-      selfService: dto.selfService,
       response: dto.response,
       totals,
       items: normalizedItems,
@@ -494,10 +497,14 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       item.costTotal = costTotal;
       cogsTotal = this.toMoney(cogsTotal + costTotal);
 
+      const tenantID =
+        this.tenantContext?.getTenantId() ?? storeProduct.tenantID;
+
       storeProduct.stock -= item.QtyItem;
       await manager.save(storeProduct);
       await manager.save(
         manager.create(InventoryMovement, {
+          tenantID,
           store: { storeID },
           variation: { variationID: item.variationID },
           delta: -item.QtyItem,
@@ -532,10 +539,13 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
+      const tenantID = this.tenantContext?.getTenantId() ?? document.tenantID;
+
       storeProduct.stock += Number(item.QtyItem);
       await manager.save(storeProduct);
       await manager.save(
         manager.create(InventoryMovement, {
+          tenantID,
           store: { storeID: document.storeID },
           variation: { variationID: item.variationID },
           delta: Number(item.QtyItem),
@@ -600,6 +610,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     timer.unref?.();
 
     try {
+      console.log(init);
       const response = await fetch(url, {
         ...init,
         signal: controller.signal,
@@ -721,11 +732,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     dto: CreateDteDocumentDto,
     apikey: string,
   ): Promise<DteCreateOutcome> {
-    const existing = await this.findExistingDocument(
-      manager,
-      idempotencyKey,
-      dto.purchaseOrderID,
-    );
+    const existing = await this.findExistingDocument(manager, idempotencyKey);
 
     if (existing && existing.status !== DteDocumentStatus.ERROR) {
       this.logger.log(
@@ -746,12 +753,6 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const purchaseOrder = await this.validatePurchaseOrder(
-      manager,
-      dto,
-      storeID,
-    );
-
     const idempotencyKeyToUse =
       existing?.idempotencyKey ?? idempotencyKey ?? null;
     const checkExistingToken =
@@ -766,17 +767,16 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       existing?.folio ?? this.buildFolio(dto.dte.Encabezado.IdDoc.Folio);
     const paymentType = this.mapPaymentType(dto.dte.Encabezado.IdDoc.FmaPago);
 
+    const tenantID = this.tenantContext?.getTenantId() ?? store.tenantID;
+
     const values = {
+      tenantID,
       apikey: this.maskApikey(apikey),
       idempotencyKey: idempotencyKeyToUse,
       token,
       folio,
       store: { storeID: store.storeID },
       storeID: store.storeID,
-      purchaseOrder: purchaseOrder
-        ? { purchaseOrderID: purchaseOrder.purchaseOrderID }
-        : null,
-      purchaseOrderID: purchaseOrder?.purchaseOrderID ?? null,
       status: DteDocumentStatus.PENDIENTE,
       documentType: dto.dte.Encabezado.IdDoc.TipoDTE ?? null,
       paymentType,
@@ -816,7 +816,6 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
           const concurrent = await this.findExistingDocument(
             manager,
             idempotencyKey,
-            dto.purchaseOrderID,
           );
           if (concurrent) {
             if (concurrent.status !== DteDocumentStatus.ERROR) {
@@ -873,7 +872,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
           ...(document.payloadNormalized as { totals?: object })?.totals,
           cogsTotal: reserved.cogsTotal,
         },
-      } as unknown as Record<string, unknown>;
+      };
       document = await manager.save(document);
     }
 
@@ -940,7 +939,13 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(
         `Documento DTE finalizado | dteDocumentID=${saved.dteDocumentID} | status=${saved.status} | folio=${saved.folio}`,
       );
-      return { kind: 'success', response: this.buildResponse(saved) };
+      return {
+        kind: 'success',
+        response: this.buildResponse(
+          saved,
+          result.ok ? result.payload : undefined,
+        ),
+      };
     }
 
     document.status = DteDocumentStatus.ERROR;
@@ -1052,9 +1057,9 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     if (!tenantContext) return;
 
     try {
-      const tenants = (await this.dataSource.query(
+      const tenants = await this.dataSource.query(
         `SELECT "tenantID" FROM "tenants" WHERE "status" = 'ACTIVE'`,
-      )) as Array<{ tenantID: string }>;
+      );
 
       for (const tenant of tenants) {
         await tenantContext.run(

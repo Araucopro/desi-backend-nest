@@ -42,11 +42,6 @@ export class DteController {
       'Recibe el payload del POS/frontend autenticado, lo normaliza al modelo interno y persiste el documento local junto con la OC asociada cuando corresponde. Requiere sesión de tenant y tienda activa.',
   })
   @ApiHeader({
-    name: 'X-Tenant-ID',
-    required: true,
-    description: 'Tenant de la sesión autenticada',
-  })
-  @ApiHeader({
     name: 'X-Store-ID',
     required: true,
     description: 'Tienda activa desde la que se emite el documento',
@@ -72,11 +67,6 @@ export class DteController {
     summary: 'Reconciliar un documento DTE pendiente contra Openfactura',
     description:
       'Consulta el TOKEN del documento en Openfactura y transiciona PENDIENTE a EMITIDO (con ledger) o a ERROR (revirtiendo la reserva de stock).',
-  })
-  @ApiHeader({
-    name: 'X-Tenant-ID',
-    required: true,
-    description: 'Tenant de la sesión autenticada',
   })
   @ApiHeader({
     name: 'X-Store-ID',

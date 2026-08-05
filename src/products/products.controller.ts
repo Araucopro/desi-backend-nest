@@ -33,7 +33,6 @@ export class ProductsController {
     return this.productsService.create(createProductDto);
   }
 
-  @Public()
   @Get()
   @ApiOperation({ summary: 'Obtener todos los productos' })
   @ApiResponse({

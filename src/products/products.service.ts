@@ -34,19 +34,27 @@ export class ProductsService {
 
   async create(createProductDto: CreateProductDto): Promise<Product> {
     return this.runInTransaction(async (transactionalEntityManager) => {
+      const tenantID = this.tenantContext?.getTenantId();
       const { variations, ...productData } = createProductDto;
 
-      const product = transactionalEntityManager.create(Product, productData);
+      const product = transactionalEntityManager.create(Product, {
+        ...productData,
+        ...(tenantID ? { tenantID } : {}),
+      });
       const savedProduct = await transactionalEntityManager.save(product);
 
       const centralStore = await transactionalEntityManager.findOne(Store, {
-        where: { isCentralStore: true },
+        where: {
+          isCentralStore: true,
+          ...(tenantID ? { tenantID } : {}),
+        },
       });
 
       for (const variationDto of variations) {
         const variation = transactionalEntityManager.create(ProductVariation, {
           ...variationDto,
           product: savedProduct,
+          ...(tenantID ? { tenantID } : {}),
         });
         const savedVariation = await transactionalEntityManager.save(variation);
 
@@ -57,6 +65,7 @@ export class ProductsService {
             stock: variationDto.stock,
             priceCost: variationDto.priceCost,
             priceList: variationDto.priceList,
+            ...(tenantID ? { tenantID } : {}),
           });
           await transactionalEntityManager.save(sp);
         }
@@ -197,9 +206,14 @@ export class ProductsService {
       transactionalEntityManager.merge(Product, product, productData);
       const savedProduct = await transactionalEntityManager.save(product);
 
+      const tenantID = this.tenantContext?.getTenantId();
+
       if (variations) {
         const centralStore = await transactionalEntityManager.findOne(Store, {
-          where: { isCentralStore: true },
+          where: {
+            isCentralStore: true,
+            ...(tenantID ? { tenantID } : {}),
+          },
         });
 
         const existingVariationsMap = new Map(

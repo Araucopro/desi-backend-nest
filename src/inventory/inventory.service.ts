@@ -1,6 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import {
   InventoryMovement,
   InventoryMovementReason,
@@ -13,7 +13,6 @@ import { TenantContextService } from '../multitenant/tenant-context.service';
 export class InventoryService {
   constructor(
     @InjectRepository(InventoryMovement)
-    private readonly inventoryMovementRepository: Repository<InventoryMovement>,
     private readonly dataSource: DataSource,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
@@ -40,6 +39,8 @@ export class InventoryService {
         },
       });
 
+      const tenantID = this.tenantContext?.getTenantId();
+
       if (!storeProduct) {
         storeProduct = manager.create(StoreProduct, {
           store: { storeID },
@@ -47,6 +48,7 @@ export class InventoryService {
           stock: 0,
           priceCost: 0,
           priceList: 0,
+          ...(tenantID ? { tenantID } : {}),
         });
       }
 
@@ -79,6 +81,7 @@ export class InventoryService {
       }
 
       const movement = manager.create(InventoryMovement, {
+        ...(tenantID ? { tenantID } : {}),
         store: { storeID },
         variation: { variationID },
         reason,

@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class DteDocumentResponseDto {
   @ApiProperty({
@@ -17,5 +17,22 @@ export class DteDocumentResponseDto {
     description: 'Estado de emisión del documento',
     example: 'EMITIDO',
   })
-  status!: string;
+  STATUS!: string;
+
+  @ApiPropertyOptional({
+    description: 'Contenido PDF en Base64 si se solicita',
+  })
+  PDF?: string;
+
+  @ApiPropertyOptional({
+    description: 'Contenido XML en Base64 si se solicita',
+  })
+  XML?: string;
+
+  @ApiPropertyOptional({
+    description: 'Alertas o advertencias retornadas por el proveedor DTE',
+  })
+  WARNING?: unknown[];
+
+  [key: string]: unknown;
 }

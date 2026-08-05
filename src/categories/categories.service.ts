@@ -17,8 +17,9 @@ export class CategoriesService {
   create(createCategoryDto: CreateCategoryDto) {
     if (this.tenantContext) {
       return this.tenantContext.transaction((manager) => {
+        const tenantID = this.tenantContext!.getTenantId();
         const repo = manager.getRepository(Category);
-        const category = repo.create(createCategoryDto);
+        const category = repo.create({ ...createCategoryDto, tenantID });
         return repo.save(category);
       });
     }
@@ -27,10 +28,12 @@ export class CategoriesService {
   }
 
   findAll() {
+    const tenantId = this.tenantContext?.get(false)?.tenantId;
+    const tenantWhere = tenantId ? { tenantID: tenantId } : {};
     if (this.tenantContext) {
       return this.tenantContext.transaction((manager) =>
         manager.getRepository(Category).find({
-          where: { parentID: IsNull() },
+          where: { parentID: IsNull(), ...tenantWhere },
           relations: ['children', 'parent'],
         }),
       );
@@ -42,10 +45,12 @@ export class CategoriesService {
   }
 
   findOne(id: string) {
+    const tenantId = this.tenantContext?.get(false)?.tenantId;
+    const tenantWhere = tenantId ? { tenantID: tenantId } : {};
     if (this.tenantContext) {
       return this.tenantContext.transaction((manager) =>
         manager.getRepository(Category).findOne({
-          where: { categoryID: id },
+          where: { categoryID: id, ...tenantWhere },
           relations: ['children', 'parent'],
         }),
       );
