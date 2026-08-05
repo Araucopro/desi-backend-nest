@@ -110,6 +110,9 @@ export class DteDocument {
   })
   cogsTotal!: number;
 
+  @Column({ type: 'text', nullable: true })
+  errorDetail!: string | null;
+
   @Column({ type: 'date' })
   issueDate!: Date;
 

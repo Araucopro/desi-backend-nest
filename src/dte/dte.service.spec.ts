@@ -1,10 +1,23 @@
+import {
+  BadGatewayException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { DteService } from './dte.service';
-import { DteDocument } from './entities/dte-document.entity';
+import { DteDocument, DteDocumentStatus } from './entities/dte-document.entity';
 import { Store } from '../stores/entities/store.entity';
+import { Product } from '../products/entities/product.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 
-function createDteDto() {
+function createDteDto(
+  overrides: {
+    fmaPago?: string;
+    quantity?: number;
+    noCode?: boolean;
+  } = {},
+) {
   return {
     purchaseOrderID: undefined,
     response: ['FOLIO'],
@@ -14,6 +27,7 @@ function createDteDto() {
           TipoDTE: 33,
           Folio: 100,
           FchEmis: '2026-01-15',
+          FmaPago: overrides.fmaPago,
         },
         Emisor: {
           RUTEmisor: '76123456-7',
@@ -33,10 +47,10 @@ function createDteDto() {
         {
           NroLinDet: 1,
           NmbItem: 'Producto A',
-          QtyItem: 2,
+          QtyItem: overrides.quantity ?? 2,
           PrcItem: 500,
           MontoItem: 1000,
-          CdgItem: { VlrCodigo: 'SKU-1' },
+          ...(overrides.noCode ? {} : { CdgItem: { VlrCodigo: 'SKU-1' } }),
         },
       ],
     },
@@ -46,9 +60,42 @@ function createDteDto() {
   };
 }
 
-function createMockManager() {
+function createMockManager(
+  options: {
+    existingDocument?: Partial<DteDocument> | null;
+    storeProductStock?: number;
+    storeProductCost?: number;
+    saveDocumentError?: unknown;
+    documentAfterConflict?: Partial<DteDocument> | null;
+    resolveByName?: boolean;
+  } = {},
+) {
+  const storeProduct = {
+    storeProductID: 'sp-1',
+    stock: options.storeProductStock ?? 10,
+    priceCost: options.storeProductCost ?? 120,
+  };
+  const variation = {
+    variationID: 'var-1',
+    sku: 'SKU-1',
+    product: { name: 'Producto A' },
+  };
+  const product = {
+    productID: 'product-1',
+    name: 'Producto A',
+    variations: [{ ...variation, product: undefined }],
+  };
+  let document: Partial<DteDocument> | null = options.existingDocument ?? null;
+  let documentSaveAttempted = false;
+
   return {
-    findOne: jest.fn().mockImplementation(async (entity: unknown) => {
+    findOne: jest.fn(async (entity: unknown, _criteria?: unknown) => {
+      if (entity === DteDocument) {
+        if (options.saveDocumentError && documentSaveAttempted) {
+          return options.documentAfterConflict ?? null;
+        }
+        return document;
+      }
       if (entity === Store) {
         return {
           storeID: 'store-1',
@@ -59,26 +106,44 @@ function createMockManager() {
         };
       }
       if (entity === ProductVariation) {
-        return {
-          variationID: 'var-1',
-          sku: 'SKU-1',
-          product: { name: 'Producto A' },
-        };
+        return options.resolveByName ? null : variation;
+      }
+      if (entity === Product) {
+        return options.resolveByName ? product : null;
       }
       if (entity === StoreProduct) {
-        return {
-          storeProductID: 'sp-1',
-          priceCost: 120,
-          stock: 10,
-        };
+        return storeProduct;
+      }
+      if (entity === PurchaseOrder) {
+        return null;
       }
       return null;
     }),
-    create: jest.fn((_entity: unknown, values: unknown) => ({
-      ...(values as object),
+    find: jest.fn().mockResolvedValue([]),
+    create: jest.fn((_entity: unknown, values: object) => ({
+      ...values,
       dteDocumentID: 'dte-1',
     })),
-    save: jest.fn(async (entity: unknown) => entity),
+    save: jest.fn(async (entity: unknown) => {
+      const candidate = entity as Partial<DteDocument> & {
+        dteDocumentID?: string;
+        status?: DteDocumentStatus;
+        payloadRaw?: unknown;
+      };
+      if (
+        candidate?.dteDocumentID === 'dte-1' &&
+        candidate.status !== undefined &&
+        candidate.payloadRaw !== undefined
+      ) {
+        if (options.saveDocumentError && !documentSaveAttempted) {
+          documentSaveAttempted = true;
+          throw options.saveDocumentError;
+        }
+        document = candidate;
+      }
+      return entity;
+    }),
+    query: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -109,7 +174,8 @@ describe('DteService', () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       headers: { get: () => 'application/json' },
-      json: async () => ({ TOKEN: 'token-1', FOLIO: 200, status: 'EMITIDO' }),
+      text: async () =>
+        JSON.stringify({ TOKEN: 'token-1', FOLIO: 200, status: 'EMITIDO' }),
     }) as unknown as typeof fetch;
   });
 
@@ -126,17 +192,31 @@ describe('DteService', () => {
     );
   }
 
+  function findSavedDocument(status?: DteDocumentStatus) {
+    return (manager.save.mock.calls as Array<[any]>).find(([entity]) => {
+      if (
+        entity?.dteDocumentID !== 'dte-1' ||
+        entity?.payloadRaw === undefined
+      ) {
+        return false;
+      }
+      return status ? entity.status === status : true;
+    })?.[0];
+  }
+
   it('snapshots COGS from StoreProduct.priceCost and records the ledger on EMITIDO', async () => {
     const service = createService();
 
-    const result = await service.create(undefined, createDteDto() as any);
+    const result = await service.create(
+      'store-1',
+      undefined,
+      createDteDto() as any,
+    );
 
     expect(result.FOLIO).toBe(200);
+    expect(result.status).toBe('EMITIDO');
 
-    const savedDocument = (manager.save.mock.calls as Array<[any]>).find(
-      ([entity]) => entity?.total === 1190 && entity?.dteDocumentID === 'dte-1',
-    )?.[0];
-
+    const savedDocument = findSavedDocument(DteDocumentStatus.EMITIDO);
     expect(savedDocument).toMatchObject({
       netTotal: 1000,
       taxTotal: 190,
@@ -159,37 +239,330 @@ describe('DteService', () => {
     );
   });
 
-  it('does not record ledger movements when the DTE is not EMITIDO', async () => {
+  it('marks ERROR and reverts stock without ledger when Openfactura returns status ERROR', async () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
       headers: { get: () => 'application/json' },
-      json: async () => ({ TOKEN: 'token-1', FOLIO: 200, status: 'ERROR' }),
+      text: async () =>
+        JSON.stringify({ TOKEN: 'token-1', FOLIO: 200, status: 'ERROR' }),
     });
 
     const service = createService();
-    await service.create(undefined, createDteDto() as any);
+    await expect(
+      service.create('store-1', undefined, createDteDto() as any),
+    ).rejects.toBeInstanceOf(BadGatewayException);
 
-    const savedDocument = (manager.save.mock.calls as Array<[any]>).find(
-      ([entity]) => entity?.total === 1190 && entity?.dteDocumentID === 'dte-1',
-    )?.[0];
+    const savedDocument = findSavedDocument(DteDocumentStatus.ERROR);
     expect(savedDocument.status).toBe('ERROR');
+    expect(savedDocument.errorDetail).toContain(
+      'Openfactura reportó estado ERROR',
+    );
+    expect(mockFinancialMovementsService.recordDte).not.toHaveBeenCalled();
+    expect(
+      manager.save.mock.calls.some(
+        ([entity]) => entity?.reason === 'ADJUSTMENT' && entity?.delta === 2,
+      ),
+    ).toBe(true);
+  });
+
+  it('marks ERROR and reverts stock on HTTP 5xx without ledger', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 500,
+      headers: { get: () => 'application/json' },
+      text: async () => JSON.stringify({ message: 'boom' }),
+    });
+
+    const service = createService();
+    await expect(
+      service.create('store-1', undefined, createDteDto() as any),
+    ).rejects.toBeInstanceOf(BadGatewayException);
+
+    const savedDocument = findSavedDocument(DteDocumentStatus.ERROR);
+    expect(savedDocument.status).toBe('ERROR');
+    expect(savedDocument.errorDetail).toContain('estado 500');
+    expect(mockFinancialMovementsService.recordDte).not.toHaveBeenCalled();
+    expect(
+      manager.save.mock.calls.some(
+        ([entity]) => entity?.reason === 'ADJUSTMENT' && entity?.delta === 2,
+      ),
+    ).toBe(true);
+  });
+
+  it('marks ERROR and reverts stock on timeout without ledger', async () => {
+    (global.fetch as jest.Mock).mockRejectedValue(
+      Object.assign(new Error('aborted'), { name: 'AbortError' }),
+    );
+
+    const service = createService();
+    await expect(
+      service.create('store-1', undefined, createDteDto() as any),
+    ).rejects.toBeInstanceOf(BadGatewayException);
+
+    const savedDocument = findSavedDocument(DteDocumentStatus.ERROR);
+    expect(savedDocument.status).toBe('ERROR');
+    expect(savedDocument.errorDetail).toContain(
+      'Timeout llamando a Openfactura',
+    );
+    expect(mockFinancialMovementsService.recordDte).not.toHaveBeenCalled();
+    expect(
+      manager.save.mock.calls.some(
+        ([entity]) => entity?.reason === 'ADJUSTMENT' && entity?.delta === 2,
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects insufficient stock in Tx A without calling Openfactura', async () => {
+    manager = createMockManager({ storeProductStock: 1 });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    await expect(
+      service.create('store-1', undefined, createDteDto() as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('reuses an existing EMITIDO document by idempotency key', async () => {
+    manager = createMockManager({
+      existingDocument: {
+        dteDocumentID: 'existing-dte',
+        token: 'existing-token',
+        folio: 111,
+        status: DteDocumentStatus.EMITIDO,
+      },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    const result = await service.create(
+      'store-1',
+      'idem-1',
+      createDteDto() as any,
+    );
+
+    expect(result.TOKEN).toBe('existing-token');
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(dataSource.transaction).toHaveBeenCalledTimes(1);
     expect(mockFinancialMovementsService.recordDte).not.toHaveBeenCalled();
   });
 
-  it('reuses an existing DTE by idempotency key without duplicating the ledger', async () => {
-    mockDteDocumentRepository.findOne.mockResolvedValue({
-      dteDocumentID: 'existing-dte',
-      token: 'existing-token',
-      folio: 111,
-      status: 'EMITIDO',
+  it('reuses an existing EMITIDO document by purchaseOrderID', async () => {
+    manager = createMockManager({
+      existingDocument: {
+        dteDocumentID: 'existing-dte',
+        token: 'existing-token',
+        folio: 222,
+        status: DteDocumentStatus.EMITIDO,
+        purchaseOrderID: 'po-1',
+      },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    const dto = createDteDto() as any;
+    dto.purchaseOrderID = 'po-1';
+    const result = await service.create('store-1', undefined, dto);
+
+    expect(result.FOLIO).toBe(222);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('retries an ERROR document on the same row and keeps the original Idempotency-Key', async () => {
+    manager = createMockManager({
+      existingDocument: {
+        dteDocumentID: 'dte-1',
+        token: 'local-abc',
+        folio: 111,
+        status: DteDocumentStatus.ERROR,
+        idempotencyKey: 'idem-orig',
+        payloadNormalized: {
+          items: [
+            {
+              variationID: 'var-1',
+              QtyItem: 2,
+            },
+          ],
+        },
+      },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      text: async () =>
+        JSON.stringify({ TOKEN: 'token-new', FOLIO: 300, status: 'EMITIDO' }),
     });
 
     const service = createService();
-    const result = await service.create('idem-1', createDteDto() as any);
+    const result = await service.create(
+      'store-1',
+      'idem-retry',
+      createDteDto() as any,
+    );
+
+    expect(result.TOKEN).toBe('token-new');
+    expect(result.FOLIO).toBe(300);
+    expect((global.fetch as jest.Mock).mock.calls[0][1].headers).toMatchObject({
+      'Idempotency-Key': 'idem-orig',
+    });
+    expect(findSavedDocument(DteDocumentStatus.EMITIDO).dteDocumentID).toBe(
+      'dte-1',
+    );
+  });
+
+  it('re-reads and returns the existing document on unique violation 23505', async () => {
+    manager = createMockManager({
+      saveDocumentError: { code: '23505' },
+      documentAfterConflict: {
+        dteDocumentID: 'existing-dte',
+        token: 'existing-token',
+        folio: 444,
+        status: DteDocumentStatus.EMITIDO,
+      },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    const result = await service.create(
+      'store-1',
+      'idem-1',
+      createDteDto() as any,
+    );
 
     expect(result.TOKEN).toBe('existing-token');
-    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(manager.query).toHaveBeenCalledWith(
+      'ROLLBACK TO SAVEPOINT dte_document_insert',
+    );
+  });
+
+  it('maps FmaPago 2 to CREDIT before persisting', async () => {
+    const service = createService();
+    await service.create(
+      'store-1',
+      undefined,
+      createDteDto({ fmaPago: '2' }) as any,
+    );
+
+    expect(findSavedDocument(DteDocumentStatus.EMITIDO).paymentType).toBe(
+      'Credito',
+    );
+  });
+
+  it('persists a masked apikey instead of the full secret', async () => {
+    const service = createService();
+    await service.create('store-1', undefined, createDteDto() as any);
+
+    expect(findSavedDocument(DteDocumentStatus.EMITIDO).apikey).toBe(
+      'apik...test',
+    );
+  });
+
+  it('warns and resolves items by name when SKU is absent', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    manager = createMockManager({ resolveByName: true });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    await service.create(
+      'store-1',
+      undefined,
+      createDteDto({ noCode: true }) as any,
+    );
+
+    expect(
+      findSavedDocument(DteDocumentStatus.EMITIDO).payloadNormalized.items[0],
+    ).toMatchObject({
+      variationID: 'var-1',
+      resolvedByName: true,
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Resolución de ítem por nombre'),
+    );
+  });
+
+  it('reconciles a PENDIENTE document with a real token to EMITIDO and records the ledger', async () => {
+    manager = createMockManager({
+      existingDocument: {
+        dteDocumentID: 'dte-1',
+        token: 'real-token',
+        folio: 100,
+        status: DteDocumentStatus.PENDIENTE,
+        payloadRaw: {},
+        payloadNormalized: {
+          items: [{ variationID: 'var-1', QtyItem: 2 }],
+        },
+      },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      text: async () => JSON.stringify({ folio: 555 }),
+    });
+
+    const service = createService();
+    const result = await service.reconcile('dte-1', 'store-1');
+
+    expect(result.status).toBe('EMITIDO');
+    expect(result.FOLIO).toBe(555);
+    expect(mockFinancialMovementsService.recordDte).toHaveBeenCalled();
+  });
+
+  it('reconciles PENDIENTE to ERROR when Openfactura no longer has the token', async () => {
+    manager = createMockManager({
+      existingDocument: {
+        dteDocumentID: 'dte-1',
+        token: 'real-token',
+        folio: 100,
+        status: DteDocumentStatus.PENDIENTE,
+        payloadRaw: {},
+        payloadNormalized: {
+          items: [{ variationID: 'var-1', QtyItem: 2 }],
+        },
+      },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 404,
+      headers: { get: () => 'application/json' },
+      text: async () => '{}',
+    });
+
+    const service = createService();
+    await expect(service.reconcile('dte-1', 'store-1')).rejects.toBeInstanceOf(
+      BadGatewayException,
+    );
+
+    const savedDocument = findSavedDocument(DteDocumentStatus.ERROR);
+    expect(savedDocument.status).toBe('ERROR');
+    expect(savedDocument.errorDetail).toContain('estado 404');
     expect(mockFinancialMovementsService.recordDte).not.toHaveBeenCalled();
-    expect(manager.save).not.toHaveBeenCalled();
+    expect(
+      manager.save.mock.calls.some(
+        ([entity]) => entity?.reason === 'ADJUSTMENT' && entity?.delta === 2,
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects reconcile when the document has no real Openfactura token', async () => {
+    manager = createMockManager({
+      existingDocument: {
+        dteDocumentID: 'dte-1',
+        token: 'local-abc',
+        folio: 100,
+        status: DteDocumentStatus.PENDIENTE,
+        payloadRaw: {},
+      },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    await expect(service.reconcile('dte-1', 'store-1')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

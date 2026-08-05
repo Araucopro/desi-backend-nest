@@ -1,27 +1,55 @@
-import { Body, Controller, Headers, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Headers,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBody,
   ApiHeader,
   ApiOperation,
+  ApiParam,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { Public } from '../auth/decorators/public.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { GetStoreId } from '../common/decorators/get-store-id.decorator';
+import { StoreContextGuard } from '../common/guards/store-context.guard';
+import { UserRole } from '../users/entities/user.entity';
 import { CreateDteDocumentDto } from './dto/create-dte-document.dto';
 import { DteDocumentResponseDto } from './dto/dte-document-response.dto';
 import { DteService } from './dte.service';
 
 @ApiTags('DTE')
 @Controller('v2/dte')
+@UseGuards(StoreContextGuard)
 export class DteController {
   constructor(private readonly dteService: DteService) {}
 
-  @Public()
   @Post('document')
+  @Roles(
+    UserRole.ADMIN,
+    UserRole.STORE_MANAGER,
+    UserRole.CONSIGNADO,
+    UserRole.TERCERO,
+  )
   @ApiOperation({
     summary: 'Crear documento DTE compatible con v2_dte_document',
     description:
-      'Recibe el payload del facturador, lo normaliza al modelo interno y persiste el documento local junto con la OC asociada cuando corresponde.',
+      'Recibe el payload del POS/frontend autenticado, lo normaliza al modelo interno y persiste el documento local junto con la OC asociada cuando corresponde. Requiere sesión de tenant y tienda activa.',
+  })
+  @ApiHeader({
+    name: 'X-Tenant-ID',
+    required: true,
+    description: 'Tenant de la sesión autenticada',
+  })
+  @ApiHeader({
+    name: 'X-Store-ID',
+    required: true,
+    description: 'Tienda activa desde la que se emite el documento',
   })
   @ApiHeader({
     name: 'Idempotency-Key',
@@ -31,9 +59,40 @@ export class DteController {
   @ApiBody({ type: CreateDteDocumentDto })
   @ApiResponse({ status: 201, type: DteDocumentResponseDto })
   create(
+    @GetStoreId() storeID: string,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() dto: CreateDteDocumentDto,
   ) {
-    return this.dteService.create(idempotencyKey, dto);
+    return this.dteService.create(storeID, idempotencyKey, dto);
+  }
+
+  @Post(':dteDocumentID/reconcile')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Reconciliar un documento DTE pendiente contra Openfactura',
+    description:
+      'Consulta el TOKEN del documento en Openfactura y transiciona PENDIENTE a EMITIDO (con ledger) o a ERROR (revirtiendo la reserva de stock).',
+  })
+  @ApiHeader({
+    name: 'X-Tenant-ID',
+    required: true,
+    description: 'Tenant de la sesión autenticada',
+  })
+  @ApiHeader({
+    name: 'X-Store-ID',
+    required: true,
+    description: 'Tienda a la que pertenece el documento',
+  })
+  @ApiParam({
+    name: 'dteDocumentID',
+    required: true,
+    description: 'UUID del documento DTE',
+  })
+  @ApiResponse({ status: 200, type: DteDocumentResponseDto })
+  reconcile(
+    @Param('dteDocumentID', ParseUUIDPipe) dteDocumentID: string,
+    @GetStoreId() storeID: string,
+  ) {
+    return this.dteService.reconcile(dteDocumentID, storeID);
   }
 }
