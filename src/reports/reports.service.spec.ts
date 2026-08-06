@@ -10,6 +10,9 @@ type BuilderState = {
 
 function createRepositoryMock(
   rowsByAlias: Record<string, Array<Record<string, unknown>>>,
+  options?: {
+    rawOne?: Record<string, Record<string, unknown>>;
+  },
 ) {
   const builders: BuilderState[] = [];
 
@@ -54,7 +57,8 @@ function createRepositoryMock(
           return this;
         },
         getRawMany: async () => rowsByAlias[alias] ?? [],
-        getRawOne: async () => ({ count: '0', total: '0' }),
+        getRawOne: async () =>
+          options?.rawOne?.[alias] ?? { count: '0', total: '0' },
         leftJoinAndSelect() {
           return this;
         },
@@ -84,6 +88,10 @@ function movementRow(overrides: Record<string, unknown>) {
     taxTotal: '0',
     ...overrides,
   };
+}
+
+function createSaleRepoMock(rows: Array<Record<string, unknown>> = []) {
+  return createRepositoryMock({ sale: rows });
 }
 
 describe('ReportsService', () => {
@@ -148,6 +156,7 @@ describe('ReportsService', () => {
     const service = new ReportsService(
       documentsRepo as any,
       movementsRepo as any,
+      createSaleRepoMock() as any,
     );
 
     const result = await service.getIncomeStatement({ year: 2026 });
@@ -215,6 +224,7 @@ describe('ReportsService', () => {
     const service = new ReportsService(
       documentsRepo as any,
       movementsRepo as any,
+      createSaleRepoMock() as any,
     );
     const result = await service.getIncomeStatement({ year: 2026 });
 
@@ -241,6 +251,7 @@ describe('ReportsService', () => {
     const service = new ReportsService(
       documentsRepo as any,
       movementsRepo as any,
+      createSaleRepoMock() as any,
     );
     const result = await service.getIncomeStatement({ year: 2026 });
 
@@ -265,6 +276,7 @@ describe('ReportsService', () => {
     const service = new ReportsService(
       documentsRepo as any,
       movementsRepo as any,
+      createSaleRepoMock() as any,
     );
     const result = await service.getIncomeStatement({ year: 2026 });
 
@@ -302,6 +314,7 @@ describe('ReportsService', () => {
     const service = new ReportsService(
       documentsRepo as any,
       movementsRepo as any,
+      createSaleRepoMock() as any,
     );
     const result = await service.getIncomeStatement({ year: 2026 });
 
@@ -315,6 +328,7 @@ describe('ReportsService', () => {
     const service = new ReportsService(
       documentsRepo as any,
       movementsRepo as any,
+      createSaleRepoMock() as any,
     );
 
     await service.getIncomeStatement({
@@ -335,6 +349,7 @@ describe('ReportsService', () => {
     const service = new ReportsService(
       documentsRepo as any,
       movementsRepo as any,
+      createSaleRepoMock() as any,
     );
 
     await service.getIncomeStatement({ year: 2026 });
@@ -362,10 +377,59 @@ describe('ReportsService', () => {
     const service = new ReportsService(
       documentsRepo as any,
       movementsRepo as any,
+      createSaleRepoMock() as any,
     );
 
     const result = await service.getIncomeStatement({});
 
     expect(result.year).toBe(2026);
+  });
+
+  it('merges notas de venta into the sales report without double counting', async () => {
+    const documentsRepo = createRepositoryMock(
+      {
+        document: [{ key: 'Efectivo', count: '1', total: '1000' }],
+      },
+      {
+        rawOne: {
+          document: { count: '1', total: '1000' },
+        },
+      },
+    );
+    const movementsRepo = createRepositoryMock({ movement: [] });
+    const saleRepo = createRepositoryMock(
+      {
+        sale: [
+          { key: 'Efectivo', count: '2', total: '2500' },
+          { key: 'EMITIDA', count: '2', total: '2500' },
+        ],
+      },
+      {
+        rawOne: {
+          sale: { count: '2', total: '2500' },
+        },
+      },
+    );
+
+    const service = new ReportsService(
+      documentsRepo as any,
+      movementsRepo as any,
+      saleRepo as any,
+    );
+
+    const result = await service.getSalesReport({});
+
+    expect(result.groupedByPaymentType).toEqual([
+      { key: 'Efectivo', count: 3, total: 3500 },
+      { key: 'EMITIDA', count: 2, total: 2500 },
+    ]);
+    expect(result.groupedByStatus).toEqual([
+      { key: 'Efectivo', count: 3, total: 3500 },
+      { key: 'EMITIDA', count: 2, total: 2500 },
+    ]);
+    expect(result.periodSummary.today).toEqual({ count: 3, total: 3500 });
+    expect(result.periodSummary.yesterday).toEqual({ count: 3, total: 3500 });
+    expect(result.periodSummary.month).toEqual({ count: 3, total: 3500 });
+    expect(result.meta).toEqual({ page: 1, limit: 50, total: 0 });
   });
 });

@@ -26,6 +26,7 @@ import { MultitenantModule } from './multitenant/multitenant.module';
 import { TenantContextInterceptor } from './multitenant/tenant-context.interceptor';
 import { SiiCodesModule } from './sii-codes/sii-codes.module';
 import { FinancialMovementsModule } from './financial-movements/financial-movements.module';
+import { SalesModule } from './sales/sales.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { FinancialMovementsModule } from './financial-movements/financial-moveme
     MultitenantModule,
     FinancialMovementsModule,
     SiiCodesModule,
+    SalesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },

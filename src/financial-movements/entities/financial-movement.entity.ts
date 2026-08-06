@@ -29,6 +29,7 @@ export enum FinancialMovementSourceType {
   DTE_DOCUMENT = 'DTE_DOCUMENT',
   PURCHASE_ORDER = 'PURCHASE_ORDER',
   EXPENSE = 'EXPENSE',
+  SALE_NOTE = 'SALE_NOTE',
 }
 
 @Entity({ name: 'FinancialMovement' })

@@ -198,4 +198,50 @@ describe('FinancialMovementsService', () => {
       sourceID: 'expense-1',
     });
   });
+
+  it('records VENTA and COSTO_VENTA for a nota de venta', async () => {
+    const sale = {
+      saleID: 'sale-1',
+      tenantID: 'tenant-1',
+      storeID: 'store-1',
+      issueDate: new Date('2026-08-06'),
+      netTotal: 840.34,
+      taxTotal: 159.66,
+      cogsTotal: 400,
+    };
+
+    await service.recordSaleNote(manager as any, sale as any);
+
+    expect(manager.delete).toHaveBeenCalledWith(FinancialMovement, {
+      sourceType: FinancialMovementSourceType.SALE_NOTE,
+      sourceID: 'sale-1',
+    });
+    expect(manager.save).toHaveBeenCalledWith([
+      expect.objectContaining({
+        direction: FinancialMovementDirection.INGRESO,
+        category: FinancialMovementCategory.VENTA,
+        amount: 840.34,
+        taxAmount: 159.66,
+        sourceType: FinancialMovementSourceType.SALE_NOTE,
+        sourceID: 'sale-1',
+      }),
+      expect.objectContaining({
+        direction: FinancialMovementDirection.EGRESO,
+        category: FinancialMovementCategory.COSTO_VENTA,
+        amount: 400,
+        taxAmount: 0,
+        sourceType: FinancialMovementSourceType.SALE_NOTE,
+        sourceID: 'sale-1',
+      }),
+    ]);
+  });
+
+  it('removes all movements of a nota de venta', async () => {
+    await service.removeSaleNote(manager as any, 'sale-1');
+
+    expect(manager.delete).toHaveBeenCalledWith(FinancialMovement, {
+      sourceType: FinancialMovementSourceType.SALE_NOTE,
+      sourceID: 'sale-1',
+    });
+  });
 });

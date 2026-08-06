@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DteController } from './dte.controller';
 import { DteService } from './dte.service';
+import { DteMapperService } from './dte-mapper.service';
 import { DteDocument } from './entities/dte-document.entity';
 import { Store } from '../stores/entities/store.entity';
 import { Product } from '../products/entities/product.entity';
@@ -31,6 +32,7 @@ import { FinancialMovementsModule } from '../financial-movements/financial-movem
     ]),
   ],
   controllers: [DteController],
-  providers: [DteService],
+  providers: [DteService, DteMapperService],
+  exports: [DteService, DteMapperService],
 })
 export class DteModule {}

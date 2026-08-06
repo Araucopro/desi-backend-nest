@@ -24,6 +24,7 @@ import {
 } from './dto/income-statement.dto';
 import { ReportsSaleFilterDto } from './dto/report-salesFilter.dto';
 import { TenantContextService } from '../multitenant/tenant-context.service';
+import { Sale, SaleStatus, SaleType } from '../sales/entities/sale.entity';
 
 type FinancialMovementRow = {
   month: string | number;
@@ -55,6 +56,28 @@ type DteDocumentListItem = {
   payloadNormalized: Record<string, unknown>;
 };
 
+type SaleListItem = {
+  saleID: string;
+  dteDocumentID: string | null;
+  saleType: SaleType;
+  token: string | null;
+  folio: number | null;
+  status: string;
+  paymentType: string;
+  total: number;
+  documentType: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+  store: {
+    storeID: string;
+    rut: string;
+    name: string;
+    location: string | null;
+  } | null;
+  items: Array<Record<string, unknown>>;
+  payloadNormalized: Record<string, unknown>;
+};
+
 @Injectable()
 export class ReportsService {
   constructor(
@@ -62,6 +85,8 @@ export class ReportsService {
     private readonly dteDocumentRepository: Repository<DteDocument>,
     @InjectRepository(FinancialMovement)
     private readonly financialMovementRepository: Repository<FinancialMovement>,
+    @InjectRepository(Sale)
+    private readonly saleRepository: Repository<Sale>,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
@@ -78,6 +103,9 @@ export class ReportsService {
         }
         if (target === DteDocument) {
           return this.dteDocumentRepository;
+        }
+        if (target === Sale) {
+          return this.saleRepository;
         }
         throw new Error('Repositorio no disponible fuera de contexto tenant');
       },
@@ -373,7 +401,7 @@ export class ReportsService {
     return { from: fromDate.toISOString(), to: toDate.toISOString() };
   }
 
-  private async aggregateCountAndTotal(
+  private async aggregateDteCountAndTotal(
     repo: Repository<DteDocument>,
     startIso: string,
     endIso: string,
@@ -390,6 +418,31 @@ export class ReportsService {
       .andWhere("document.status = 'EMITIDO'");
 
     if (storeId) qb.andWhere('document.storeID = :storeId', { storeId });
+
+    const raw = await qb.getRawOne();
+    return { count: Number(raw.count || 0), total: Number(raw.total || 0) };
+  }
+
+  private async aggregateSaleNoteCountAndTotal(
+    repo: Repository<Sale>,
+    startIso: string,
+    endIso: string,
+    storeId?: string,
+  ) {
+    const qb = repo
+      .createQueryBuilder('sale')
+      .select('COUNT(sale.saleID)', 'count')
+      .addSelect('COALESCE(SUM(sale.total),0)', 'total')
+      .where('sale.createdAt >= :start AND sale.createdAt < :end', {
+        start: startIso,
+        end: endIso,
+      })
+      .andWhere('sale.status = :status', { status: SaleStatus.EMITIDA })
+      .andWhere('sale.saleType = :saleType', {
+        saleType: SaleType.NOTA_VENTA,
+      });
+
+    if (storeId) qb.andWhere('sale.storeID = :storeId', { storeId });
 
     const raw = await qb.getRawOne();
     return { count: Number(raw.count || 0), total: Number(raw.total || 0) };
@@ -424,9 +477,92 @@ export class ReportsService {
     };
   }
 
+  private serializeSaleNote(sale: Sale): SaleListItem {
+    const payloadNormalized = {
+      saleType: sale.saleType,
+      status: sale.status,
+      subtotal: Number(sale.subtotal),
+      discount: Number(sale.discount),
+      netTotal: Number(sale.netTotal),
+      taxTotal: Number(sale.taxTotal),
+      cogsTotal: Number(sale.cogsTotal),
+      receiver: sale.receiver ?? null,
+      items: (sale.items ?? []).map((item) => ({
+        saleItemID: item.saleItemID,
+        storeProductID: item.storeProductID,
+        variationID: item.variationID,
+        productName: item.productName,
+        sku: item.sku,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        unitCost: Number(item.unitCost),
+        lineTotal: Number(item.lineTotal),
+      })),
+    };
+
+    return {
+      saleID: sale.saleID,
+      dteDocumentID: sale.dteDocumentID,
+      saleType: sale.saleType,
+      token: null,
+      folio: sale.folio,
+      status: sale.status,
+      paymentType: sale.paymentType,
+      total: Number(sale.total),
+      documentType: null,
+      createdAt: sale.createdAt,
+      updatedAt: sale.updatedAt,
+      store: sale.store
+        ? {
+            storeID: sale.store.storeID,
+            rut: sale.store.rut,
+            name: sale.store.name,
+            location: sale.store.location,
+          }
+        : null,
+      items: payloadNormalized.items,
+      payloadNormalized,
+    };
+  }
+
+  private mergeGrouped(
+    dteRows: Array<Record<string, unknown>>,
+    saleRows: Array<Record<string, unknown>>,
+  ) {
+    const map = new Map<
+      string,
+      { key: string; count: number; total: number }
+    >();
+
+    for (const row of dteRows) {
+      map.set(String(row.key), {
+        key: String(row.key),
+        count: Number(row.count),
+        total: Number(row.total),
+      });
+    }
+    for (const row of saleRows) {
+      const key = String(row.key);
+      const current = map.get(key);
+      if (current) {
+        current.count += Number(row.count);
+        current.total += Number(row.total);
+      } else {
+        map.set(key, {
+          key,
+          count: Number(row.count),
+          total: Number(row.total),
+        });
+      }
+    }
+
+    return Array.from(map.values());
+  }
+
   async getSalesReport(filter: ReportsSaleFilterDto) {
     return this.runInTransaction(async (manager) => {
       const dteRepo = manager.getRepository(DteDocument);
+      const saleRepo = manager.getRepository(Sale);
       const { storeId, page = 1, limit = 50 } = filter;
       const { from, to } = this.normalizeDates(filter.from, filter.to);
 
@@ -451,26 +587,54 @@ export class ReportsService {
           to,
         });
 
+      const salePaymentQuery = saleRepo
+        .createQueryBuilder('sale')
+        .select('sale.paymentType', 'key')
+        .addSelect('COUNT(sale.saleID)', 'count')
+        .addSelect('SUM(sale.total)', 'total')
+        .where('sale.createdAt >= :from AND sale.createdAt < :to', {
+          from,
+          to,
+        })
+        .andWhere('sale.status = :status', { status: SaleStatus.EMITIDA })
+        .andWhere('sale.saleType = :saleType', {
+          saleType: SaleType.NOTA_VENTA,
+        });
+
+      const saleStatusQuery = saleRepo
+        .createQueryBuilder('sale')
+        .select('sale.status', 'key')
+        .addSelect('COUNT(sale.saleID)', 'count')
+        .addSelect('SUM(sale.total)', 'total')
+        .where('sale.createdAt >= :from AND sale.createdAt < :to', {
+          from,
+          to,
+        })
+        .andWhere('sale.status = :status', { status: SaleStatus.EMITIDA })
+        .andWhere('sale.saleType = :saleType', {
+          saleType: SaleType.NOTA_VENTA,
+        });
+
       if (storeId) {
         paymentQuery.andWhere('document.storeID = :storeId', { storeId });
         statusQuery.andWhere('document.storeID = :storeId', { storeId });
+        salePaymentQuery.andWhere('sale.storeID = :storeId', { storeId });
+        saleStatusQuery.andWhere('sale.storeID = :storeId', { storeId });
       }
 
-      const [paymentRaw, statusRaw] = await Promise.all([
-        paymentQuery.groupBy('document.paymentType').getRawMany(),
-        statusQuery.groupBy('document.status').getRawMany(),
-      ]);
+      const [paymentRaw, statusRaw, salePaymentRaw, saleStatusRaw] =
+        await Promise.all([
+          paymentQuery.groupBy('document.paymentType').getRawMany(),
+          statusQuery.groupBy('document.status').getRawMany(),
+          salePaymentQuery.groupBy('sale.paymentType').getRawMany(),
+          saleStatusQuery.groupBy('sale.status').getRawMany(),
+        ]);
 
-      const groupedByPaymentType = paymentRaw.map((r) => ({
-        key: r.key,
-        count: Number(r.count),
-        total: Number(r.total),
-      }));
-      const groupedByStatus = statusRaw.map((r) => ({
-        key: r.key,
-        count: Number(r.count),
-        total: Number(r.total),
-      }));
+      const groupedByPaymentType = this.mergeGrouped(
+        paymentRaw,
+        salePaymentRaw,
+      );
+      const groupedByStatus = this.mergeGrouped(statusRaw, saleStatusRaw);
 
       const now = new Date();
       const todayStart = new Date(
@@ -511,25 +675,53 @@ export class ReportsService {
       );
 
       const [todaySummary, yesterdaySummary, monthSummary] = await Promise.all([
-        this.aggregateCountAndTotal(
+        this.aggregateDteCountAndTotal(
           dteRepo,
           todayStart.toISOString(),
           tomorrowStart.toISOString(),
           storeId,
         ),
-        this.aggregateCountAndTotal(
+        this.aggregateDteCountAndTotal(
           dteRepo,
           yesterdayStart.toISOString(),
           todayStart.toISOString(),
           storeId,
         ),
-        this.aggregateCountAndTotal(
+        this.aggregateDteCountAndTotal(
           dteRepo,
           monthStart.toISOString(),
           tomorrowStart.toISOString(),
           storeId,
         ),
       ]);
+      const [todayNotes, yesterdayNotes, monthNotes] = await Promise.all([
+        this.aggregateSaleNoteCountAndTotal(
+          saleRepo,
+          todayStart.toISOString(),
+          tomorrowStart.toISOString(),
+          storeId,
+        ),
+        this.aggregateSaleNoteCountAndTotal(
+          saleRepo,
+          yesterdayStart.toISOString(),
+          todayStart.toISOString(),
+          storeId,
+        ),
+        this.aggregateSaleNoteCountAndTotal(
+          saleRepo,
+          monthStart.toISOString(),
+          tomorrowStart.toISOString(),
+          storeId,
+        ),
+      ]);
+
+      const mergeSummary = (
+        dte: { count: number; total: number },
+        notes: { count: number; total: number },
+      ) => ({
+        count: dte.count + notes.count,
+        total: dte.total + notes.total,
+      });
 
       const listQuery = dteRepo
         .createQueryBuilder('document')
@@ -544,20 +736,51 @@ export class ReportsService {
 
       const [documents, total] = await listQuery
         .orderBy('document.createdAt', 'DESC')
-        .skip((page - 1) * limit)
-        .take(limit)
+        .skip(0)
+        .take(page * limit)
         .getManyAndCount();
+
+      const noteListQuery = saleRepo
+        .createQueryBuilder('sale')
+        .leftJoinAndSelect('sale.store', 'store')
+        .leftJoinAndSelect('sale.items', 'items')
+        .where('sale.createdAt >= :from AND sale.createdAt < :to', {
+          from,
+          to,
+        })
+        .andWhere('sale.status = :status', { status: SaleStatus.EMITIDA })
+        .andWhere('sale.saleType = :saleType', {
+          saleType: SaleType.NOTA_VENTA,
+        });
+
+      if (storeId)
+        noteListQuery.andWhere('sale.storeID = :storeId', { storeId });
+
+      const [notes, notesTotal] = await noteListQuery
+        .orderBy('sale.createdAt', 'DESC')
+        .skip(0)
+        .take(page * limit)
+        .getManyAndCount();
+
+      const combined = [
+        ...documents.map((document) => this.serializeDocument(document)),
+        ...notes.map((note) => this.serializeSaleNote(note)),
+      ]
+        .sort(
+          (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
+        )
+        .slice((page - 1) * limit, page * limit);
 
       return {
         groupedByPaymentType,
         groupedByStatus,
         periodSummary: {
-          today: todaySummary,
-          yesterday: yesterdaySummary,
-          month: monthSummary,
+          today: mergeSummary(todaySummary, todayNotes),
+          yesterday: mergeSummary(yesterdaySummary, yesterdayNotes),
+          month: mergeSummary(monthSummary, monthNotes),
         },
-        sales: documents.map((document) => this.serializeDocument(document)),
-        meta: { page, limit, total },
+        sales: combined,
+        meta: { page, limit, total: total + notesTotal },
       };
     });
   }

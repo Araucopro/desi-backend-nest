@@ -13,10 +13,6 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes, randomInt } from 'crypto';
 import { DataSource, EntityManager, ILike, Repository } from 'typeorm';
-import {
-  InventoryMovement,
-  InventoryMovementReason,
-} from '../inventory/entities/inventory-movement.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { Store } from '../stores/entities/store.entity';
 import { Product } from '../products/entities/product.entity';
@@ -34,6 +30,10 @@ import {
 } from './entities/dte-document.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
+import {
+  reserveStockAndSnapshotCosts,
+  revertReservedStock,
+} from '../inventory/inventory-stock.helper';
 
 const OPENFACTURA_TIMEOUT_MS = 15_000;
 const LOCAL_TOKEN_PREFIX = 'local-';
@@ -90,6 +90,13 @@ type DteCreateOutcome =
 type DteFinalizeOutcome =
   | { kind: 'success'; response: DteDocumentResponseDto }
   | { kind: 'error'; message: string; response: DteDocumentResponseDto };
+
+export type DteCreateOptions = {
+  /** Cuando es false, el stock ya salió (conversión de nota de venta). */
+  reserveStock?: boolean;
+  /** Venta asociada, para trazabilidad e idempotencia de conversión. */
+  saleID?: string;
+};
 
 @Injectable()
 export class DteService implements OnModuleInit, OnModuleDestroy {
@@ -417,9 +424,11 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     extraPayload?: OpenfacturaDocumentResponse,
   ): DteDocumentResponseDto {
     const base: DteDocumentResponseDto = {
+      dteDocumentID: document.dteDocumentID,
       TOKEN: document.token,
       FOLIO: document.folio,
       STATUS: document.status,
+      saleID: document.saleID,
     };
 
     if (extraPayload) {
@@ -486,100 +495,6 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       totals,
       items: normalizedItems,
     };
-  }
-
-  private async reserveStockAndSnapshotCosts(
-    manager: EntityManager,
-    storeID: string,
-    items: NormalizedDteItem[],
-    referenceID: string,
-  ): Promise<{ items: NormalizedDteItem[]; cogsTotal: number }> {
-    let cogsTotal = 0;
-
-    for (const item of items) {
-      const storeProduct = await manager.findOne(StoreProduct, {
-        where: {
-          store: { storeID },
-          variation: { variationID: item.variationID },
-        },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (!storeProduct) {
-        throw new BadRequestException(
-          `Stock insuficiente en tienda para VariationID: ${item.variationID}. Solicitado: ${item.QtyItem}, Disponible: 0`,
-        );
-      }
-
-      if (Number(storeProduct.stock) < item.QtyItem) {
-        throw new BadRequestException(
-          `Stock insuficiente en tienda para VariationID: ${item.variationID}. Solicitado: ${item.QtyItem}, Disponible: ${storeProduct.stock}`,
-        );
-      }
-
-      const costPrice = this.toMoney(Number(storeProduct.priceCost ?? 0));
-      const costTotal = this.toMoney(costPrice * item.QtyItem);
-      item.costPrice = costPrice;
-      item.costTotal = costTotal;
-      cogsTotal = this.toMoney(cogsTotal + costTotal);
-
-      const tenantID =
-        this.tenantContext?.getTenantId() ?? storeProduct.tenantID;
-
-      storeProduct.stock -= item.QtyItem;
-      await manager.save(storeProduct);
-      await manager.save(
-        manager.create(InventoryMovement, {
-          tenantID,
-          store: { storeID },
-          variation: { variationID: item.variationID },
-          delta: -item.QtyItem,
-          reason: InventoryMovementReason.SALE,
-          referenceID,
-        }),
-      );
-    }
-
-    return { items, cogsTotal };
-  }
-
-  private async revertReservedStock(
-    manager: EntityManager,
-    document: DteDocument,
-  ): Promise<void> {
-    const items = this.readNormalizedItems(document);
-
-    for (const item of items) {
-      const storeProduct = await manager.findOne(StoreProduct, {
-        where: {
-          store: { storeID: document.storeID },
-          variation: { variationID: item.variationID },
-        },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (!storeProduct) {
-        this.logger.error(
-          `No se pudo revertir stock del DTE ${document.dteDocumentID}: StoreProduct no encontrado para variationID=${item.variationID}`,
-        );
-        continue;
-      }
-
-      const tenantID = this.tenantContext?.getTenantId() ?? document.tenantID;
-
-      storeProduct.stock += Number(item.QtyItem);
-      await manager.save(storeProduct);
-      await manager.save(
-        manager.create(InventoryMovement, {
-          tenantID,
-          store: { storeID: document.storeID },
-          variation: { variationID: item.variationID },
-          delta: Number(item.QtyItem),
-          reason: InventoryMovementReason.ADJUSTMENT,
-          referenceID: document.dteDocumentID,
-        }),
-      );
-    }
   }
 
   private applyFinalStatusToNormalized(
@@ -756,7 +671,9 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     idempotencyKey: string | undefined,
     dto: CreateDteDocumentDto,
     apikey: string,
+    options?: DteCreateOptions,
   ): Promise<DteCreateOutcome> {
+    const reserveStock = options?.reserveStock !== false;
     const existing = await this.findExistingDocument(
       manager,
       idempotencyKey,
@@ -803,6 +720,8 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       apikey: this.maskApikey(apikey),
       idempotencyKey: idempotencyKeyToUse,
       purchaseOrderID: dto.purchaseOrderID ?? null,
+      saleID: options?.saleID ?? null,
+      stockReserved: reserveStock,
       token,
       folio,
       store: { storeID: store.storeID },
@@ -875,36 +794,39 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const reserved = await this.reserveStockAndSnapshotCosts(
-      manager,
-      store.storeID,
-      normalizedItems,
-      document.dteDocumentID,
-    );
-    const currentItems = this.readNormalizedItems(document);
-    const costsChanged =
-      reserved.cogsTotal !== document.cogsTotal ||
-      reserved.items.some((item, index) => {
-        const current = currentItems[index];
-        return (
-          !current ||
-          current.costPrice !== item.costPrice ||
-          current.costTotal !== item.costTotal
-        );
-      });
+    if (reserveStock) {
+      const reservedCogsTotal = await reserveStockAndSnapshotCosts(
+        manager,
+        store.storeID,
+        normalizedItems,
+        document.dteDocumentID,
+        this.tenantContext?.getTenantId(),
+      );
+      const currentItems = this.readNormalizedItems(document);
+      const costsChanged =
+        reservedCogsTotal !== document.cogsTotal ||
+        normalizedItems.some((item, index) => {
+          const current = currentItems[index];
+          return (
+            !current ||
+            current.costPrice !== item.costPrice ||
+            current.costTotal !== item.costTotal
+          );
+        });
 
-    if (costsChanged) {
-      document.cogsTotal = reserved.cogsTotal;
-      document.payloadNormalized = {
-        ...document.payloadNormalized,
-        items: reserved.items,
-        cogsTotal: reserved.cogsTotal,
-        totals: {
-          ...(document.payloadNormalized as { totals?: object })?.totals,
-          cogsTotal: reserved.cogsTotal,
-        },
-      };
-      document = await manager.save(document);
+      if (costsChanged) {
+        document.cogsTotal = reservedCogsTotal;
+        document.payloadNormalized = {
+          ...document.payloadNormalized,
+          items: normalizedItems,
+          cogsTotal: reservedCogsTotal,
+          totals: {
+            ...(document.payloadNormalized as { totals?: object })?.totals,
+            cogsTotal: reservedCogsTotal,
+          },
+        };
+        document = await manager.save(document);
+      }
     }
 
     this.logger.log(
@@ -996,7 +918,20 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     );
 
     const saved = await manager.save(document);
-    await this.revertReservedStock(manager, saved);
+    if (saved.stockReserved !== false) {
+      await revertReservedStock(
+        manager,
+        saved.storeID,
+        this.readNormalizedItems(saved),
+        saved.dteDocumentID,
+        this.tenantContext?.getTenantId() ?? saved.tenantID,
+        (variationID) => {
+          this.logger.error(
+            `No se pudo revertir stock del DTE ${saved.dteDocumentID}: StoreProduct no encontrado para variationID=${variationID}`,
+          );
+        },
+      );
+    }
 
     this.logger.error(
       `Documento DTE en ERROR | dteDocumentID=${saved.dteDocumentID} | detail=${document.errorDetail}`,
@@ -1012,6 +947,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     storeID: string,
     idempotencyKey: string | undefined,
     dto: CreateDteDocumentDto,
+    options?: DteCreateOptions,
   ): Promise<DteDocumentResponseDto> {
     const apikey = this.requireApikey();
     this.logger.log(
@@ -1023,7 +959,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     );
 
     const outcome = await this.runInTransaction((manager) =>
-      this.prepare(manager, storeID, idempotencyKey, dto, apikey),
+      this.prepare(manager, storeID, idempotencyKey, dto, apikey, options),
     );
 
     if (outcome.kind === 'existing') return outcome.response;

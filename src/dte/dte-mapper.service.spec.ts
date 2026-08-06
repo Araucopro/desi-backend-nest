@@ -1,0 +1,100 @@
+import { BadRequestException } from '@nestjs/common';
+import { DteMapperService } from './dte-mapper.service';
+import { SalePaymentType, SaleType } from '../sales/entities/sale.entity';
+import { StoreType } from '../stores/entities/store.entity';
+
+const store = {
+  storeID: 'store-1',
+  tenantID: 'tenant-1',
+  rut: '76123456-7',
+  name: 'Tienda Demo',
+  businessName: 'Tienda Demo SpA',
+  address: 'Av. Siempre Viva 123',
+  city: 'Santiago',
+  phone: '+56 2 1234 5678',
+  giro: 'VENTA AL POR MENOR',
+  acteco: '479100',
+  type: StoreType.FRANCHISE,
+  location: 'Santiago',
+} as any;
+
+function saleInput(overrides: Record<string, unknown> = {}) {
+  return {
+    saleType: SaleType.NOTA_VENTA,
+    paymentType: SalePaymentType.CASH,
+    issueDate: new Date('2026-08-06T12:00:00.000Z'),
+    receiver: { rut: '66666666-6', name: 'Cliente Ejemplo' },
+    items: [
+      {
+        productName: 'Producto A',
+        sku: 'SKU-1',
+        quantity: 2,
+        unitPrice: 1000,
+        lineTotal: 2000,
+      },
+    ],
+    total: 2000,
+    netTotal: 1680.67,
+    taxTotal: 319.33,
+    store,
+    ...overrides,
+  };
+}
+
+describe('DteMapperService', () => {
+  const service = new DteMapperService();
+
+  it('maps a boleta with generic receptor and IVA-included item prices', () => {
+    const dto = service.mapSaleToDte(saleInput(), { documentType: 39 });
+
+    expect(dto.dte.Encabezado.IdDoc.TipoDTE).toBe(39);
+    expect(dto.dte.Encabezado.Receptor).toEqual({
+      RUTRecep: '66666666-6',
+      RznSocRecep: 'Anonimo',
+    });
+    expect(dto.dte.Detalle[0]).toMatchObject({
+      QtyItem: 2,
+      PrcItem: 1000,
+      MontoItem: 2000,
+    });
+    expect(dto.dte.Encabezado.Totales).toMatchObject({
+      MntNeto: 1681,
+      IVA: 319,
+      MntTotal: 2000,
+    });
+    expect(Number.isInteger(dto.dte.Encabezado.Totales!.MntNeto)).toBe(true);
+    expect(Number.isInteger(dto.dte.Encabezado.Totales!.IVA)).toBe(true);
+    expect(Number.isInteger(dto.dte.Encabezado.Totales!.MntTotal)).toBe(true);
+    expect(Number.isInteger(dto.dte.Detalle[0].MontoItem)).toBe(true);
+    expect(Number.isInteger(dto.dte.Detalle[0].PrcItem)).toBe(true);
+  });
+
+  it('maps a factura with validated receptor and net prices', () => {
+    const dto = service.mapSaleToDte(saleInput(), { documentType: 33 });
+
+    expect(dto.dte.Encabezado.IdDoc.TipoDTE).toBe(33);
+    expect(dto.dte.Encabezado.Receptor).toMatchObject({
+      RUTRecep: '66666666-6',
+      RznSocRecep: 'Cliente Ejemplo',
+    });
+    expect(dto.dte.Detalle[0]).toMatchObject({
+      PrcItem: 840,
+      MontoItem: 1681,
+    });
+    expect(dto.dte.Encabezado.Totales).toMatchObject({
+      MntNeto: 1681,
+      IVA: 319,
+      MntTotal: 2000,
+    });
+    expect(Number.isInteger(dto.dte.Encabezado.Totales!.MntNeto)).toBe(true);
+    expect(Number.isInteger(dto.dte.Encabezado.Totales!.IVA)).toBe(true);
+    expect(Number.isInteger(dto.dte.Detalle[0].MontoItem)).toBe(true);
+    expect(Number.isInteger(dto.dte.Detalle[0].PrcItem)).toBe(true);
+  });
+
+  it('rejects a factura without receiver', () => {
+    expect(() =>
+      service.mapSaleToDte(saleInput({ receiver: null }), { documentType: 33 }),
+    ).toThrow(BadRequestException);
+  });
+});

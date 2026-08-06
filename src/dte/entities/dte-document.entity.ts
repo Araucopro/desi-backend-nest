@@ -58,6 +58,13 @@ export class DteDocument {
   @Column({ type: 'uuid', nullable: true })
   purchaseOrderID!: string | null;
 
+  @Index({ unique: true })
+  @Column({ type: 'uuid', nullable: true })
+  saleID!: string | null;
+
+  @Column({ type: 'boolean', default: true })
+  stockReserved!: boolean;
+
   @OneToOne(() => PurchaseOrder, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'purchaseOrderID' })
   purchaseOrder!: PurchaseOrder | null;

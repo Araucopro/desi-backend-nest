@@ -13,6 +13,16 @@ import {
   FinancialMovementSourceType,
 } from './entities/financial-movement.entity';
 
+export type SaleNoteLedgerInput = {
+  saleID: string;
+  tenantID: string;
+  storeID: string;
+  issueDate: Date;
+  netTotal: number;
+  taxTotal: number;
+  cogsTotal: number;
+};
+
 /**
  * Proyección derivada del ledger financiero.
  *
@@ -174,5 +184,57 @@ export class FinancialMovementsService {
       case ExpenseType.FINANCIAL:
         return FinancialMovementCategory.GASTO_FINANCIERO;
     }
+  }
+
+  /**
+   * Ledger de nota de venta interna: ingreso por venta (neto + IVA) y
+   * egreso por costo de venta, ambos con sourceType SALE_NOTE.
+   */
+  async recordSaleNote(
+    manager: EntityManager,
+    sale: SaleNoteLedgerInput,
+  ): Promise<void> {
+    await this.removeForSource(
+      manager,
+      FinancialMovementSourceType.SALE_NOTE,
+      sale.saleID,
+    );
+
+    await manager.save([
+      manager.create(FinancialMovement, {
+        tenantID: sale.tenantID,
+        storeID: sale.storeID,
+        date: sale.issueDate,
+        direction: FinancialMovementDirection.INGRESO,
+        category: FinancialMovementCategory.VENTA,
+        amount: this.toMoney(Number(sale.netTotal)),
+        taxAmount: this.toMoney(Number(sale.taxTotal)),
+        taxCredit: false,
+        acceptedForTax: true,
+        sourceType: FinancialMovementSourceType.SALE_NOTE,
+        sourceID: sale.saleID,
+      }),
+      manager.create(FinancialMovement, {
+        tenantID: sale.tenantID,
+        storeID: sale.storeID,
+        date: sale.issueDate,
+        direction: FinancialMovementDirection.EGRESO,
+        category: FinancialMovementCategory.COSTO_VENTA,
+        amount: this.toMoney(Number(sale.cogsTotal)),
+        taxAmount: 0,
+        taxCredit: false,
+        acceptedForTax: true,
+        sourceType: FinancialMovementSourceType.SALE_NOTE,
+        sourceID: sale.saleID,
+      }),
+    ]);
+  }
+
+  async removeSaleNote(manager: EntityManager, saleID: string): Promise<void> {
+    await this.removeForSource(
+      manager,
+      FinancialMovementSourceType.SALE_NOTE,
+      saleID,
+    );
   }
 }

@@ -650,4 +650,62 @@ describe('DteService', () => {
     );
     expect(global.fetch).not.toHaveBeenCalled();
   });
+
+  it('supports reserveStock=false for nota de venta conversion without deducting stock', async () => {
+    const service = createService();
+
+    const result = await service.create(
+      'store-1',
+      'sale-1',
+      createDteDto() as any,
+      { reserveStock: false, saleID: 'sale-1' },
+    );
+
+    expect(result.FOLIO).toBe(200);
+    expect(result.saleID).toBe('sale-1');
+    expect(findSavedDocument(DteDocumentStatus.EMITIDO)).toMatchObject({
+      saleID: 'sale-1',
+      stockReserved: false,
+    });
+    expect(
+      manager.save.mock.calls.some(([entity]) => {
+        const saved = entity as { reason?: unknown };
+        return saved?.reason === 'SALE';
+      }),
+    ).toBe(false);
+    expect(
+      manager.save.mock.calls.some(([entity]) => {
+        const saved = entity as { stock?: unknown };
+        return typeof saved?.stock === 'number' && saved.stock < 10;
+      }),
+    ).toBe(false);
+  });
+
+  it('does not revert stock when a reserveStock=false DTE ends in ERROR', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      text: async () =>
+        JSON.stringify({ TOKEN: 'token-1', FOLIO: 200, status: 'ERROR' }),
+    });
+
+    const service = createService();
+    await expect(
+      service.create('store-1', 'sale-1', createDteDto() as any, {
+        reserveStock: false,
+        saleID: 'sale-1',
+      }),
+    ).rejects.toBeInstanceOf(BadGatewayException);
+
+    expect(findSavedDocument(DteDocumentStatus.ERROR)).toMatchObject({
+      saleID: 'sale-1',
+      stockReserved: false,
+    });
+    expect(
+      manager.save.mock.calls.some(([entity]) => {
+        const saved = entity as { reason?: unknown };
+        return saved?.reason === 'ADJUSTMENT';
+      }),
+    ).toBe(false);
+  });
 });

@@ -2,6 +2,12 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class DteDocumentResponseDto {
   @ApiProperty({
+    description: 'ID interno del documento DTE',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  })
+  dteDocumentID!: string;
+
+  @ApiProperty({
     description: 'Token del documento generado',
     example: 'b822a58da11856bb09423a0a6fba59f5e089bd738e01d3ea670c45d4686f66d6',
   })
@@ -33,6 +39,11 @@ export class DteDocumentResponseDto {
     description: 'Alertas o advertencias retornadas por el proveedor DTE',
   })
   WARNING?: unknown[];
+
+  @ApiPropertyOptional({
+    description: 'Venta asociada al documento (conversión nota de venta)',
+  })
+  saleID?: string | null;
 
   [key: string]: unknown;
 }
