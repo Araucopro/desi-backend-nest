@@ -9,10 +9,7 @@ import { IS_PUBLIC_KEY } from '../../auth/decorators/public.decorator';
 import { MASTER_ROUTE } from '../../auth/decorators/master.decorator';
 import { UserRole } from '../../users/entities/user.entity';
 import { UserStore } from '../../relations/userstores/entities/userstore.entity';
-import {
-  STORE_ID_HEADER,
-  TENANT_ID_HEADER,
-} from '../../multitenant/multitenant.constants';
+import { STORE_ID_HEADER } from '../../multitenant/multitenant.constants';
 import { TenantContextService } from '../../multitenant/tenant-context.service';
 
 @Injectable()
@@ -63,9 +60,7 @@ export class StoreContextGuard implements CanActivate {
     }
 
     const userId = payload.userId || payload.id;
-    const tenantId =
-      payload.tenantId ||
-      (request.headers[TENANT_ID_HEADER] as string | undefined);
+    const tenantId = payload.tenantId || payload.impersonatingTenantId;
 
     if (!tenantId) {
       throw new ForbiddenException('Tenant context is required');

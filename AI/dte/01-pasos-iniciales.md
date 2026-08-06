@@ -139,11 +139,9 @@ Mantener `POST /v2/dte/document` solo para compatibilidad con webhooks externos 
 1. POST /auth/login                → JWT (userId, tenantId, role) — sin storeID
 2. GET  /userstores/my-stores      → lista de tiendas asignadas al usuario
    Authorization: Bearer <token>
-   X-Tenant-ID: <tenantID>
 3. <usuario selecciona tienda en UI>
 4. Todas las peticiones operativas incluyen:
    Authorization: Bearer <token>
-   X-Tenant-ID: <tenantID>
    X-Store-ID:  <storeID-seleccionado>
 ```
 

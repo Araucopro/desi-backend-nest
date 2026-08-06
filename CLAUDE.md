@@ -121,7 +121,7 @@ Auth actual:
 - `GET /auth/check-status` con `AuthGuard`.
 - JWT payload Tenant: `{ id, email, role, tenantID }`.
 - JWT payload Master: `{ id, email, isMasterAdmin: true }`.
-- Header obligatorio para peticiones de tenant: `X-Tenant-ID` (debe coincidir con `tenantID` del JWT).
+- El `tenantID` se obtiene del JWT: `tenantId` en tokens tenant y `impersonatingTenantId` en tokens master con impersonación. No se usa el header `X-Tenant-ID`.
 - Decorators:
   - `@Public()`
   - `@Roles(...)`
@@ -129,7 +129,7 @@ Auth actual:
   - `@MasterRoute()`
 - Guards:
   - `AuthGuard`
-  - `TenantContextGuard`
+  - `TenantContextGuard` (valida `tenantId`/`impersonatingTenantId` del token y estado del tenant)
   - `MasterAuthGuard`
   - `RolesGuard`
 

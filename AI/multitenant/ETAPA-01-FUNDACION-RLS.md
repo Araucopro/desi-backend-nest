@@ -5,7 +5,7 @@ Rama: trabajo local de implementación
 
 ## Resultado
 
-Se incorporó el límite de seguridad por `tenantID` para las entidades de negocio, el catálogo `tenants`, usuarios MASTER y `audit_events`. El contexto se resuelve desde `X-Tenant-ID` y el JWT; ambos valores deben coincidir. Las operaciones transaccionales usan `SET LOCAL app.tenant_id` y PostgreSQL aplica políticas RLS con `FORCE ROW LEVEL SECURITY`.
+Se incorporó el límite de seguridad por `tenantID` para las entidades de negocio, el catálogo `tenants`, usuarios MASTER y `audit_events`. El contexto se resuelve desde el JWT (`tenantId` en tokens tenant, `impersonatingTenantId` en tokens master con impersonación). Las operaciones transaccionales usan `SET LOCAL app.tenant_id` y PostgreSQL aplica políticas RLS con `FORCE ROW LEVEL SECURITY`.
 
 ## Cambios principales
 
@@ -28,7 +28,7 @@ Usar `DATABASE_URL` o `PG*`, además de `JWT_SECRET`, `PG_RUNTIME_USER`, `PG_RUN
 1. Crear la base y ejecutar `pnpm install`.
 2. Ejecutar `pnpm exec typeorm migration:run -d dist/datasource/data-source.js` después de `pnpm build`, usando credenciales propietarias.
 3. Configurar la aplicación con el rol runtime y arrancar con `pnpm start:prod`.
-4. Crear/activar tenants mediante la superficie MASTER y enviar `X-Tenant-ID` en login y rutas tenant.
+4. Crear/activar tenants mediante la superficie MASTER. Las rutas tenant resuelven el tenant únicamente desde el JWT; ya no se envía `X-Tenant-ID`.
 
 La migración inicial crea el esquema de entidades como parte de una operación versionada para soportar la base nueva; el proceso de arranque no modifica el esquema.
 
@@ -41,7 +41,7 @@ No se ejecutaron pruebas de integración PostgreSQL en este entorno porque no se
 ## Resumen de cambios principales:
 
 - RLS multitenant con tenantID en entidades de negocio.
-- Contexto tenant vía X-Tenant-ID + JWT.
+- Contexto tenant vía JWT (`tenantId` / `impersonatingTenantId`).
 - SET LOCAL app.tenant_id dentro de transacciones.
 - Entidades Tenant, MasterUser y AuditEvent.
 - Guards MASTER y tenant, impersonación auditada.

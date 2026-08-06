@@ -43,6 +43,13 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('User not authenticated');
     }
 
+    // Los tokens master con impersonación activa operan como soporte de la
+    // plataforma dentro del tenant impersonado; su role (p.ej. SUPPORT) no es
+    // un UserRole de tenant, por lo que no debe evaluarse contra @Roles.
+    if (user.type === 'master' && user.impersonatingTenantId) {
+      return true;
+    }
+
     const hasRole = requiredRoles.some((role) => user.role === role);
 
     if (!hasRole) {

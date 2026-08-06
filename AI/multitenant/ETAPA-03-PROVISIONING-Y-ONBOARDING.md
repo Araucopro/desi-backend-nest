@@ -51,11 +51,11 @@ Se implementa una verificación multicapa:
 ```
 HTTP Request ──► TenantContextGuard ──► TenantContextInterceptor ──► TenantContextService.transaction()
                       │                         │                               │
-           Valida X-Tenant-ID + JWT   Resuelve AsyncLocalStorage         Ejecuta SET LOCAL app.tenant_id
+           Valida tenant del JWT      Resuelve AsyncLocalStorage         Ejecuta SET LOCAL app.tenant_id
            Lanza 401 si no coincide   Si no hay tenantID → Aborta        Si falla config → Exception
 ```
 
-1. **`TenantContextGuard`**: Valida que la cabecera `X-Tenant-ID` coincida con el claim `tenantID` del JWT. Si el tenant está `SUSPENDED` o `ARCHIVED`, rechaza con `403 Forbidden ('Tenant no activo')`.
+1. **`TenantContextGuard`**: Valida que el token tenga contexto tenant (`tenantId` o `impersonatingTenantId`) y que el tenant esté `ACTIVE`. Si el tenant está `SUSPENDED` o `ARCHIVED`, rechaza con `403 Forbidden ('Tenant no activo')`.
 2. **`TenantContextService`**: Valida que `tenantId` esté presente en el almacenamiento asíncrono (`AsyncLocalStorage`) antes de invocar la consulta DB. Si el contexto es nulo en una ruta protegida, aborta la transacción arrojando `UnauthorizedException('Contexto tenant no inicializado')`.
 
 ---
@@ -195,7 +195,7 @@ pnpm exec tsc --noEmit
 3. **Login Tenant Admin**:
    `POST /auth/login` con las credenciales creadas → Retorna token JWT de tenant.
 4. **Verificar aislamiento RLS**:
-   `GET /stores` con `X-Tenant-ID` → Retorna únicamente la Tienda Central provisionada.
+   `GET /stores` con token tenant → Retorna únicamente la Tienda Central provisionada.
 5. **Verificar Cuota Pesimista**:
    Intentar crear más de `maxStores` tiendas → Verifica que retorne `403 Forbidden` al alcanzar el límite.
 
@@ -221,4 +221,3 @@ pnpm exec tsc --noEmit
 - **Alertas de Cuota (Warning Thresholds)**: Emitir webhooks o alertas cuando un tenant alcance el 80% y 95% de sus límites de `maxStores` o `maxUsers`.
 - **Integración con Motor de Subscripciones y Billing**: Automatización del cambio de estado (`ACTIVE` -> `SUSPENDED`) integrado con la pasarela de pagos al vencer la suscripción.
 - **Disaster Recovery & Exportación de Datos por Tenant**: Herramienta de backup/exportación aislada por tenant en formato JSON/SQL dump filtrado por `tenantID`.
-

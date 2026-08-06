@@ -9,7 +9,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { IS_PUBLIC_KEY } from '../auth/decorators/public.decorator';
 import { MASTER_ROUTE } from '../auth/decorators/master.decorator';
-import { TENANT_ID_HEADER } from './multitenant.constants';
 import { Tenant, TenantStatus } from './entities/tenant.entity';
 
 @Injectable()
@@ -36,39 +35,32 @@ export class TenantContextGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
     const payload = request.user;
-    const header = request.headers[TENANT_ID_HEADER] as string | undefined;
+    const tenantId = payload?.tenantId ?? payload?.impersonatingTenantId;
 
-    if (!payload?.tenantId && !header) {
+    if (!tenantId) {
       throw new ForbiddenException('Tenant context is required');
     }
 
-    if (payload?.tenantId && header && payload.tenantId !== header) {
-      throw new ForbiddenException('Tenant mismatch');
+    const tenant = await this.tenantsRepo.findOne({
+      where: { tenantID: tenantId },
+    });
+    if (!tenant) {
+      throw new ForbiddenException('Tenant not found');
     }
-
-    const tenantId = payload?.tenantId || header;
-    if (tenantId) {
-      const tenant = await this.tenantsRepo.findOne({
-        where: { tenantID: tenantId },
-      });
-      if (!tenant) {
-        throw new ForbiddenException('Tenant not found');
-      }
-      if (tenant.status !== TenantStatus.ACTIVE) {
-        throw new ForbiddenException(
-          `Tenant access denied: tenant status is ${tenant.status}`,
-        );
-      }
-      if (
-        tenant.subscriptionExpiresAt &&
-        new Date(tenant.subscriptionExpiresAt).getTime() < Date.now()
-      ) {
-        tenant.status = TenantStatus.SUSPENDED;
-        await this.tenantsRepo.save(tenant);
-        throw new ForbiddenException(
-          'Tenant subscription has expired. Account suspended.',
-        );
-      }
+    if (tenant.status !== TenantStatus.ACTIVE) {
+      throw new ForbiddenException(
+        `Tenant access denied: tenant status is ${tenant.status}`,
+      );
+    }
+    if (
+      tenant.subscriptionExpiresAt &&
+      new Date(tenant.subscriptionExpiresAt).getTime() < Date.now()
+    ) {
+      tenant.status = TenantStatus.SUSPENDED;
+      await this.tenantsRepo.save(tenant);
+      throw new ForbiddenException(
+        'Tenant subscription has expired. Account suspended.',
+      );
     }
 
     return true;

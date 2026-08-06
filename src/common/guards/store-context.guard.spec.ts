@@ -39,8 +39,12 @@ describe('StoreContextGuard', () => {
   it('validates the user-store assignment inside a tenant transaction', async () => {
     const { guard, manager, tenantContext } = createGuard();
     const context = createContext({
-      headers: { 'x-store-id': 'store-1', 'x-tenant-id': 'tenant-1' },
-      user: { userId: 'user-1', role: UserRole.STORE_MANAGER },
+      headers: { 'x-store-id': 'store-1' },
+      user: {
+        userId: 'user-1',
+        tenantId: 'tenant-1',
+        role: UserRole.STORE_MANAGER,
+      },
     });
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
@@ -60,8 +64,12 @@ describe('StoreContextGuard', () => {
   it('rejects when the user is not assigned to the store', async () => {
     const { guard } = createGuard(null);
     const context = createContext({
-      headers: { 'x-store-id': 'store-1', 'x-tenant-id': 'tenant-1' },
-      user: { userId: 'user-1', role: UserRole.STORE_MANAGER },
+      headers: { 'x-store-id': 'store-1' },
+      user: {
+        userId: 'user-1',
+        tenantId: 'tenant-1',
+        role: UserRole.STORE_MANAGER,
+      },
     });
 
     await expect(guard.canActivate(context)).rejects.toBeInstanceOf(
@@ -72,8 +80,8 @@ describe('StoreContextGuard', () => {
   it('lets tenant admins through without querying user_stores', async () => {
     const { guard, manager, tenantContext } = createGuard();
     const context = createContext({
-      headers: { 'x-store-id': 'store-1', 'x-tenant-id': 'tenant-1' },
-      user: { userId: 'user-1', role: UserRole.ADMIN },
+      headers: { 'x-store-id': 'store-1' },
+      user: { userId: 'user-1', tenantId: 'tenant-1', role: UserRole.ADMIN },
     });
 
     await expect(guard.canActivate(context)).resolves.toBe(true);

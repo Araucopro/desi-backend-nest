@@ -253,11 +253,10 @@ El token master debe tener un tipo distinto y jamás ser aceptado por endpoints 
 
 Fuentes posibles para resolver tenant:
 
-- header `X-Tenant-Id`: útil para clientes internos, siempre validado contra el token;
-- claim JWT: necesario para evitar ambigüedad en sesión;
+- claim JWT: única fuente (`tenantId` en tokens tenant, `impersonatingTenantId` en tokens master con impersonación);
 - credencial/API key: debe mapearse a un solo tenant y opcionalmente tienda.
 
-Si existen varias fuentes, deben coincidir. Un conflicto debe producir `403`, nunca escoger silenciosamente una de ellas.
+El header `X-Tenant-ID` ya no se usa: el contexto tenant siempre se resuelve desde el token.
 
 ---
 

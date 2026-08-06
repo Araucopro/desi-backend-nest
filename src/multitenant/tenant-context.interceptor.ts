@@ -8,7 +8,6 @@ import {
 import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
 import { TenantContextService } from './tenant-context.service';
-import { TENANT_ID_HEADER } from './multitenant.constants';
 import { IS_PUBLIC_KEY } from '../auth/decorators/public.decorator';
 
 @Injectable()
@@ -36,19 +35,8 @@ export class TenantContextInterceptor implements NestInterceptor {
     if (payload?.type === 'master' && !payload.impersonatingTenantId)
       return next.handle();
 
-    const headerTenant = request.headers[TENANT_ID_HEADER] as
-      | string
-      | undefined;
-    const tenantId =
-      payload?.tenantId ?? payload?.impersonatingTenantId ?? headerTenant;
-    if (!tenantId) throw new ForbiddenException('X-Tenant-ID is required');
-    if (
-      headerTenant &&
-      payload?.tenantId &&
-      headerTenant !== payload.tenantId
-    ) {
-      throw new ForbiddenException('Tenant mismatch');
-    }
+    const tenantId = payload?.tenantId ?? payload?.impersonatingTenantId;
+    if (!tenantId) throw new ForbiddenException('Tenant context is required');
     request.tenantId = tenantId;
     return this.context.run(
       {

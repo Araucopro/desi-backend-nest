@@ -36,7 +36,8 @@ export class AuthService {
     const { email, password } = loginDto;
 
     try {
-      // Sin x-tenant-id: buscamos al usuario por email globalmente
+      // Buscamos al usuario por email globalmente porque el login aún no
+      // tiene token/tenant_id (problema chicken-and-egg).
       const user = await this.findUserByEmailGlobal(email);
       if (!user) throw new UnauthorizedException('Invalid credentials');
 
