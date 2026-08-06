@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -352,6 +353,13 @@ class DteDocumentReferenceDto {
 }
 
 export class CreateDteDocumentDto {
+  @ApiPropertyOptional({
+    description: 'ID de la orden de compra asociada, si aplica',
+  })
+  @IsOptional()
+  @IsUUID()
+  purchaseOrderID?: string;
+
   @ApiProperty({
     description: 'Campos de salida que solicita el cliente',
     isArray: true,

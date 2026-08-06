@@ -9,7 +9,10 @@ import { Store } from '../stores/entities/store.entity';
 import { Product } from '../products/entities/product.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
-import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
+import {
+  PurchaseOrder,
+  PurchaseOrderCommercialStatus,
+} from '../purchase-orders/entities/purchase-order.entity';
 
 function createDteDto(
   overrides: {
@@ -68,6 +71,7 @@ function createMockManager(
     saveDocumentError?: unknown;
     documentAfterConflict?: Partial<DteDocument> | null;
     resolveByName?: boolean;
+    purchaseOrder?: Partial<PurchaseOrder> | null;
   } = {},
 ) {
   const storeProduct = {
@@ -115,7 +119,7 @@ function createMockManager(
         return storeProduct;
       }
       if (entity === PurchaseOrder) {
-        return null;
+        return options.purchaseOrder ?? null;
       }
       return null;
     }),
@@ -214,7 +218,7 @@ describe('DteService', () => {
     );
 
     expect(result.FOLIO).toBe(200);
-    expect(result.status).toBe('EMITIDO');
+    expect(result.STATUS).toBe('EMITIDO');
 
     const savedDocument = findSavedDocument(DteDocumentStatus.EMITIDO);
     expect(savedDocument).toMatchObject({
@@ -259,9 +263,10 @@ describe('DteService', () => {
     );
     expect(mockFinancialMovementsService.recordDte).not.toHaveBeenCalled();
     expect(
-      manager.save.mock.calls.some(
-        ([entity]) => entity?.reason === 'ADJUSTMENT' && entity?.delta === 2,
-      ),
+      manager.save.mock.calls.some(([entity]) => {
+        const saved = entity as { reason?: unknown; delta?: unknown };
+        return saved?.reason === 'ADJUSTMENT' && saved?.delta === 2;
+      }),
     ).toBe(true);
   });
 
@@ -283,9 +288,10 @@ describe('DteService', () => {
     expect(savedDocument.errorDetail).toContain('estado 500');
     expect(mockFinancialMovementsService.recordDte).not.toHaveBeenCalled();
     expect(
-      manager.save.mock.calls.some(
-        ([entity]) => entity?.reason === 'ADJUSTMENT' && entity?.delta === 2,
-      ),
+      manager.save.mock.calls.some(([entity]) => {
+        const saved = entity as { reason?: unknown; delta?: unknown };
+        return saved?.reason === 'ADJUSTMENT' && saved?.delta === 2;
+      }),
     ).toBe(true);
   });
 
@@ -306,9 +312,10 @@ describe('DteService', () => {
     );
     expect(mockFinancialMovementsService.recordDte).not.toHaveBeenCalled();
     expect(
-      manager.save.mock.calls.some(
-        ([entity]) => entity?.reason === 'ADJUSTMENT' && entity?.delta === 2,
-      ),
+      manager.save.mock.calls.some(([entity]) => {
+        const saved = entity as { reason?: unknown; delta?: unknown };
+        return saved?.reason === 'ADJUSTMENT' && saved?.delta === 2;
+      }),
     ).toBe(true);
   });
 
@@ -365,6 +372,83 @@ describe('DteService', () => {
     const result = await service.create('store-1', undefined, dto);
 
     expect(result.FOLIO).toBe(222);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('persists purchaseOrderID when a valid accepted PO is provided', async () => {
+    manager = createMockManager({
+      purchaseOrder: { status: PurchaseOrderCommercialStatus.ACEPTADO },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    const dto = createDteDto() as any;
+    dto.purchaseOrderID = 'po-1';
+    await service.create('store-1', undefined, dto);
+
+    expect(findSavedDocument(DteDocumentStatus.EMITIDO).purchaseOrderID).toBe(
+      'po-1',
+    );
+  });
+
+  it('resolves concurrent duplicates by purchaseOrderID without idempotency key', async () => {
+    manager = createMockManager({
+      purchaseOrder: { status: PurchaseOrderCommercialStatus.ACEPTADO },
+      saveDocumentError: { code: '23505' },
+      documentAfterConflict: {
+        dteDocumentID: 'existing-dte',
+        token: 'existing-token',
+        folio: 555,
+        status: DteDocumentStatus.EMITIDO,
+        purchaseOrderID: 'po-1',
+      },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    const dto = createDteDto() as any;
+    dto.purchaseOrderID = 'po-1';
+    const result = await service.create('store-1', undefined, dto);
+
+    expect(result.TOKEN).toBe('existing-token');
+    expect(result.FOLIO).toBe(555);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(manager.query).toHaveBeenCalledWith(
+      'ROLLBACK TO SAVEPOINT dte_document_insert',
+    );
+  });
+
+  it('rejects a purchaseOrderID that belongs to another store', async () => {
+    manager = createMockManager({ purchaseOrder: null });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    const dto = createDteDto() as any;
+    dto.purchaseOrderID = 'po-1';
+
+    await expect(service.create('store-1', undefined, dto)).rejects.toThrow(
+      'no encontrada para esta tienda',
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [PurchaseOrderCommercialStatus.PENDIENTE],
+    [PurchaseOrderCommercialStatus.ENVIADO],
+    [PurchaseOrderCommercialStatus.RECHAZADO],
+  ])('rejects a purchaseOrderID whose PO is in status %s', async (status) => {
+    manager = createMockManager({
+      purchaseOrder: { status },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    const dto = createDteDto() as any;
+    dto.purchaseOrderID = 'po-1';
+
+    await expect(service.create('store-1', undefined, dto)).rejects.toThrow(
+      'no está en estado Aceptado',
+    );
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -505,7 +589,7 @@ describe('DteService', () => {
     const service = createService();
     const result = await service.reconcile('dte-1', 'store-1');
 
-    expect(result.status).toBe('EMITIDO');
+    expect(result.STATUS).toBe('EMITIDO');
     expect(result.FOLIO).toBe(555);
     expect(mockFinancialMovementsService.recordDte).toHaveBeenCalled();
   });
@@ -541,9 +625,10 @@ describe('DteService', () => {
     expect(savedDocument.errorDetail).toContain('estado 404');
     expect(mockFinancialMovementsService.recordDte).not.toHaveBeenCalled();
     expect(
-      manager.save.mock.calls.some(
-        ([entity]) => entity?.reason === 'ADJUSTMENT' && entity?.delta === 2,
-      ),
+      manager.save.mock.calls.some(([entity]) => {
+        const saved = entity as { reason?: unknown; delta?: unknown };
+        return saved?.reason === 'ADJUSTMENT' && saved?.delta === 2;
+      }),
     ).toBe(true);
   });
 

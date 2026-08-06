@@ -246,6 +246,25 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
+    if (dto.purchaseOrderID) {
+      const po = await manager.findOne(PurchaseOrder, {
+        where: {
+          purchaseOrderID: dto.purchaseOrderID,
+          store: { storeID: store.storeID },
+        },
+      });
+      if (!po) {
+        throw new BadRequestException(
+          `Orden de compra ${dto.purchaseOrderID} no encontrada para esta tienda`,
+        );
+      }
+      if (po.status !== PurchaseOrderCommercialStatus.ACEPTADO) {
+        throw new BadRequestException(
+          `La orden de compra ${dto.purchaseOrderID} no está en estado Aceptado (actual: ${po.status})`,
+        );
+      }
+    }
+
     // Auto-completar/construir datos del Emisor a partir de la tienda (Store)
     dto.dte.Encabezado.Emisor = {
       RUTEmisor: store.rut,
@@ -363,12 +382,19 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
   private async findExistingDocument(
     manager: EntityManager,
     idempotencyKey: string | undefined,
+    purchaseOrderID: string | undefined,
   ): Promise<DteDocument | null> {
     if (idempotencyKey) {
       const byKey = await manager.findOne(DteDocument, {
         where: { idempotencyKey },
       });
       if (byKey) return byKey;
+    }
+    if (purchaseOrderID) {
+      const byPO = await manager.findOne(DteDocument, {
+        where: { purchaseOrderID },
+      });
+      if (byPO) return byPO;
     }
     return null;
   }
@@ -610,7 +636,6 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     timer.unref?.();
 
     try {
-      console.log(init);
       const response = await fetch(url, {
         ...init,
         signal: controller.signal,
@@ -732,7 +757,11 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     dto: CreateDteDocumentDto,
     apikey: string,
   ): Promise<DteCreateOutcome> {
-    const existing = await this.findExistingDocument(manager, idempotencyKey);
+    const existing = await this.findExistingDocument(
+      manager,
+      idempotencyKey,
+      dto.purchaseOrderID,
+    );
 
     if (existing && existing.status !== DteDocumentStatus.ERROR) {
       this.logger.log(
@@ -773,6 +802,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       tenantID,
       apikey: this.maskApikey(apikey),
       idempotencyKey: idempotencyKeyToUse,
+      purchaseOrderID: dto.purchaseOrderID ?? null,
       token,
       folio,
       store: { storeID: store.storeID },
@@ -816,6 +846,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
           const concurrent = await this.findExistingDocument(
             manager,
             idempotencyKey,
+            dto.purchaseOrderID,
           );
           if (concurrent) {
             if (concurrent.status !== DteDocumentStatus.ERROR) {
