@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -7,7 +8,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { ConfigService } from '@nestjs/config';
@@ -23,6 +24,10 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { TenantContextService } from './tenant-context.service';
 import { Store } from '../stores/entities/store.entity';
 import { User } from '../users/entities/user.entity';
+import { CreateUserDto } from '../users/dto/create-user.dto';
+import { UpdateUserDto } from '../users/dto/update-user.dto';
+import { CreateStoreDto } from '../stores/dto/create-store.dto';
+import { UpdateStoreDto } from '../stores/dto/update-store.dto';
 import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { Category } from '../categories/entities/category.entity';
 import { Product } from '../products/entities/product.entity';
@@ -373,6 +378,246 @@ export class MasterService implements OnModuleInit {
             adminUserID: savedUser.userID,
             status: tenant.status,
           };
+        }),
+    );
+  }
+
+  private isUniqueViolation(error: unknown): boolean {
+    return (
+      error instanceof QueryFailedError &&
+      (error as { driverError?: { code?: string } }).driverError?.code ===
+        '23505'
+    );
+  }
+
+  async createTenantUser(
+    tenantID: string,
+    dto: CreateUserDto,
+    masterUserID: string,
+  ): Promise<User> {
+    const passwordHash = await bcrypt.hash(dto.password, 10);
+
+    return this.tenantContext.run(
+      { tenantId: tenantID, masterUserId: masterUserID, impersonating: false },
+      () =>
+        this.tenantContext.transaction(async (manager) => {
+          const tenant = await manager.getRepository(Tenant).findOne({
+            where: { tenantID },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!tenant) throw new NotFoundException('Tenant not found');
+          if (tenant.status !== TenantStatus.ACTIVE)
+            throw new ConflictException('Tenant is not active');
+
+          const userRepository = manager.getRepository(User);
+          const userCount = await userRepository.count({
+            where: { tenantID },
+          });
+          if (userCount >= tenant.maxUsers)
+            throw new ForbiddenException(
+              `Tenant user limit (${tenant.maxUsers}) exceeded`,
+            );
+
+          let savedUser: User;
+          try {
+            savedUser = await userRepository.save(
+              userRepository.create({
+                ...dto,
+                tenantID,
+                password: passwordHash,
+                sessionVersion: 1,
+              }),
+            );
+          } catch (error) {
+            if (this.isUniqueViolation(error))
+              throw new ConflictException(
+                `User with email ${dto.email} already exists`,
+              );
+            throw error;
+          }
+
+          await manager.save(
+            AuditEvent,
+            manager.create(AuditEvent, {
+              tenantID,
+              masterUserID,
+              action: 'CREATE_USER',
+              endpoint: 'master/tenants/:tenantId/users',
+              result: 'SUCCESS',
+              reason: `Master created user ${savedUser.email}`,
+            }),
+          );
+
+          return savedUser;
+        }),
+    );
+  }
+
+  async updateTenantUser(
+    tenantID: string,
+    userID: string,
+    dto: UpdateUserDto,
+    masterUserID: string,
+  ): Promise<User> {
+    return this.tenantContext.run(
+      { tenantId: tenantID, masterUserId: masterUserID, impersonating: false },
+      () =>
+        this.tenantContext.transaction(async (manager) => {
+          const user = await manager.getRepository(User).findOne({
+            where: { userID, tenantID },
+          });
+          if (!user) throw new NotFoundException('User not found');
+
+          const updates = { ...dto };
+          if (updates.password) {
+            updates.password = await bcrypt.hash(updates.password, 10);
+          }
+          Object.assign(user, updates);
+
+          const savedUser = await manager.getRepository(User).save(user);
+
+          await manager.save(
+            AuditEvent,
+            manager.create(AuditEvent, {
+              tenantID,
+              masterUserID,
+              action: 'UPDATE_USER',
+              endpoint: 'master/tenants/:tenantId/users/:userId',
+              result: 'SUCCESS',
+              reason: `Master updated user ${savedUser.email}`,
+            }),
+          );
+
+          return savedUser;
+        }),
+    );
+  }
+
+  async createTenantStore(
+    tenantID: string,
+    dto: CreateStoreDto,
+    masterUserID: string,
+  ): Promise<Store> {
+    return this.tenantContext.run(
+      { tenantId: tenantID, masterUserId: masterUserID, impersonating: false },
+      () =>
+        this.tenantContext.transaction(async (manager) => {
+          const tenant = await manager.getRepository(Tenant).findOne({
+            where: { tenantID },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!tenant) throw new NotFoundException('Tenant not found');
+          if (tenant.status !== TenantStatus.ACTIVE)
+            throw new ConflictException('Tenant is not active');
+
+          const storeRepository = manager.getRepository(Store);
+          const storeCount = await storeRepository.count({
+            where: { tenantID },
+          });
+          if (storeCount >= tenant.maxStores)
+            throw new ForbiddenException(
+              `Tenant store limit (${tenant.maxStores}) exceeded`,
+            );
+
+          let savedStore: Store;
+          try {
+            savedStore = await storeRepository.save(
+              storeRepository.create({
+                ...dto,
+                tenantID,
+              }),
+            );
+          } catch (error) {
+            if (this.isUniqueViolation(error))
+              throw new ConflictException(
+                `Store with email ${dto.email} or name ${dto.name} already exists`,
+              );
+            throw error;
+          }
+
+          await manager.save(
+            AuditEvent,
+            manager.create(AuditEvent, {
+              tenantID,
+              masterUserID,
+              action: 'CREATE_STORE',
+              endpoint: 'master/tenants/:tenantId/stores',
+              result: 'SUCCESS',
+              reason: `Master created store ${savedStore.name}`,
+            }),
+          );
+
+          return savedStore;
+        }),
+    );
+  }
+
+  async updateTenantStore(
+    tenantID: string,
+    storeID: string,
+    dto: UpdateStoreDto,
+    masterUserID: string,
+  ): Promise<Store> {
+    return this.tenantContext.run(
+      { tenantId: tenantID, masterUserId: masterUserID, impersonating: false },
+      () =>
+        this.tenantContext.transaction(async (manager) => {
+          const storeRepository = manager.getRepository(Store);
+          const store = await storeRepository.findOne({
+            where: { storeID, tenantID },
+          });
+          if (!store) throw new NotFoundException('Store not found');
+
+          if (
+            dto.email !== undefined &&
+            dto.email !== store.email &&
+            (await storeRepository.exists({
+              where: { email: dto.email, tenantID },
+            }))
+          ) {
+            throw new ConflictException(
+              `Store with email ${dto.email} already exists`,
+            );
+          }
+
+          if (
+            dto.name !== undefined &&
+            dto.name !== store.name &&
+            (await storeRepository.exists({
+              where: { name: dto.name, tenantID },
+            }))
+          ) {
+            throw new ConflictException(
+              `Store with name ${dto.name} already exists`,
+            );
+          }
+
+          Object.assign(store, dto);
+
+          let savedStore: Store;
+          try {
+            savedStore = await storeRepository.save(store);
+          } catch (error) {
+            if (this.isUniqueViolation(error))
+              throw new ConflictException(
+                'Store with email or name already exists',
+              );
+            throw error;
+          }
+
+          await manager.save(
+            AuditEvent,
+            manager.create(AuditEvent, {
+              tenantID,
+              masterUserID,
+              action: 'UPDATE_STORE',
+              endpoint: 'master/tenants/:tenantId/stores/:storeId',
+              result: 'SUCCESS',
+              reason: `Master updated store ${savedStore.name}`,
+            }),
+          );
+
+          return savedStore;
         }),
     );
   }
