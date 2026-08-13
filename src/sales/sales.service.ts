@@ -10,7 +10,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { Store } from '../stores/entities/store.entity';
-import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { PricingService } from '../pricing/pricing.service';
 import { DteService } from '../dte/dte.service';
 import { DteMapperService } from '../dte/dte-mapper.service';
@@ -130,51 +129,30 @@ export class SalesService {
       );
     }
 
-    const items: PreparedSaleItem[] = [];
-    let cogsTotal = 0;
+    const pricing = await this.pricingService.calculateCart({
+      storeID,
+      items: dto.items.map((item) => ({
+        storeProductID: item.storeProductID,
+        quantity: item.quantity,
+      })),
+      userID: userId ?? null,
+      pricingDate: this.toDateOnly(dto.issueDate ?? new Date()),
+    });
 
-    for (const itemDto of dto.items) {
-      const storeProduct = await manager.findOne(StoreProduct, {
-        where: {
-          storeProductID: itemDto.storeProductID,
-          store: { storeID },
-        },
-        relations: ['variation', 'variation.product'],
-      });
-      if (!storeProduct) {
-        throw new NotFoundException(
-          `Producto de tienda ${itemDto.storeProductID} no encontrado en la tienda ${storeID}`,
-        );
-      }
-
-      const pricing = await this.pricingService.calculatePrice({
-        storeProductID: itemDto.storeProductID,
-        quantity: itemDto.quantity,
-        userID: userId ?? null,
-        manualDiscount: dto.manualDiscount,
-        baseUnitPrice: storeProduct.priceList,
-        priceCost: storeProduct.priceCost,
-        pricingDate: this.toDateOnly(dto.issueDate ?? new Date()),
-      });
-
-      const unitPrice = this.toMoney(pricing.finalPrice / itemDto.quantity);
-      const lineTotal = Math.round(unitPrice * itemDto.quantity);
-      const unitCost = this.toMoney(Number(storeProduct.priceCost ?? 0));
-      cogsTotal = this.toMoney(cogsTotal + unitCost * itemDto.quantity);
-
-      items.push({
-        storeProductID: itemDto.storeProductID,
-        variationID: storeProduct.variation.variationID,
-        productName:
-          storeProduct.variation.product?.name ?? storeProduct.variation.sku,
-        sku: storeProduct.variation.sku,
-        quantity: itemDto.quantity,
-        unitPrice,
-        unitCost,
-        lineTotal,
-        baseTotal: Math.round(pricing.basePrice),
-      });
-    }
+    const items: PreparedSaleItem[] = pricing.items.map((item) => ({
+      storeProductID: item.storeProductID,
+      variationID: item.variationID,
+      productName: item.productName,
+      sku: item.sku,
+      quantity: item.quantity,
+      unitPrice: item.finalUnitPrice,
+      unitCost: item.unitCost,
+      lineTotal: item.lineTotal,
+      baseTotal: item.basePrice,
+    }));
+    const cogsTotal = this.toMoney(
+      items.reduce((acc, item) => acc + item.unitCost * item.quantity, 0),
+    );
 
     const total = Math.round(
       items.reduce((acc, item) => acc + item.lineTotal, 0),

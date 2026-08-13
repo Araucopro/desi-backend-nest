@@ -47,7 +47,7 @@ export class SalesController {
   @ApiOperation({
     summary: 'Crear venta (boleta, factura o nota de venta)',
     description:
-      'Boleta (39) y factura (33) se emiten vía Openfactura a través de DteService. La nota de venta descuenta stock, registra movimientos de inventario y ledger financiero sin facturador.',
+      'Boleta (39) y factura (33) se emiten vía Openfactura a través de DteService. La nota de venta descuenta stock, registra movimientos de inventario y ledger financiero sin facturador. Los descuentos se aplican automáticamente desde las ofertas activas del motor de precios; no se aceptan descuentos manuales en la venta.',
   })
   @ApiHeader({
     name: 'X-Store-ID',

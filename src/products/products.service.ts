@@ -109,6 +109,7 @@ export class ProductsService {
                 });
                 (sp as any).finalPrice = result.finalPrice;
                 (sp as any).discountApplied = result.discountApplied;
+                (sp as any).discountsApplied = result.discountsApplied ?? [];
                 (sp as any).activeOffer = result.discountDetails;
                 (sp as any).pricingBreakdown = result.breakdown;
               } catch (e: any) {
@@ -157,6 +158,9 @@ export class ProductsService {
 
               (sp as any).finalPrice = finalPrice;
               (sp as any).discountApplied = discountApplied;
+              (sp as any).discountsApplied = discountDetails
+                ? [{ ...discountDetails, applied: true }]
+                : [];
               (sp as any).activeOffer = discountDetails;
             }
           }

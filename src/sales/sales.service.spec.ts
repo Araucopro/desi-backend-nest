@@ -139,7 +139,7 @@ function createManagerMock(
 
 describe('SalesService', () => {
   const pricingService = {
-    calculatePrice: jest.fn(),
+    calculateCart: jest.fn(),
   };
   const dteService = {
     create: jest.fn(),
@@ -160,9 +160,25 @@ describe('SalesService', () => {
     jest.clearAllMocks();
     ctx = createManagerMock();
     dataSource = { transaction: jest.fn((cb) => cb(ctx.manager)) };
-    pricingService.calculatePrice.mockResolvedValue({
-      finalPrice: 1190,
-      basePrice: 1190,
+    pricingService.calculateCart.mockResolvedValue({
+      items: [
+        {
+          storeProductID: 'sp-1',
+          variationID: 'var-1',
+          productID: 'product-1',
+          productName: 'Producto A',
+          sku: 'SKU-1',
+          quantity: 1,
+          finalUnitPrice: 1190,
+          unitCost: 400,
+          lineTotal: 1190,
+          basePrice: 1190,
+          discountsApplied: [],
+          breakdown: [],
+        },
+      ],
+      totals: { subtotal: 1190, discount: 0, total: 1190 },
+      pricingContext: { storeID: 'store-1' },
     });
     dteService.create.mockResolvedValue({
       dteDocumentID: 'dte-1',
@@ -208,11 +224,17 @@ describe('SalesService', () => {
       saleType: SaleType.NOTA_VENTA,
       status: SaleStatus.EMITIDA,
       folio: 1,
+      subtotal: 1190,
+      discount: 0,
       total: 1190,
       netTotal: 1000,
       taxTotal: 190,
       cogsTotal: 400,
     });
+    expect(pricingService.calculateCart).toHaveBeenCalledTimes(1);
+    expect(pricingService.calculateCart.mock.calls[0][0]).not.toHaveProperty(
+      'manualDiscount',
+    );
     expect(ctx.storeProduct.stock).toBe(9);
     expect(ctx.savedItems).toHaveLength(1);
     expect(ctx.savedItems[0]).toMatchObject({
@@ -232,6 +254,61 @@ describe('SalesService', () => {
       }),
     );
     expect(dteService.create).not.toHaveBeenCalled();
+    expect(result.dte).toBeNull();
+  });
+
+  it('persists automatic offer discounts from calculatePrice without manual discount', async () => {
+    pricingService.calculateCart.mockResolvedValue({
+      items: [
+        {
+          storeProductID: 'sp-1',
+          variationID: 'var-1',
+          productID: 'product-1',
+          productName: 'Producto A',
+          sku: 'SKU-1',
+          quantity: 1,
+          finalUnitPrice: 1071,
+          unitCost: 400,
+          lineTotal: 1071,
+          basePrice: 1190,
+          discountsApplied: [],
+          breakdown: [],
+        },
+      ],
+      totals: { subtotal: 1190, discount: 119, total: 1071 },
+      pricingContext: { storeID: 'store-1' },
+    });
+    const service = createService();
+
+    const result = await service.create(
+      'store-1',
+      undefined,
+      notaVentaDto() as any,
+    );
+
+    const sale = ctx.sale();
+    expect(sale).toMatchObject({
+      saleType: SaleType.NOTA_VENTA,
+      status: SaleStatus.EMITIDA,
+      folio: 1,
+      subtotal: 1190,
+      discount: 119,
+      total: 1071,
+      netTotal: 900,
+      taxTotal: 171,
+      cogsTotal: 400,
+    });
+    expect(pricingService.calculateCart).toHaveBeenCalledTimes(1);
+    expect(pricingService.calculateCart.mock.calls[0][0]).not.toHaveProperty(
+      'manualDiscount',
+    );
+    expect(ctx.savedItems[0]).toMatchObject({
+      storeProductID: 'sp-1',
+      quantity: 1,
+      unitPrice: 1071,
+      unitCost: 400,
+      lineTotal: 1071,
+    });
     expect(result.dte).toBeNull();
   });
 

@@ -14,6 +14,7 @@ import { CreateSpecialOfferDto } from './dto/create-special-offer.dto';
 import { UpdateSpecialOfferDto } from './dto/update-special-offer.dto';
 import { ApiBody, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { CalculatePriceDto } from './dto/calculate-price.dto';
+import { CalculateCartDto } from './dto/calculate-cart.dto';
 import { PricingListQueryDto } from './dto/pricing-list.query.dto';
 import { SpecialOfferListQueryDto } from './dto/special-offer-list.query.dto';
 
@@ -56,15 +57,46 @@ export class PricingController {
 
   @Get('offers')
   @ApiOperation({
-    summary: 'Listar todas las ofertas especiales o filtrar por producto',
+    summary:
+      'Listar ofertas especiales con filtros por alcance, tienda, producto, categoría y marca',
   })
   @ApiQuery({
     name: 'storeProductID',
     required: false,
     description: 'Filtra las ofertas por producto de tienda',
   })
+  @ApiQuery({
+    name: 'storeID',
+    required: false,
+    description: 'Filtra las ofertas por tienda',
+  })
+  @ApiQuery({
+    name: 'targetScope',
+    required: false,
+    description: 'Filtra las ofertas por alcance',
+  })
+  @ApiQuery({
+    name: 'productID',
+    required: false,
+    description: 'Filtra las ofertas por producto incluido',
+  })
+  @ApiQuery({
+    name: 'categoryID',
+    required: false,
+    description: 'Filtra las ofertas por categoría',
+  })
+  @ApiQuery({
+    name: 'brand',
+    required: false,
+    description: 'Filtra las ofertas por marca',
+  })
+  @ApiQuery({
+    name: 'isActive',
+    required: false,
+    description: 'Filtra por ofertas activas o inactivas',
+  })
   getOffers(@Query() query: SpecialOfferListQueryDto) {
-    return this.offerService.getSpecialOffers(query.storeProductID);
+    return this.offerService.getSpecialOffers(query);
   }
 
   @Post('offers')
@@ -89,6 +121,16 @@ export class PricingController {
   @ApiBody({ type: CalculatePriceDto })
   calculate(@Body() input: CalculatePriceDto) {
     return this.pricingService.calculatePrice(input);
+  }
+
+  @Post('calculate-cart')
+  @ApiOperation({
+    summary:
+      'Calcular carrito completo con ofertas apilables, 2x1/3x2/6x5 y combos',
+  })
+  @ApiBody({ type: CalculateCartDto })
+  calculateCart(@Body() input: CalculateCartDto) {
+    return this.pricingService.calculateCart(input);
   }
 
   @Get('price-check/:storeProductID')
