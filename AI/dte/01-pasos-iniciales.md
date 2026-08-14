@@ -49,22 +49,27 @@ El módulo `src/dte/` fue concebido como una prueba de concepto preliminar para 
   * `CreateProductVariationDto` actualizado con el campo opcional.
   * Incluida en la migración `20260728000500`.
 
-### 2.4. Brecha de Negocio: Boleta (39) vs Factura (33) — ⏳ PENDIENTE
+### 2.4. Brecha de Negocio: Boleta (39) vs Factura (33) — ✅ RESUELTO
 * **Boleta Electrónica (DTE 39)**: Consumidor final, receptor anónimo (`66666666-6`), precios con IVA incluido.
 * **Factura Electrónica (DTE 33)**: Exige datos completos y válidos del Receptor (RUT con DV, Razón Social, Giro, Dirección, Comuna) y desglose obligatorio de Neto + IVA (19%).
-* **Pendiente**: Crear un DTO de venta de dominio (`EmitDteDto`) separado del DTO técnico de Openfactura, con validación diferenciada por tipo de documento.
+* **Solución implementada**:
+  * `CreateDteDocumentDto` usa una unión discriminada por `Encabezado.IdDoc.TipoDTE`: `BoletaEncabezadoDto` (39, sin `FmaPago`, `RznSocEmisor`/`GiroEmisor`) y `FacturaEncabezadoDto` (33, con `FmaPago`, `RznSoc`/`GiroEmis`).
+  * `DteMapperService.mapSaleToDte()` construye `IdDoc` y `Emisor` por rama de tipo, replicando el patrón ya usado en Receptor/Totales.
+  * `DteService.mapToDocumentPayload()` autocompleta el Emisor respetando el esquema del tipo de documento antes de enviar a Openfactura.
 
-### 2.5. Resolución de Productos por variationID — ⏳ PENDIENTE
+### 2.5. Resolución de Productos por variationID — ✅ RESUELTO
 * **Problema original**: `DteService.resolveVariation` buscaba por nombre de texto (`ILike`), propenso a errores.
-* **Pendiente**: El nuevo flujo de venta debe recibir `variationID` (UUID) directamente desde el POS/frontend.
+* **Solución implementada**:
+  * El flujo POS (`/sales`) resuelve por `storeProductID` (UUID) vía `PricingService` antes de construir el DTE.
+  * En el endpoint legado, si el ítem trae SKU se resuelve solo por SKU exacto (sin fallback por nombre); sin SKU, se resuelve por nombre con coincidencia exacta (ignorando mayúsculas/espacios) y solo si corresponde a una única variación. Ambigüedad o ausencia lanzan `BadRequestException`.
 
-### 2.6. Integración con Motor de Precios — ⏳ PENDIENTE
+### 2.6. Integración con Motor de Precios — ✅ RESUELTO
 * **Problema original**: El servicio confiaba en los montos del payload externo sin verificar contra `PricingService`.
-* **Pendiente**: Invocar `PricingService.calculatePrice()` para validar y calcular el precio final antes de construir el payload DTE.
+* **Solución implementada**: `SalesService.buildPreparedSale()` usa `PricingService.calculateCart()` para calcular precios finales, descuentos y totales antes de que `DteMapperService` construya el payload DTE.
 
-### 2.7. Concurrencia: Llamada HTTP dentro de Transacción DB — ⏳ PENDIENTE
+### 2.7. Concurrencia: Llamada HTTP dentro de Transacción DB — ✅ RESUELTO
 * **Problema original**: La llamada `fetch` a Openfactura ocurre dentro de la transacción PostgreSQL, reteniendo locks por el tiempo de respuesta de la API externa.
-* **Pendiente**: Separar el flujo en dos transacciones: (1) reserva de stock y creación del DTE en estado `PENDIENTE`, (2) actualización post-respuesta de Openfactura.
+* **Solución implementada**: `DteService.create()` usa dos transacciones: (1) `prepare()` crea el DTE en `PENDIENTE` y reserva stock; (2) la llamada HTTP ocurre fuera de transacción; (3) `finalizeInTransaction()` cierra a `EMITIDO`/`ERROR` con el resultado real de Openfactura.
 
 ---
 
@@ -159,7 +164,7 @@ Mantener `POST /v2/dte/document` solo para compatibilidad con webhooks externos 
 | 4 | `StoreContextGuard` rechaza `403` si el usuario no pertenece a la tienda | ✅ |
 | 5 | Campos DTE en `Store` persisten correctamente | ✅ |
 | 6 | `supplierSku` persiste en `ProductVariation` | ✅ |
-| 7 | Boleta (39) se emite sin datos de receptor | ⏳ |
-| 8 | Factura (33) rechaza si falta receptor o RUT inválido | ⏳ |
-| 9 | Totales calculados por backend con `PricingService` | ⏳ |
-| 10 | Llamada HTTP a Openfactura fuera de la transacción de DB | ⏳ |
+| 7 | Boleta (39) se emite con receptor genérico y esquema de Emisor/IdDoc de boleta | ✅ |
+| 8 | Factura (33) rechaza si falta receptor o RUT inválido | ✅ |
+| 9 | Totales calculados por backend con `PricingService` | ✅ |
+| 10 | Llamada HTTP a Openfactura fuera de la transacción de DB | ✅ |

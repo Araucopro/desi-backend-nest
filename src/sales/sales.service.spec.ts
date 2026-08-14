@@ -12,6 +12,7 @@ import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import {
   DteDocument,
+  DteDocumentPaymentType,
   DteDocumentStatus,
 } from '../dte/entities/dte-document.entity';
 
@@ -356,7 +357,10 @@ describe('SalesService', () => {
       'store-1',
       undefined,
       {},
-      { reserveStock: true },
+      {
+        reserveStock: true,
+        paymentType: DteDocumentPaymentType.CREDIT,
+      },
     );
     expect(ctx.sale()).toMatchObject({
       saleType: SaleType.FACTURA,
@@ -445,7 +449,11 @@ describe('SalesService', () => {
       'store-1',
       'sale-1',
       {},
-      { reserveStock: false, saleID: 'sale-1' },
+      {
+        reserveStock: false,
+        saleID: 'sale-1',
+        paymentType: DteDocumentPaymentType.CASH,
+      },
     );
     expect(ctx.sale()).toMatchObject({
       status: SaleStatus.CONVERTIDA,

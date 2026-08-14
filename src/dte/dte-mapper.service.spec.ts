@@ -46,9 +46,17 @@ describe('DteMapperService', () => {
 
   it('maps a boleta with generic receptor and IVA-included item prices', () => {
     const dto = service.mapSaleToDte(saleInput(), { documentType: 39 });
+    const encabezado = dto.dte.Encabezado;
 
-    expect(dto.dte.Encabezado.IdDoc.TipoDTE).toBe(39);
-    expect(dto.dte.Encabezado.Receptor).toEqual({
+    expect(encabezado.IdDoc.TipoDTE).toBe(39);
+    expect(encabezado.IdDoc).not.toHaveProperty('FmaPago');
+    expect(encabezado.Emisor).toMatchObject({
+      RznSocEmisor: 'Tienda Demo SpA',
+      GiroEmisor: 'VENTA AL POR MENOR',
+    });
+    expect(encabezado.Emisor).not.toHaveProperty('RznSoc');
+    expect(encabezado.Emisor).not.toHaveProperty('GiroEmis');
+    expect(encabezado.Receptor).toEqual({
       RUTRecep: '66666666-6',
       RznSocRecep: 'Anonimo',
     });
@@ -57,23 +65,31 @@ describe('DteMapperService', () => {
       PrcItem: 1000,
       MontoItem: 2000,
     });
-    expect(dto.dte.Encabezado.Totales).toMatchObject({
+    expect(encabezado.Totales).toMatchObject({
       MntNeto: 1681,
       IVA: 319,
       MntTotal: 2000,
     });
-    expect(Number.isInteger(dto.dte.Encabezado.Totales!.MntNeto)).toBe(true);
-    expect(Number.isInteger(dto.dte.Encabezado.Totales!.IVA)).toBe(true);
-    expect(Number.isInteger(dto.dte.Encabezado.Totales!.MntTotal)).toBe(true);
+    expect(Number.isInteger(encabezado.Totales!.MntNeto)).toBe(true);
+    expect(Number.isInteger(encabezado.Totales!.IVA)).toBe(true);
+    expect(Number.isInteger(encabezado.Totales!.MntTotal)).toBe(true);
     expect(Number.isInteger(dto.dte.Detalle[0].MontoItem)).toBe(true);
     expect(Number.isInteger(dto.dte.Detalle[0].PrcItem)).toBe(true);
   });
 
   it('maps a factura with validated receptor and net prices', () => {
     const dto = service.mapSaleToDte(saleInput(), { documentType: 33 });
+    const encabezado = dto.dte.Encabezado;
 
-    expect(dto.dte.Encabezado.IdDoc.TipoDTE).toBe(33);
-    expect(dto.dte.Encabezado.Receptor).toMatchObject({
+    expect(encabezado.IdDoc.TipoDTE).toBe(33);
+    expect(encabezado.IdDoc).toMatchObject({ FmaPago: '1' });
+    expect(encabezado.Emisor).toMatchObject({
+      RznSoc: 'Tienda Demo SpA',
+      GiroEmis: 'VENTA AL POR MENOR',
+    });
+    expect(encabezado.Emisor).not.toHaveProperty('RznSocEmisor');
+    expect(encabezado.Emisor).not.toHaveProperty('GiroEmisor');
+    expect(encabezado.Receptor).toMatchObject({
       RUTRecep: '66666666-6',
       RznSocRecep: 'Cliente Ejemplo',
     });
@@ -81,13 +97,13 @@ describe('DteMapperService', () => {
       PrcItem: 840,
       MontoItem: 1681,
     });
-    expect(dto.dte.Encabezado.Totales).toMatchObject({
+    expect(encabezado.Totales).toMatchObject({
       MntNeto: 1681,
       IVA: 319,
       MntTotal: 2000,
     });
-    expect(Number.isInteger(dto.dte.Encabezado.Totales!.MntNeto)).toBe(true);
-    expect(Number.isInteger(dto.dte.Encabezado.Totales!.IVA)).toBe(true);
+    expect(Number.isInteger(encabezado.Totales!.MntNeto)).toBe(true);
+    expect(Number.isInteger(encabezado.Totales!.IVA)).toBe(true);
     expect(Number.isInteger(dto.dte.Detalle[0].MontoItem)).toBe(true);
     expect(Number.isInteger(dto.dte.Detalle[0].PrcItem)).toBe(true);
   });

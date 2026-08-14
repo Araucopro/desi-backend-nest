@@ -15,6 +15,7 @@ import { DteService } from '../dte/dte.service';
 import { DteMapperService } from '../dte/dte-mapper.service';
 import {
   DteDocument,
+  DteDocumentPaymentType,
   DteDocumentStatus,
 } from '../dte/entities/dte-document.entity';
 import { DteDocumentResponseDto } from '../dte/dto/dte-document-response.dto';
@@ -98,6 +99,18 @@ export class SalesService {
         : String(value).slice(0, 10);
     const date = new Date(`${text}T12:00:00`);
     return Number.isNaN(date.getTime()) ? new Date() : date;
+  }
+
+  private toDtePaymentType(
+    paymentType: SalePaymentType,
+  ): DteDocumentPaymentType {
+    if (paymentType === SalePaymentType.CREDIT) {
+      return DteDocumentPaymentType.CREDIT;
+    }
+    if (paymentType === SalePaymentType.DEBIT) {
+      return DteDocumentPaymentType.DEBIT;
+    }
+    return DteDocumentPaymentType.CASH;
   }
 
   private isUniqueViolation(error: unknown): boolean {
@@ -375,7 +388,10 @@ export class SalesService {
       storeID,
       idempotencyKey,
       dteDto,
-      { reserveStock: true },
+      {
+        reserveStock: true,
+        paymentType: this.toDtePaymentType(prepared.paymentType),
+      },
     );
 
     const sale = await this.persistElectronicSale(
@@ -556,6 +572,7 @@ export class SalesService {
     const dteResponse = await this.dteService.create(storeID, saleID, dteDto, {
       reserveStock: false,
       saleID,
+      paymentType: this.toDtePaymentType(sale.paymentType),
     });
 
     if (dteResponse.STATUS === 'PENDIENTE') {

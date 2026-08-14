@@ -250,9 +250,12 @@ describe('PricingService', () => {
     });
     manager.findOne.mockResolvedValue(franchise);
     manager.find.mockImplementation((_entity: unknown, options?: unknown) => {
-      const where = (options as { where?: { store?: { isCentralStore?: boolean } } })
-        ?.where;
-      return Promise.resolve(where?.store?.isCentralStore ? [central] : [franchise]);
+      const where = (
+        options as { where?: { store?: { isCentralStore?: boolean } } }
+      )?.where;
+      return Promise.resolve(
+        where?.store?.isCentralStore ? [central] : [franchise],
+      );
     });
     offerService.getApplicableOffers.mockResolvedValue([]);
     offerService.getApplicableStoreProductIDs.mockResolvedValue(new Set());

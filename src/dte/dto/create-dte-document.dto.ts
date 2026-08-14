@@ -1,9 +1,11 @@
-import { Type } from 'class-transformer';
+import { Type, TypeHelpOptions } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
+  IsDefined,
   IsEnum,
   IsInt,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -11,7 +13,12 @@ import {
   IsUUID,
   ValidateNested,
 } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiExtraModels,
+  ApiProperty,
+  ApiPropertyOptional,
+  getSchemaPath,
+} from '@nestjs/swagger';
 
 export enum DteResponseValue {
   TOKEN = 'TOKEN',
@@ -21,12 +28,46 @@ export enum DteResponseValue {
   XML = 'XML',
 }
 
-class DteIdDocDto {
-  @ApiPropertyOptional({ description: 'Tipo de DTE', example: 33 })
+export class DteIdDocBoletaDto {
+  @ApiProperty({ description: 'Tipo de DTE', example: 39 })
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([39])
+  TipoDTE!: 39;
+
+  @ApiPropertyOptional({ description: 'Folio del documento', example: 0 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  TipoDTE?: number;
+  Folio?: number;
+
+  @ApiProperty({ description: 'Fecha de emisión', example: '2026-08-03' })
+  @IsDateString()
+  FchEmis!: string;
+
+  @ApiPropertyOptional({
+    description: 'Tipo de transacción compra',
+    example: '1',
+  })
+  @IsOptional()
+  @IsString()
+  TpoTranCompra?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tipo de transacción venta',
+    example: '1',
+  })
+  @IsOptional()
+  @IsString()
+  TpoTranVenta?: string;
+}
+
+export class DteIdDocFacturaDto {
+  @ApiProperty({ description: 'Tipo de DTE', example: 33 })
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([33])
+  TipoDTE!: 33;
 
   @ApiPropertyOptional({ description: 'Folio del documento', example: 0 })
   @IsOptional()
@@ -60,7 +101,64 @@ class DteIdDocDto {
   FmaPago?: string;
 }
 
-class DteEmisorDto {
+export class DteEmisorBoletaDto {
+  @ApiProperty({ description: 'RUT del emisor', example: '76795561-8' })
+  @IsString()
+  @IsNotEmpty()
+  RUTEmisor!: string;
+
+  @ApiProperty({
+    description: 'Razón social del emisor (Boleta)',
+    example: 'HAULMER SPA',
+  })
+  @IsString()
+  @IsNotEmpty()
+  RznSocEmisor!: string;
+
+  @ApiPropertyOptional({
+    description: 'Giro comercial del emisor (Boleta)',
+    example: 'VENTA AL POR MENOR POR CORREO, POR INTERNET Y VIA TELEFONICA',
+  })
+  @IsOptional()
+  @IsString()
+  GiroEmisor?: string;
+
+  @ApiPropertyOptional({
+    description: 'Códigos de actividad',
+    example: ['479100'],
+  })
+  @IsOptional()
+  @IsArray()
+  Acteco?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Dirección origen',
+    example: 'ARTURO PRAT 527 CURICO',
+  })
+  @IsOptional()
+  @IsString()
+  DirOrigen?: string;
+
+  @ApiPropertyOptional({ description: 'Comuna de origen', example: 'Curicó' })
+  @IsOptional()
+  @IsString()
+  CmnaOrigen?: string;
+
+  @ApiPropertyOptional({ description: 'Teléfono', example: '0 0' })
+  @IsOptional()
+  @IsString()
+  Telefono?: string;
+
+  @ApiPropertyOptional({
+    description: 'Código sucursal SII',
+    example: '81303347',
+  })
+  @IsOptional()
+  @IsString()
+  CdgSIISucur?: string;
+}
+
+export class DteEmisorFacturaDto {
   @ApiProperty({ description: 'RUT del emisor', example: '76795561-8' })
   @IsString()
   @IsNotEmpty()
@@ -237,19 +335,21 @@ class DteDetalleItemDto {
   CdgItem?: DteCodigoItemDto;
 }
 
-class DteEncabezadoDto {
-  @ApiProperty({ type: DteIdDocDto })
+export class BoletaEncabezadoDto {
+  @ApiProperty({ type: DteIdDocBoletaDto })
+  @IsDefined()
   @ValidateNested()
-  @Type(() => DteIdDocDto)
-  IdDoc!: DteIdDocDto;
+  @Type(() => DteIdDocBoletaDto)
+  IdDoc!: DteIdDocBoletaDto;
 
-  @ApiPropertyOptional({ type: DteEmisorDto })
+  @ApiPropertyOptional({ type: DteEmisorBoletaDto })
   @IsOptional()
   @ValidateNested()
-  @Type(() => DteEmisorDto)
-  Emisor?: DteEmisorDto;
+  @Type(() => DteEmisorBoletaDto)
+  Emisor?: DteEmisorBoletaDto;
 
   @ApiProperty({ type: DteReceptorDto })
+  @IsDefined()
   @ValidateNested()
   @Type(() => DteReceptorDto)
   Receptor!: DteReceptorDto;
@@ -261,10 +361,54 @@ class DteEncabezadoDto {
   Totales?: DteTotalesDto;
 }
 
-class DteDto {
-  @ApiProperty({ type: DteEncabezadoDto })
+export class FacturaEncabezadoDto {
+  @ApiProperty({ type: DteIdDocFacturaDto })
+  @IsDefined()
   @ValidateNested()
-  @Type(() => DteEncabezadoDto)
+  @Type(() => DteIdDocFacturaDto)
+  IdDoc!: DteIdDocFacturaDto;
+
+  @ApiPropertyOptional({ type: DteEmisorFacturaDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DteEmisorFacturaDto)
+  Emisor?: DteEmisorFacturaDto;
+
+  @ApiProperty({ type: DteReceptorDto })
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => DteReceptorDto)
+  Receptor!: DteReceptorDto;
+
+  @ApiPropertyOptional({ type: DteTotalesDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DteTotalesDto)
+  Totales?: DteTotalesDto;
+}
+
+export type DteEncabezadoDto = BoletaEncabezadoDto | FacturaEncabezadoDto;
+
+@ApiExtraModels(BoletaEncabezadoDto, FacturaEncabezadoDto)
+export class DteDto {
+  @ApiProperty({
+    oneOf: [
+      { $ref: getSchemaPath(BoletaEncabezadoDto) },
+      { $ref: getSchemaPath(FacturaEncabezadoDto) },
+    ],
+  })
+  @IsDefined()
+  @ValidateNested()
+  @Type((type?: TypeHelpOptions) => {
+    const encabezado = (
+      type?.object as
+        | { Encabezado?: { IdDoc?: { TipoDTE?: unknown } } }
+        | undefined
+    )?.Encabezado;
+    return Number(encabezado?.IdDoc?.TipoDTE) === 39
+      ? BoletaEncabezadoDto
+      : FacturaEncabezadoDto;
+  })
   Encabezado!: DteEncabezadoDto;
 
   @ApiProperty({ type: [DteDetalleItemDto] })
@@ -371,6 +515,7 @@ export class CreateDteDocumentDto {
   response!: DteResponseValue[];
 
   @ApiProperty({ type: DteDto })
+  @IsDefined()
   @ValidateNested()
   @Type(() => DteDto)
   dte!: DteDto;

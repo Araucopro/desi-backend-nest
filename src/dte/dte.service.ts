@@ -12,7 +12,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes, randomInt } from 'crypto';
-import { DataSource, EntityManager, ILike, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { Store } from '../stores/entities/store.entity';
 import { Product } from '../products/entities/product.entity';
@@ -21,7 +21,11 @@ import {
   PurchaseOrder,
   PurchaseOrderCommercialStatus,
 } from '../purchase-orders/entities/purchase-order.entity';
-import { CreateDteDocumentDto } from './dto/create-dte-document.dto';
+import {
+  BoletaEncabezadoDto,
+  CreateDteDocumentDto,
+  DteEncabezadoDto,
+} from './dto/create-dte-document.dto';
 import { DteDocumentResponseDto } from './dto/dte-document-response.dto';
 import {
   DteDocument,
@@ -96,7 +100,15 @@ export type DteCreateOptions = {
   reserveStock?: boolean;
   /** Venta asociada, para trazabilidad e idempotencia de conversión. */
   saleID?: string;
+  /** Forma de pago real del POS, preservada aunque el payload boleta no incluya FmaPago. */
+  paymentType?: DteDocumentPaymentType;
 };
+
+function isBoletaEncabezado(
+  encabezado: DteEncabezadoDto,
+): encabezado is BoletaEncabezadoDto {
+  return encabezado.IdDoc.TipoDTE === 39;
+}
 
 @Injectable()
 export class DteService implements OnModuleInit, OnModuleDestroy {
@@ -185,6 +197,10 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     return DteDocumentPaymentType.CASH;
   }
 
+  private normalizeName(value: string): string {
+    return value.trim().replace(/\s+/g, ' ').toLowerCase();
+  }
+
   private async resolveVariation(
     manager: EntityManager,
     item: CreateDteDocumentDto['dte']['Detalle'][number],
@@ -199,14 +215,37 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
         where: { sku: code },
         relations: ['product'],
       });
-      if (bySku) return bySku;
+      if (!bySku) {
+        throw new BadRequestException(
+          `No se pudo resolver la variación para el SKU "${code}"`,
+        );
+      }
+      return bySku;
     }
 
-    const byName = await manager.findOne(Product, {
-      where: { name: ILike(item.NmbItem) },
-      relations: ['variations'],
-    });
-    if (byName?.variations?.length === 1) {
+    const normalizedName = this.normalizeName(item.NmbItem);
+    const candidates = await manager
+      .createQueryBuilder(Product, 'product')
+      .innerJoinAndSelect('product.variations', 'variations')
+      .where(
+        `LOWER(REPLACE(product.name, ' ', '')) = LOWER(REPLACE(:name, ' ', ''))`,
+        { name: normalizedName },
+      )
+      .getMany();
+    const byName = candidates.find(
+      (product) => this.normalizeName(product.name) === normalizedName,
+    );
+
+    if (candidates.length > 1 || byName?.variations?.length !== 1) {
+      const detail = byName
+        ? `El ítem "${item.NmbItem}" tiene ${byName.variations?.length ?? 0} variaciones; usa SKU para resolverlo`
+        : candidates.length > 1
+          ? `El nombre "${item.NmbItem}" es ambiguo; usa SKU para resolverlo`
+          : `No se pudo resolver la variación para el item "${item.NmbItem}"`;
+      throw new BadRequestException(detail);
+    }
+
+    if (byName) {
       stats.count += 1;
       const variation = byName.variations[0];
       this.logger.warn(
@@ -272,27 +311,39 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // Auto-completar/construir datos del Emisor a partir de la tienda (Store)
-    dto.dte.Encabezado.Emisor = {
-      RUTEmisor: store.rut,
-      RznSoc: store.businessName || store.name,
-      GiroEmis:
-        store.giro ||
-        dto.dte.Encabezado.Emisor?.GiroEmis ||
-        'VENTA AL POR MENOR',
-      Acteco: store.acteco
-        ? store.acteco.split(',').map((a) => a.trim())
-        : dto.dte.Encabezado.Emisor?.Acteco || ['479100'],
-      DirOrigen:
-        store.address || dto.dte.Encabezado.Emisor?.DirOrigen || 'DIRECCION',
-      CmnaOrigen:
-        store.city || dto.dte.Encabezado.Emisor?.CmnaOrigen || 'SANTIAGO',
-      Telefono: store.phone || dto.dte.Encabezado.Emisor?.Telefono || '0 0',
-      CdgSIISucur:
-        store.cdgSIISucur ||
-        dto.dte.Encabezado.Emisor?.CdgSIISucur ||
-        undefined,
-    };
+    // Auto-completar/construir datos del Emisor a partir de la tienda (Store),
+    // respetando el esquema de Boleta (RznSocEmisor/GiroEmisor) o Factura
+    // (RznSoc/GiroEmis) que exige Openfactura.
+    const encabezado = dto.dte.Encabezado;
+    if (isBoletaEncabezado(encabezado)) {
+      const existing = encabezado.Emisor;
+      encabezado.Emisor = {
+        RUTEmisor: store.rut,
+        RznSocEmisor: store.businessName || store.name,
+        GiroEmisor: store.giro || existing?.GiroEmisor || 'VENTA AL POR MENOR',
+        Acteco: store.acteco
+          ? store.acteco.split(',').map((a) => a.trim())
+          : existing?.Acteco || ['479100'],
+        DirOrigen: store.address || existing?.DirOrigen || 'DIRECCION',
+        CmnaOrigen: store.city || existing?.CmnaOrigen || 'SANTIAGO',
+        Telefono: store.phone || existing?.Telefono || '0 0',
+        CdgSIISucur: store.cdgSIISucur || existing?.CdgSIISucur || undefined,
+      };
+    } else {
+      const existing = encabezado.Emisor;
+      encabezado.Emisor = {
+        RUTEmisor: store.rut,
+        RznSoc: store.businessName || store.name,
+        GiroEmis: store.giro || existing?.GiroEmis || 'VENTA AL POR MENOR',
+        Acteco: store.acteco
+          ? store.acteco.split(',').map((a) => a.trim())
+          : existing?.Acteco || ['479100'],
+        DirOrigen: store.address || existing?.DirOrigen || 'DIRECCION',
+        CmnaOrigen: store.city || existing?.CmnaOrigen || 'SANTIAGO',
+        Telefono: store.phone || existing?.Telefono || '0 0',
+        CdgSIISucur: store.cdgSIISucur || existing?.CdgSIISucur || undefined,
+      };
+    }
 
     const nameFallbackStats = { count: 0 };
     const normalizedItems: NormalizedDteItem[] = [];
@@ -513,18 +564,14 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     return current;
   }
 
-  private previewJson(payload: OpenfacturaDocumentResponse): string {
+  private formatJson(payload: OpenfacturaDocumentResponse): string {
     try {
       const safePayload = Object.fromEntries(
         Object.entries(payload).filter(
           ([key]) => !BINARY_RESPONSE_KEYS.includes(key),
         ),
       );
-      const text = JSON.stringify(safePayload);
-      if (!text) return '';
-      return text.length > ERROR_DETAIL_PREVIEW_LIMIT
-        ? `${text.slice(0, ERROR_DETAIL_PREVIEW_LIMIT)}...`
-        : text;
+      return JSON.stringify(safePayload) ?? '';
     } catch {
       return '';
     }
@@ -567,9 +614,9 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (!response.ok) {
-        const preview = this.previewJson(payload) || this.previewText(text);
+        const detailBody = this.formatJson(payload) || text.trim();
         const detail = `Openfactura respondió con estado ${response.status}${
-          preview ? `: ${preview}` : ''
+          detailBody ? `: ${detailBody}` : ''
         }`;
         this.logger.error(
           `Openfactura respondió error | url=${url} | detail=${detail}`,
@@ -711,7 +758,13 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
         : this.buildToken();
     const folio =
       existing?.folio ?? this.buildFolio(dto.dte.Encabezado.IdDoc.Folio);
-    const paymentType = this.mapPaymentType(dto.dte.Encabezado.IdDoc.FmaPago);
+    const paymentType =
+      options?.paymentType ??
+      this.mapPaymentType(
+        'FmaPago' in dto.dte.Encabezado.IdDoc
+          ? dto.dte.Encabezado.IdDoc.FmaPago
+          : undefined,
+      );
 
     const tenantID = this.tenantContext?.getTenantId() ?? store.tenantID;
 
@@ -902,7 +955,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     }
 
     document.status = DteDocumentStatus.ERROR;
-    const statusPreview = result.ok ? this.previewJson(result.payload) : '';
+    const statusPreview = result.ok ? this.formatJson(result.payload) : '';
     document.errorDetail = result.ok
       ? `Openfactura reportó estado ERROR${
           statusPreview ? `: ${statusPreview}` : ''
@@ -938,7 +991,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     );
     return {
       kind: 'error',
-      message: `Openfactura no pudo emitir el documento ${saved.dteDocumentID}: ${document.errorDetail}`,
+      message: `Openfactura no pudo emitir el documento ${saved.dteDocumentID}: ${this.previewText(document.errorDetail)}`,
       response: this.buildResponse(saved),
     };
   }

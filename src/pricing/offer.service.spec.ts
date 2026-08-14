@@ -165,9 +165,7 @@ describe('OfferService', () => {
         targetScope: OfferTargetScope.PRODUCT,
         storeID: 'store-1',
         priority: 1,
-        productTargets: [
-          { productID: 'product-1' } as SpecialOfferProduct,
-        ],
+        productTargets: [{ productID: 'product-1' } as SpecialOfferProduct],
       }),
       offer({
         offerID: 'category-offer',

@@ -1,0 +1,186 @@
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { CreateDteDocumentDto } from './create-dte-document.dto';
+
+function basePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    response: ['FOLIO'],
+    dte: {
+      Encabezado: {
+        IdDoc: {
+          TipoDTE: 39,
+          FchEmis: '2026-08-03',
+        },
+        Emisor: {
+          RUTEmisor: '76123456-7',
+          RznSocEmisor: 'Tienda Demo SpA',
+        },
+        Receptor: {
+          RUTRecep: '66666666-6',
+          RznSocRecep: 'Anonimo',
+        },
+        Totales: {
+          MntTotal: 1190,
+        },
+      },
+      Detalle: [
+        {
+          NroLinDet: 1,
+          NmbItem: 'Producto A',
+          QtyItem: 1,
+          PrcItem: 1000,
+          MontoItem: 1000,
+        },
+      ],
+    },
+    ...overrides,
+  };
+}
+
+async function validateDto(payload: Record<string, unknown>) {
+  const instance = plainToInstance(CreateDteDocumentDto, payload);
+  return validate(instance, {
+    whitelist: true,
+    forbidNonWhitelisted: true,
+  });
+}
+
+describe('CreateDteDocumentDto', () => {
+  it('accepts a valid boleta (39) without FmaPago', async () => {
+    const errors = await validateDto(basePayload());
+    expect(errors).toEqual([]);
+  });
+
+  it('rejects a boleta that uses factura-only fields', async () => {
+    const errors = await validateDto(
+      basePayload({
+        dte: {
+          Encabezado: {
+            IdDoc: {
+              TipoDTE: 39,
+              FchEmis: '2026-08-03',
+              FmaPago: '1',
+            },
+            Emisor: {
+              RUTEmisor: '76123456-7',
+              RznSoc: 'Tienda Demo SpA',
+            },
+            Receptor: {
+              RUTRecep: '66666666-6',
+              RznSocRecep: 'Anonimo',
+            },
+          },
+          Detalle: [
+            {
+              NroLinDet: 1,
+              NmbItem: 'Producto A',
+              QtyItem: 1,
+              PrcItem: 1000,
+              MontoItem: 1000,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('accepts a valid factura (33) with FmaPago', async () => {
+    const errors = await validateDto(
+      basePayload({
+        dte: {
+          Encabezado: {
+            IdDoc: {
+              TipoDTE: 33,
+              FchEmis: '2026-08-03',
+              FmaPago: '2',
+            },
+            Emisor: {
+              RUTEmisor: '76123456-7',
+              RznSoc: 'Tienda Demo SpA',
+            },
+            Receptor: {
+              RUTRecep: '66666666-6',
+              RznSocRecep: 'Cliente SpA',
+            },
+          },
+          Detalle: [
+            {
+              NroLinDet: 1,
+              NmbItem: 'Producto A',
+              QtyItem: 1,
+              PrcItem: 840,
+              MontoItem: 840,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(errors).toEqual([]);
+  });
+
+  it('rejects a factura without receptor', async () => {
+    const errors = await validateDto(
+      basePayload({
+        dte: {
+          Encabezado: {
+            IdDoc: {
+              TipoDTE: 33,
+              FchEmis: '2026-08-03',
+            },
+            Emisor: {
+              RUTEmisor: '76123456-7',
+              RznSoc: 'Tienda Demo SpA',
+            },
+          },
+          Detalle: [
+            {
+              NroLinDet: 1,
+              NmbItem: 'Producto A',
+              QtyItem: 1,
+              PrcItem: 840,
+              MontoItem: 840,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects a payload without TipoDTE', async () => {
+    const errors = await validateDto(
+      basePayload({
+        dte: {
+          Encabezado: {
+            IdDoc: {
+              FchEmis: '2026-08-03',
+            },
+            Emisor: {
+              RUTEmisor: '76123456-7',
+              RznSoc: 'Tienda Demo SpA',
+            },
+            Receptor: {
+              RUTRecep: '66666666-6',
+              RznSocRecep: 'Cliente SpA',
+            },
+          },
+          Detalle: [
+            {
+              NroLinDet: 1,
+              NmbItem: 'Producto A',
+              QtyItem: 1,
+              PrcItem: 840,
+              MontoItem: 840,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(errors.length).toBeGreaterThan(0);
+  });
+});

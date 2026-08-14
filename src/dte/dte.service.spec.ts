@@ -4,7 +4,11 @@ import {
   Logger,
 } from '@nestjs/common';
 import { DteService } from './dte.service';
-import { DteDocument, DteDocumentStatus } from './entities/dte-document.entity';
+import {
+  DteDocument,
+  DteDocumentPaymentType,
+  DteDocumentStatus,
+} from './entities/dte-document.entity';
 import { Store } from '../stores/entities/store.entity';
 import { Product } from '../products/entities/product.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
@@ -19,6 +23,8 @@ function createDteDto(
     fmaPago?: string;
     quantity?: number;
     noCode?: boolean;
+    noFmaPago?: boolean;
+    tipoDTE?: number;
   } = {},
 ) {
   return {
@@ -27,10 +33,10 @@ function createDteDto(
     dte: {
       Encabezado: {
         IdDoc: {
-          TipoDTE: 33,
+          TipoDTE: overrides.tipoDTE ?? 33,
           Folio: 100,
           FchEmis: '2026-01-15',
-          FmaPago: overrides.fmaPago,
+          ...(overrides.noFmaPago ? {} : { FmaPago: overrides.fmaPago }),
         },
         Emisor: {
           RUTEmisor: '76123456-7',
@@ -71,6 +77,8 @@ function createMockManager(
     saveDocumentError?: unknown;
     documentAfterConflict?: Partial<DteDocument> | null;
     resolveByName?: boolean;
+    resolveBySku?: boolean;
+    ambiguousByName?: boolean;
     purchaseOrder?: Partial<PurchaseOrder> | null;
   } = {},
 ) {
@@ -88,6 +96,17 @@ function createMockManager(
     productID: 'product-1',
     name: 'Producto A',
     variations: [{ ...variation, product: undefined }],
+  };
+  const ambiguousProduct = {
+    ...product,
+    variations: [
+      { ...variation, product: undefined },
+      {
+        variationID: 'var-2',
+        sku: 'SKU-2',
+        product: undefined,
+      },
+    ],
   };
   let document: Partial<DteDocument> | null = options.existingDocument ?? null;
   let documentSaveAttempted = false;
@@ -110,7 +129,9 @@ function createMockManager(
         };
       }
       if (entity === ProductVariation) {
-        return options.resolveByName ? null : variation;
+        return options.resolveByName || options.resolveBySku === false
+          ? null
+          : variation;
       }
       if (entity === Product) {
         return options.resolveByName ? product : null;
@@ -123,6 +144,19 @@ function createMockManager(
       }
       return null;
     }),
+    createQueryBuilder: jest.fn(() => ({
+      innerJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getMany: jest
+        .fn()
+        .mockResolvedValue(
+          options.ambiguousByName
+            ? [ambiguousProduct]
+            : options.resolveByName
+              ? [product]
+              : [],
+        ),
+    })),
     find: jest.fn().mockResolvedValue([]),
     create: jest.fn((_entity: unknown, values: object) => ({
       ...values,
@@ -532,6 +566,75 @@ describe('DteService', () => {
     expect(findSavedDocument(DteDocumentStatus.EMITIDO).paymentType).toBe(
       'Credito',
     );
+  });
+
+  it('persists options.paymentType for a boleta without FmaPago', async () => {
+    const service = createService();
+
+    await service.create(
+      'store-1',
+      undefined,
+      createDteDto({ tipoDTE: 39, noFmaPago: true }) as any,
+      { paymentType: DteDocumentPaymentType.CREDIT },
+    );
+
+    expect(findSavedDocument(DteDocumentStatus.EMITIDO).paymentType).toBe(
+      'Credito',
+    );
+  });
+
+  it('stores the full Openfactura error in DB/log but truncates only the client message', async () => {
+    const longDetail = `${'a'.repeat(300)}TAIL_MARKER${'b'.repeat(80)}`;
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 400,
+      headers: { get: () => 'application/json' },
+      text: async () => JSON.stringify({ message: longDetail }),
+    });
+    const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+    const service = createService();
+    let caught: unknown;
+    try {
+      await service.create('store-1', undefined, createDteDto() as any);
+    } catch (error) {
+      caught = error;
+    }
+
+    const savedDocument = findSavedDocument(DteDocumentStatus.ERROR);
+    expect(savedDocument.errorDetail).toContain(longDetail);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(longDetail));
+    expect(caught).toBeInstanceOf(BadGatewayException);
+    const clientMessage = caught instanceof Error ? caught.message : '';
+    expect(clientMessage).toContain('a'.repeat(250));
+    expect(clientMessage).not.toContain('TAIL_MARKER');
+    expect(clientMessage.length).toBeLessThan(400);
+  });
+
+  it('rejects an inexistent SKU without falling back to the product name', async () => {
+    manager = createMockManager({ resolveBySku: false });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    await expect(
+      service.create('store-1', undefined, createDteDto() as any),
+    ).rejects.toThrow('No se pudo resolver la variación para el SKU "SKU-1"');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects an ambiguous product name with multiple variations', async () => {
+    manager = createMockManager({ ambiguousByName: true });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    await expect(
+      service.create(
+        'store-1',
+        undefined,
+        createDteDto({ noCode: true }) as any,
+      ),
+    ).rejects.toThrow('tiene 2 variaciones; usa SKU para resolverlo');
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('persists a masked apikey instead of the full secret', async () => {

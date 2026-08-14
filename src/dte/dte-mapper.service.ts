@@ -113,6 +113,53 @@ export class DteMapperService {
       VlrPagar: mntTotal,
     };
 
+    const emisorBase = {
+      RUTEmisor: store.rut,
+      ...(store.acteco
+        ? {
+            Acteco: store.acteco
+              .split(',')
+              .map((code) => code.trim())
+              .filter(Boolean),
+          }
+        : {}),
+      ...(store.address ? { DirOrigen: store.address } : {}),
+      ...(store.city ? { CmnaOrigen: store.city } : {}),
+      ...(store.phone ? { Telefono: store.phone } : {}),
+      ...(store.cdgSIISucur ? { CdgSIISucur: store.cdgSIISucur } : {}),
+    };
+
+    const encabezado = isBoleta
+      ? {
+          IdDoc: {
+            TipoDTE: 39 as const,
+            Folio: 0,
+            FchEmis: this.toDateOnly(sale.issueDate),
+          },
+          Emisor: {
+            ...emisorBase,
+            RznSocEmisor: store.businessName || store.name,
+            ...(store.giro ? { GiroEmisor: store.giro } : {}),
+          },
+          Receptor: receptor,
+          Totales: totals,
+        }
+      : {
+          IdDoc: {
+            TipoDTE: 33 as const,
+            Folio: 0,
+            FchEmis: this.toDateOnly(sale.issueDate),
+            FmaPago: this.mapFmaPago(sale.paymentType),
+          },
+          Emisor: {
+            ...emisorBase,
+            RznSoc: store.businessName || store.name,
+            ...(store.giro ? { GiroEmis: store.giro } : {}),
+          },
+          Receptor: receptor,
+          Totales: totals,
+        };
+
     return {
       response: [
         DteResponseValue.FOLIO,
@@ -120,33 +167,7 @@ export class DteMapperService {
         DteResponseValue.PDF,
       ],
       dte: {
-        Encabezado: {
-          IdDoc: {
-            TipoDTE: documentType,
-            Folio: 0,
-            FchEmis: this.toDateOnly(sale.issueDate),
-            FmaPago: this.mapFmaPago(sale.paymentType),
-          },
-          Emisor: {
-            RUTEmisor: store.rut,
-            RznSoc: store.businessName || store.name,
-            ...(store.giro ? { GiroEmis: store.giro } : {}),
-            ...(store.acteco
-              ? {
-                  Acteco: store.acteco
-                    .split(',')
-                    .map((code) => code.trim())
-                    .filter(Boolean),
-                }
-              : {}),
-            ...(store.address ? { DirOrigen: store.address } : {}),
-            ...(store.city ? { CmnaOrigen: store.city } : {}),
-            ...(store.phone ? { Telefono: store.phone } : {}),
-            ...(store.cdgSIISucur ? { CdgSIISucur: store.cdgSIISucur } : {}),
-          },
-          Receptor: receptor,
-          Totales: totals,
-        },
+        Encabezado: encabezado,
         Detalle: detalle,
       },
       customer: {
