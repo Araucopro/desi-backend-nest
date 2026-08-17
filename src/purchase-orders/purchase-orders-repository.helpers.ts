@@ -2,11 +2,11 @@ import { NotFoundException } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { Store } from '../stores/entities/store.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
-import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
 import {
-  InventoryMovement,
-  InventoryMovementReason,
-} from '../inventory/entities/inventory-movement.entity';
+  applyInventoryMovement,
+  findStoreProductForUpdate,
+} from '../inventory/inventory-repository.helpers';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { PurchaseOrder } from './entities/purchase-order.entity';
 import { PurchaseOrderItem } from './entities/purchase-order-item.entity';
@@ -123,36 +123,6 @@ export function createPurchaseOrderItemEntity(
   });
 }
 
-async function upsertStoreStock(
-  manager: EntityManager,
-  storeID: string,
-  variationID: string,
-  priceCost: number,
-  delta: number,
-): Promise<void> {
-  let storeStock = await manager.findOne(StoreProduct, {
-    where: {
-      store: { storeID },
-      variation: { variationID },
-    },
-    lock: { mode: 'pessimistic_write' },
-  });
-
-  if (!storeStock) {
-    storeStock = manager.create(StoreProduct, {
-      store: { storeID },
-      variation: { variationID },
-      stock: 0,
-      priceCost,
-      priceList: 0,
-    });
-  }
-
-  storeStock.priceCost = priceCost;
-  storeStock.stock += delta;
-  await manager.save(storeStock);
-}
-
 /**
  * Aplica o revierte el stock de una OC y registra la trazabilidad en
  * InventoryMovements dentro de la misma transacción.
@@ -166,49 +136,46 @@ export async function applyStockForOrder(
   tenantContext?: TenantContextService,
 ): Promise<void> {
   const sign = direction === 1 ? 1 : -1;
-  const reason =
-    direction === 1
-      ? InventoryMovementReason.PURCHASE
-      : InventoryMovementReason.ADJUSTMENT;
 
   for (const item of order.items) {
     const quantity = item.quantityRequested || 0;
     if (quantity <= 0) continue;
 
-    const variation = await manager.findOne(ProductVariation, {
-      where: { variationID: item.variation.variationID },
-      lock: { mode: 'pessimistic_write' },
-    });
-
-    if (!variation) {
-      throw new NotFoundException(
-        `Variación con ID ${item.variation.variationID} no encontrada`,
-      );
-    }
-
     const storeID = order.store.storeID;
     const variationID = item.variation.variationID;
     const delta = sign * quantity;
-    const tenantID =
-      order.tenantID ?? tenantContext?.getTenantId() ?? variation.tenantID;
+    const tenantID = order.tenantID ?? tenantContext?.getTenantId();
 
-    await upsertStoreStock(
-      manager,
-      storeID,
-      variationID,
-      item.unitPrice,
-      delta,
-    );
-
-    await manager.save(
-      manager.create(InventoryMovement, {
-        tenantID,
-        store: { storeID },
-        variation: { variationID },
-        delta,
-        reason,
+    if (direction === 1) {
+      await applyInventoryMovement(manager, {
+        storeID,
+        variationID,
+        reason: InventoryMovementReason.PURCHASE,
+        quantity,
         referenceID: order.purchaseOrderID,
-      }),
-    );
+        tenantID,
+        allowNegativeStock: true,
+        createIfMissing: true,
+        priceCost: item.unitPrice,
+      });
+    } else {
+      const current = await findStoreProductForUpdate(
+        manager,
+        storeID,
+        variationID,
+      );
+      const currentStock = current ? Number(current.stock) : 0;
+      await applyInventoryMovement(manager, {
+        storeID,
+        variationID,
+        reason: InventoryMovementReason.ADJUSTMENT,
+        newStock: currentStock + delta,
+        referenceID: order.purchaseOrderID,
+        tenantID,
+        allowNegativeStock: true,
+        createIfMissing: true,
+        priceCost: item.unitPrice,
+      });
+    }
   }
 }

@@ -1,11 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
-import {
-  InventoryMovement,
-  InventoryMovementReason,
-} from '../inventory/entities/inventory-movement.entity';
+import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
+import { applyInventoryMovement } from '../inventory/inventory-repository.helpers';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import {
   StoreTransfer,
   TransferStatus,
@@ -74,75 +71,33 @@ export async function applyTransferMovements(
   plan: TransferCompletionPlan,
   tenantContext?: TenantContextService,
 ): Promise<void> {
+  const tenantID = plan.tenantID ?? tenantContext?.getTenantId();
+
   for (const item of plan.items) {
     const { variationID, quantity } = item;
 
-    const originStoreProduct = await manager.findOne(StoreProduct, {
-      where: {
-        store: { storeID: plan.originStoreID },
-        variation: { variationID },
-      },
-      lock: { mode: 'pessimistic_write' },
+    await applyInventoryMovement(manager, {
+      storeID: plan.originStoreID,
+      variationID,
+      reason: InventoryMovementReason.TRANSFER_OUT,
+      quantity,
+      referenceID: plan.transferID,
+      tenantID,
+      allowNegativeStock: false,
+      createIfMissing: false,
     });
 
-    const availableStock = originStoreProduct?.stock ?? 0;
-    if (!originStoreProduct || Number(availableStock) < quantity) {
-      throw new BadRequestException(
-        `Insufficient stock in origin store for variation ${variationID}: requested ${quantity}, available ${availableStock}`,
-      );
-    }
-
-    let destinationStoreProduct = await manager.findOne(StoreProduct, {
-      where: {
-        store: { storeID: plan.destinationStoreID },
-        variation: { variationID },
-      },
-      lock: { mode: 'pessimistic_write' },
+    await applyInventoryMovement(manager, {
+      storeID: plan.destinationStoreID,
+      variationID,
+      reason: InventoryMovementReason.TRANSFER_IN,
+      quantity,
+      referenceID: plan.transferID,
+      tenantID,
+      allowNegativeStock: true,
+      createIfMissing: true,
+      priceCost: 0,
+      priceList: 0,
     });
-
-    const effectiveTenantID =
-      plan.tenantID ??
-      tenantContext?.getTenantId() ??
-      originStoreProduct.tenantID;
-
-    if (!destinationStoreProduct) {
-      destinationStoreProduct = manager.create(StoreProduct, {
-        tenantID: effectiveTenantID,
-        store: { storeID: plan.destinationStoreID },
-        variation: { variationID },
-        stock: quantity,
-        priceCost: 0,
-        priceList: 0,
-      });
-    } else {
-      destinationStoreProduct.stock += quantity;
-    }
-
-    originStoreProduct.stock -= quantity;
-
-    await manager.save(originStoreProduct);
-    await manager.save(destinationStoreProduct);
-
-    await manager.save(
-      manager.create(InventoryMovement, {
-        tenantID: effectiveTenantID,
-        store: { storeID: plan.originStoreID },
-        variation: { variationID },
-        delta: -Math.abs(quantity),
-        reason: InventoryMovementReason.TRANSFER_OUT,
-        referenceID: plan.transferID,
-      }),
-    );
-
-    await manager.save(
-      manager.create(InventoryMovement, {
-        tenantID: effectiveTenantID,
-        store: { storeID: plan.destinationStoreID },
-        variation: { variationID },
-        delta: Math.abs(quantity),
-        reason: InventoryMovementReason.TRANSFER_IN,
-        referenceID: plan.transferID,
-      }),
-    );
   }
 }

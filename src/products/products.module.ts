@@ -4,6 +4,8 @@ import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
 import { Product } from './entities/product.entity';
 import { ProductVariation } from './entities/product-variation.entity';
+import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import { InventoryMovement } from '../inventory/entities/inventory-movement.entity';
 import { PricingModule } from '../pricing/pricing.module';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
@@ -11,7 +13,12 @@ import { TransactionRunnerService } from '../common/services/transaction-runner.
 @Module({
   imports: [
     MultitenantModule,
-    TypeOrmModule.forFeature([Product, ProductVariation]),
+    TypeOrmModule.forFeature([
+      Product,
+      ProductVariation,
+      StoreProduct,
+      InventoryMovement,
+    ]),
     PricingModule,
   ],
   controllers: [ProductsController],

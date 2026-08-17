@@ -1,17 +1,27 @@
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { Product } from './entities/product.entity';
 import { ProductVariation } from './entities/product-variation.entity';
 import { CreateProductDto } from './dto/create-product.dto';
 import { PricingService } from '../pricing/pricing.service';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
-import { Store } from '../stores/entities/store.entity';
-import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
-import { DiscountType } from '../pricing/entities/special-offer.entity';
+import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
+import {
+  applyInventoryMovement,
+  findStoreProductForUpdate,
+} from '../inventory/inventory-repository.helpers';
+import { PriceType } from '../pricing/entities/price-history.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import { buildVariationPlan, VariationPlanAction } from './products-engine';
+import {
+  createProductEntity,
+  createVariationEntity,
+  findCentralStore,
+  findProductForUpdate,
+} from './products-repository.helpers';
 
 @Injectable()
 export class ProductsService {
@@ -21,7 +31,7 @@ export class ProductsService {
     @InjectRepository(ProductVariation)
     private readonly variationRepository: Repository<ProductVariation>,
     private readonly entityManager: EntityManager,
-    @Optional() private readonly pricingService?: PricingService,
+    private readonly pricingService: PricingService,
     @Optional() private readonly tenantContext?: TenantContextService,
     @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
@@ -43,37 +53,39 @@ export class ProductsService {
       const tenantID = this.tenantContext?.getTenantId();
       const { variations, ...productData } = createProductDto;
 
-      const product = transactionalEntityManager.create(Product, {
-        ...productData,
-        ...(tenantID ? { tenantID } : {}),
-      });
-      const savedProduct = await transactionalEntityManager.save(product);
-
-      const centralStore = await transactionalEntityManager.findOne(Store, {
-        where: {
-          isCentralStore: true,
-          ...(tenantID ? { tenantID } : {}),
-        },
-      });
+      const savedProduct = await transactionalEntityManager.save(
+        createProductEntity(transactionalEntityManager, {
+          ...productData,
+          tenantID,
+        }),
+      );
+      const centralStore = await findCentralStore(
+        transactionalEntityManager,
+        tenantID,
+      );
 
       for (const variationDto of variations) {
-        const variation = transactionalEntityManager.create(ProductVariation, {
-          ...variationDto,
-          product: savedProduct,
-          ...(tenantID ? { tenantID } : {}),
-        });
-        const savedVariation = await transactionalEntityManager.save(variation);
+        const savedVariation = await transactionalEntityManager.save(
+          createVariationEntity(transactionalEntityManager, {
+            dto: variationDto,
+            product: savedProduct,
+            tenantID,
+          }),
+        );
 
         if (centralStore) {
-          const sp = transactionalEntityManager.create(StoreProduct, {
-            store: { storeID: centralStore.storeID },
-            variation: { variationID: savedVariation.variationID },
-            stock: variationDto.stock,
+          await applyInventoryMovement(transactionalEntityManager, {
+            storeID: centralStore.storeID,
+            variationID: savedVariation.variationID,
+            reason: InventoryMovementReason.ADJUSTMENT,
+            newStock: variationDto.stock,
+            referenceID: savedProduct.productID,
+            tenantID,
+            allowNegativeStock: true,
             priceCost: variationDto.priceCost,
             priceList: variationDto.priceList,
-            ...(tenantID ? { tenantID } : {}),
+            skipZeroDelta: true,
           });
-          await transactionalEntityManager.save(sp);
         }
       }
 
@@ -107,67 +119,18 @@ export class ProductsService {
         for (const variation of product.variations) {
           if (!variation.storeProducts) continue;
           for (const sp of variation.storeProducts) {
-            if (this.pricingService) {
-              try {
-                const result = await this.pricingService.calculatePrice({
-                  storeProductID: sp.storeProductID,
-                  quantity: 1,
-                });
-                (sp as any).finalPrice = result.finalPrice;
-                (sp as any).discountApplied = result.discountApplied;
-                (sp as any).discountsApplied = result.discountsApplied ?? [];
-                (sp as any).activeOffer = result.discountDetails;
-                (sp as any).pricingBreakdown = result.breakdown;
-              } catch (e: any) {
-                (sp as any).pricingError =
-                  e.message || 'Error calculando precio';
-              }
-            } else {
-              const offers = sp['specialOffers'] || [];
-              const activeOffer = offers.sort(
-                (a, b) =>
-                  (b.startDate?.getTime?.() || 0) -
-                  (a.startDate?.getTime?.() || 0),
-              )[0];
-
-              let finalPrice = sp.priceList || 0;
-              let discountApplied = false;
-              let discountDetails: {
-                offerID: string;
-                description: string | undefined;
-                type: DiscountType;
-                value: number;
-              } | null = null;
-
-              if (activeOffer) {
-                const originalPrice = finalPrice;
-                switch (activeOffer.discountType) {
-                  case DiscountType.PERCENTAGE:
-                    finalPrice = originalPrice * (1 - activeOffer.value / 100);
-                    break;
-                  case DiscountType.FIXED_AMOUNT:
-                    finalPrice = Math.max(0, originalPrice - activeOffer.value);
-                    break;
-                  case DiscountType.FIXED_PRICE:
-                    finalPrice = Number(activeOffer.value);
-                    break;
-                }
-                finalPrice = Math.round(finalPrice * 100) / 100;
-                discountApplied = true;
-                discountDetails = {
-                  offerID: activeOffer.offerID,
-                  description: activeOffer.description,
-                  type: activeOffer.discountType,
-                  value: activeOffer.value,
-                };
-              }
-
-              (sp as any).finalPrice = finalPrice;
-              (sp as any).discountApplied = discountApplied;
-              (sp as any).discountsApplied = discountDetails
-                ? [{ ...discountDetails, applied: true }]
-                : [];
-              (sp as any).activeOffer = discountDetails;
+            try {
+              const result = await this.pricingService.calculatePrice({
+                storeProductID: sp.storeProductID,
+                quantity: 1,
+              });
+              (sp as any).finalPrice = result.finalPrice;
+              (sp as any).discountApplied = result.discountApplied;
+              (sp as any).discountsApplied = result.discountsApplied ?? [];
+              (sp as any).activeOffer = result.discountDetails;
+              (sp as any).pricingBreakdown = result.breakdown;
+            } catch (e: any) {
+              (sp as any).pricingError = e.message || 'Error calculando precio';
             }
           }
         }
@@ -204,14 +167,10 @@ export class ProductsService {
     const { variations, ...productData } = updateProductDto;
 
     return this.runInTransaction(async (transactionalEntityManager) => {
-      const product = await transactionalEntityManager.findOne(Product, {
-        where: { productID: id },
-        relations: ['variations'],
-      });
-
-      if (!product) {
-        throw new NotFoundException(`Producto con ID ${id} no encontrado`);
-      }
+      const product = await findProductForUpdate(
+        transactionalEntityManager,
+        id,
+      );
 
       transactionalEntityManager.merge(Product, product, productData);
       const savedProduct = await transactionalEntityManager.save(product);
@@ -219,90 +178,139 @@ export class ProductsService {
       const tenantID = this.tenantContext?.getTenantId();
 
       if (variations) {
-        const centralStore = await transactionalEntityManager.findOne(Store, {
-          where: {
-            isCentralStore: true,
-            ...(tenantID ? { tenantID } : {}),
-          },
+        const centralStore = await findCentralStore(
+          transactionalEntityManager,
+          tenantID,
+        );
+        const plan = buildVariationPlan({
+          variations,
+          existing: product.variations,
         });
 
-        const existingVariationsMap = new Map(
-          product.variations.map((v) => [v.sku, v]),
-        );
-
-        for (const vDto of variations) {
-          let variation = existingVariationsMap.get(vDto.sku);
-
-          if (variation) {
-            transactionalEntityManager.merge(ProductVariation, variation, vDto);
-            await transactionalEntityManager.save(variation);
-            existingVariationsMap.delete(vDto.sku);
-
-            if (centralStore) {
-              let sp = await transactionalEntityManager.findOne(StoreProduct, {
-                where: {
-                  store: { storeID: centralStore.storeID },
-                  variation: { variationID: variation.variationID },
-                },
-              });
-
-              if (sp) {
-                sp.stock = vDto.stock;
-                sp.priceCost = vDto.priceCost;
-                sp.priceList = vDto.priceList;
-                await transactionalEntityManager.save(sp);
-              } else {
-                sp = transactionalEntityManager.create(StoreProduct, {
-                  store: { storeID: centralStore.storeID },
-                  variation: { variationID: variation.variationID },
-                  stock: vDto.stock,
-                  priceCost: vDto.priceCost,
-                  priceList: vDto.priceList,
-                });
-                await transactionalEntityManager.save(sp);
-              }
-            }
+        for (const action of plan) {
+          if (action.kind === 'create') {
+            await this.applyVariationCreate(
+              transactionalEntityManager,
+              action,
+              savedProduct,
+              centralStore?.storeID,
+              tenantID,
+            );
+          } else if (action.kind === 'update') {
+            await this.applyVariationUpdate(
+              transactionalEntityManager,
+              action,
+              centralStore?.storeID,
+              tenantID,
+            );
           } else {
-            variation = transactionalEntityManager.create(ProductVariation, {
-              ...vDto,
-              product: savedProduct,
-            });
-            const savedVariation =
-              await transactionalEntityManager.save(variation);
-
-            if (centralStore) {
-              const sp = transactionalEntityManager.create(StoreProduct, {
-                store: { storeID: centralStore.storeID },
-                variation: { variationID: savedVariation.variationID },
-                stock: vDto.stock,
-                priceCost: vDto.priceCost,
-                priceList: vDto.priceList,
-              });
-              await transactionalEntityManager.save(sp);
-            }
+            await transactionalEntityManager.remove(action.variation);
           }
-        }
-
-        for (const [, variation] of existingVariationsMap) {
-          await transactionalEntityManager.remove(variation);
         }
       }
 
-      return transactionalEntityManager
-        .findOne(Product, {
-          where: { productID: id },
-          relations: [
-            'variations',
-            'variations.storeProducts',
-            'variations.storeProducts.store',
-            'category',
-          ],
-        })
-        .then((res) => {
-          if (!res)
-            throw new NotFoundException(`Producto con ID ${id} no encontrado`);
-          return res;
+      const result = await transactionalEntityManager.findOne(Product, {
+        where: { productID: id },
+        relations: [
+          'variations',
+          'variations.storeProducts',
+          'variations.storeProducts.store',
+          'category',
+        ],
+      });
+
+      if (!result) {
+        throw new NotFoundException(`Producto con ID ${id} no encontrado`);
+      }
+      return result;
+    });
+  }
+
+  private async applyVariationCreate(
+    manager: EntityManager,
+    action: Extract<VariationPlanAction, { kind: 'create' }>,
+    product: Product,
+    centralStoreID: string | undefined,
+    tenantID: string | undefined,
+  ): Promise<void> {
+    const savedVariation = await manager.save(
+      createVariationEntity(manager, {
+        dto: action.dto,
+        product,
+        tenantID,
+      }),
+    );
+
+    if (!centralStoreID) return;
+
+    await applyInventoryMovement(manager, {
+      storeID: centralStoreID,
+      variationID: savedVariation.variationID,
+      reason: InventoryMovementReason.ADJUSTMENT,
+      newStock: action.dto.stock,
+      referenceID: product.productID,
+      tenantID,
+      allowNegativeStock: true,
+      priceCost: action.dto.priceCost,
+      priceList: action.dto.priceList,
+      skipZeroDelta: true,
+    });
+  }
+
+  private async applyVariationUpdate(
+    manager: EntityManager,
+    action: Extract<VariationPlanAction, { kind: 'update' }>,
+    centralStoreID: string | undefined,
+    tenantID: string | undefined,
+  ): Promise<void> {
+    const { dto, variation } = action;
+    manager.merge(ProductVariation, variation, dto);
+    await manager.save(variation);
+
+    if (!centralStoreID) return;
+
+    const storeProduct = await findStoreProductForUpdate(
+      manager,
+      centralStoreID,
+      variation.variationID,
+    );
+
+    if (storeProduct) {
+      if (
+        dto.priceCost !== undefined &&
+        dto.priceCost !== storeProduct.priceCost
+      ) {
+        await this.pricingService.applyPriceChange(manager, storeProduct, {
+          priceType: PriceType.COST,
+          oldPrice: storeProduct.priceCost,
+          newPrice: dto.priceCost,
+          reason: 'Actualización de producto',
         });
+      }
+      if (
+        dto.priceList !== undefined &&
+        dto.priceList !== storeProduct.priceList
+      ) {
+        await this.pricingService.applyPriceChange(manager, storeProduct, {
+          priceType: PriceType.LIST,
+          oldPrice: storeProduct.priceList ?? 0,
+          newPrice: dto.priceList,
+          reason: 'Actualización de producto',
+        });
+      }
+    }
+
+    await applyInventoryMovement(manager, {
+      storeID: centralStoreID,
+      variationID: variation.variationID,
+      reason: InventoryMovementReason.ADJUSTMENT,
+      newStock: dto.stock,
+      referenceID: variation.product?.productID ?? variation.variationID,
+      tenantID,
+      allowNegativeStock: true,
+      priceCost: dto.priceCost,
+      priceList: dto.priceList,
+      skipZeroDelta: true,
     });
   }
 

@@ -8,11 +8,17 @@ import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.en
 import { EntityManager, Repository } from 'typeorm';
 import { NotFoundException } from '@nestjs/common';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { PricingService } from '../pricing/pricing.service';
+import { InventoryMovement, InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
+import { CreateProductDto } from './dto/create-product.dto';
 
 describe('ProductsService', () => {
   let service: ProductsService;
-  let productRepository: Repository<Product>;
   let entityManager: EntityManager;
+  let pricingService: {
+    calculatePrice: jest.Mock;
+    applyPriceChange: jest.Mock;
+  };
 
   const mockProductRepository = {
     find: jest.fn(),
@@ -42,6 +48,13 @@ describe('ProductsService', () => {
   };
 
   beforeEach(async () => {
+    jest.clearAllMocks();
+
+    pricingService = {
+      calculatePrice: jest.fn(),
+      applyPriceChange: jest.fn().mockResolvedValue({ historyID: 'history-1' }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ProductsService,
@@ -57,18 +70,15 @@ describe('ProductsService', () => {
           provide: EntityManager,
           useValue: mockEntityManager as any,
         },
+        {
+          provide: PricingService,
+          useValue: pricingService,
+        },
       ],
     }).compile();
 
     service = module.get<ProductsService>(ProductsService);
-    productRepository = module.get<Repository<Product>>(
-      getRepositoryToken(Product),
-    );
     entityManager = module.get<EntityManager>(EntityManager);
-  });
-
-  afterEach(() => {
-    jest.clearAllMocks();
   });
 
   it('should be defined', () => {
@@ -82,7 +92,6 @@ describe('ProductsService', () => {
         cb(mockEntityManager as any),
       );
 
-      // Mock a query builder chain used by the service
       const queryBuilderMock: any = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         take: jest.fn().mockReturnThis(),
@@ -103,17 +112,70 @@ describe('ProductsService', () => {
     });
   });
 
+  describe('create', () => {
+    it('creates the central StoreProduct and registers an ADJUSTMENT movement', async () => {
+      const dto: CreateProductDto = {
+        name: 'New Product',
+        variations: [
+          {
+            sku: 'SKU-1',
+            priceCost: 80,
+            priceList: 120,
+            stock: 10,
+          },
+        ],
+      };
+      const centralStore = { storeID: 'central-1', isCentralStore: true };
+
+      mockEntityManager.transaction.mockImplementation(async (cb) =>
+        cb(mockEntityManager as any),
+      );
+      mockEntityManager.findOne.mockImplementation((entity: unknown) =>
+        entity === Store ? centralStore : null,
+      );
+      mockEntityManager.create.mockImplementation(
+        (_entity: unknown, values: object) => ({ ...values }),
+      );
+      mockEntityManager.save.mockImplementation(async (entity: unknown) => {
+        const candidate = entity as { variationID?: string; productID?: string };
+        if (!candidate.variationID) candidate.productID ??= 'product-1';
+        if (candidate.productID && !candidate.variationID) {
+          candidate.variationID = 'variation-1';
+        }
+        return entity;
+      });
+
+      const result = await service.create(dto);
+
+      expect(result).toEqual(
+        expect.objectContaining({ name: 'New Product' }),
+      );
+      expect(mockEntityManager.save).toHaveBeenCalledWith(
+        expect.objectContaining({ sku: 'SKU-1', product: expect.anything() }),
+      );
+      expect(mockEntityManager.create).toHaveBeenCalledWith(
+        InventoryMovement,
+        expect.objectContaining({
+          store: { storeID: 'central-1' },
+          variation: { variationID: 'variation-1' },
+          delta: 10,
+          reason: InventoryMovementReason.ADJUSTMENT,
+        }),
+      );
+      expect(pricingService.applyPriceChange).not.toHaveBeenCalled();
+    });
+  });
+
   describe('update', () => {
-    it('should update a product and its variations', async () => {
+    it('updates stock and delegates price changes to PricingService', async () => {
       const updateDto: UpdateProductDto = {
         name: 'Updated Product',
         variations: [
           {
-            size: 'L',
+            sku: '123',
             priceCost: 80,
             priceList: 100,
             stock: 10,
-            sku: '123',
           },
         ],
       };
@@ -124,57 +186,62 @@ describe('ProductsService', () => {
           {
             variationID: 'v1',
             sku: '123',
-            stock: 5,
-            priceCost: 50,
-            priceList: 60,
+            product: { productID: '1' },
           },
         ],
       };
-      const updatedProduct = { ...existingProduct, ...updateDto };
       const centralStore = { storeID: 'central', isCentralStore: true };
+      const existingSP = {
+        storeProductID: 'sp-1',
+        tenantID: 'tenant-1',
+        stock: 5,
+        priceCost: 50,
+        priceList: 60,
+      };
 
-      mockEntityManager.transaction.mockImplementation(async (cb) => {
-        return cb(mockEntityManager as any);
-      });
-
-      // Mock findOne implementation to return correct entities
-      mockEntityManager.findOne.mockImplementation((entity, options) => {
+      mockEntityManager.transaction.mockImplementation(async (cb) =>
+        cb(mockEntityManager as any),
+      );
+      mockEntityManager.findOne.mockImplementation((entity: unknown) => {
         if (entity === Product) return Promise.resolve(existingProduct);
         if (entity === Store) return Promise.resolve(centralStore);
-        if (entity === StoreProduct) return Promise.resolve(null); // No existing StoreProduct
+        if (entity === StoreProduct) return Promise.resolve(existingSP);
         return Promise.resolve(null);
       });
-
-      mockEntityManager.save.mockImplementation((entity) =>
-        Promise.resolve(entity),
+      mockEntityManager.create.mockImplementation(
+        (_entity: unknown, values: object) => ({ ...values }),
       );
-
-      // Mock findOne called at the end of update to return result
-      jest.spyOn(service, 'findOne').mockResolvedValue(updatedProduct as any);
+      mockEntityManager.save.mockImplementation(async (entity: unknown) => entity);
+      mockEntityManager.merge.mockImplementation(() => undefined);
 
       const result = await service.update('1', updateDto);
 
-      expect(mockEntityManager.transaction).toHaveBeenCalled();
-
-      // Verify Store logic
-      expect(mockEntityManager.findOne).toHaveBeenCalledWith(
-        Store,
-        expect.anything(),
+      expect(result).toBeDefined();
+      expect(pricingService.applyPriceChange).toHaveBeenCalledTimes(2);
+      expect(pricingService.applyPriceChange).toHaveBeenCalledWith(
+        mockEntityManager,
+        existingSP,
+        expect.objectContaining({
+          priceType: 'cost',
+          oldPrice: 50,
+          newPrice: 80,
+        }),
       );
-      // Should create StoreProduct
       expect(mockEntityManager.create).toHaveBeenCalledWith(
-        StoreProduct,
+        InventoryMovement,
         expect.objectContaining({
           store: { storeID: 'central' },
-          stock: 10,
+          variation: { variationID: 'v1' },
+          delta: 5,
+          reason: InventoryMovementReason.ADJUSTMENT,
         }),
       );
     });
 
     it('should throw NotFoundException if product not found', async () => {
-      mockEntityManager.transaction.mockImplementation(async (cb) => {
-        return cb(mockEntityManager as any);
-      });
+      mockEntityManager.transaction.mockImplementation(async (cb) =>
+        cb(mockEntityManager as any),
+      );
       mockEntityManager.findOne.mockResolvedValue(null);
 
       await expect(service.update('1', {})).rejects.toThrow(NotFoundException);

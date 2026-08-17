@@ -17,7 +17,7 @@ import { FinancialMovementsService } from '../financial-movements/financial-move
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
-import { reserveStockAndSnapshotCosts } from '../inventory/inventory-stock.helper';
+import { reserveStockAndSnapshotCosts } from '../inventory/inventory-repository.helpers';
 import { Sale, SaleStatus, SaleType } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { SaleFolioCounter } from './entities/sale-folio-counter.entity';

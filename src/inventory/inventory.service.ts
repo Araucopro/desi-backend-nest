@@ -1,19 +1,16 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
-import {
-  InventoryMovement,
-  InventoryMovementReason,
-} from './entities/inventory-movement.entity';
+import { InventoryMovement } from './entities/inventory-movement.entity';
+import { InventoryMovementReason } from './entities/inventory-movement.entity';
 import { CreateInventoryMovementDto } from './dto/create-inventory-movement.dto';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import { applyInventoryMovement } from './inventory-repository.helpers';
 
 @Injectable()
 export class InventoryService {
   constructor(
-    @InjectRepository(InventoryMovement)
     private readonly dataSource: DataSource,
     @Optional() private readonly tenantContext?: TenantContextService,
     @Optional() private readonly transactionRunner?: TransactionRunnerService,
@@ -34,72 +31,30 @@ export class InventoryService {
   async createMovement(
     createInventoryMovementDto: CreateInventoryMovementDto,
   ): Promise<InventoryMovement> {
-    const { storeID, variationID, quantity, newStock, reason } =
+    const { storeID, variationID, quantity, newStock, reason, referenceID } =
       createInventoryMovementDto;
 
     return this.runInTransaction(async (manager) => {
-      let storeProduct = await manager.findOne(StoreProduct, {
-        where: {
-          store: { storeID },
-          variation: { variationID },
-        },
-      });
-
-      const tenantID = this.tenantContext?.getTenantId();
-
-      if (!storeProduct) {
-        storeProduct = manager.create(StoreProduct, {
-          store: { storeID },
-          variation: { variationID },
-          stock: 0,
-          priceCost: 0,
-          priceList: 0,
-          ...(tenantID ? { tenantID } : {}),
-        });
-      }
-
-      let delta = 0;
-      const currentStock = storeProduct.stock;
-
-      switch (reason) {
-        case InventoryMovementReason.SALE:
-        case InventoryMovementReason.TRANSFER_OUT:
-          if (!quantity)
-            throw new Error('Quantity required for this operation');
-          delta = -Math.abs(quantity);
-          break;
-
-        case InventoryMovementReason.PURCHASE:
-        case InventoryMovementReason.TRANSFER_IN:
-          if (!quantity)
-            throw new Error('Quantity required for this operation');
-          delta = Math.abs(quantity);
-          break;
-
-        case InventoryMovementReason.ADJUSTMENT:
-          if (newStock === undefined)
-            throw new Error('New Stock required for Adjustment');
-          delta = newStock - currentStock;
-          break;
-
-        default:
-          throw new Error('Invalid Movement Reason');
-      }
-
-      const movement = manager.create(InventoryMovement, {
-        ...(tenantID ? { tenantID } : {}),
-        store: { storeID },
-        variation: { variationID },
+      const { movement } = await applyInventoryMovement(manager, {
+        storeID,
+        variationID,
         reason,
-        delta,
-        referenceID: createInventoryMovementDto.referenceID,
+        quantity,
+        newStock,
+        referenceID,
+        tenantID: this.tenantContext?.getTenantId(),
+        allowNegativeStock:
+          reason !== InventoryMovementReason.SALE &&
+          reason !== InventoryMovementReason.TRANSFER_OUT,
+        createIfMissing:
+          reason !== InventoryMovementReason.SALE &&
+          reason !== InventoryMovementReason.TRANSFER_OUT,
       });
-      const savedMovement = await manager.save(movement);
 
-      storeProduct.stock += delta;
-      await manager.save(storeProduct);
-
-      return savedMovement;
+      if (!movement) {
+        throw new Error('No inventory movement was generated');
+      }
+      return movement;
     });
   }
 

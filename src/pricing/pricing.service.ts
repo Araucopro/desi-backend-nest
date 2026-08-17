@@ -92,25 +92,50 @@ export class PricingService {
           ? storeProduct.priceCost
           : (storeProduct.priceList ?? 0);
 
-      const history = manager.create(PriceHistory, {
-        storeProduct,
+      return this.applyPriceChange(manager, storeProduct, {
         priceType,
         oldPrice,
         newPrice,
         reason,
         changedBy,
       });
-      const savedHistory = await manager.save(history);
-
-      if (priceType === PriceType.COST) {
-        storeProduct.priceCost = newPrice;
-      } else {
-        storeProduct.priceList = newPrice;
-      }
-      await manager.save(storeProduct);
-
-      return savedHistory;
     });
+  }
+
+  /**
+   * Registra el cambio de precio en PriceHistory y actualiza el StoreProduct
+   * usando el EntityManager de la transacción del llamador.
+   */
+  async applyPriceChange(
+    manager: EntityManager,
+    storeProduct: StoreProduct,
+    changes: {
+      priceType: PriceType;
+      oldPrice: number;
+      newPrice: number;
+      reason?: string;
+      changedBy?: string;
+    },
+  ): Promise<PriceHistory> {
+    const history = manager.create(PriceHistory, {
+      tenantID: storeProduct.tenantID,
+      storeProduct,
+      priceType: changes.priceType,
+      oldPrice: changes.oldPrice,
+      newPrice: changes.newPrice,
+      reason: changes.reason,
+      changedBy: changes.changedBy,
+    });
+    const savedHistory = await manager.save(history);
+
+    if (changes.priceType === PriceType.COST) {
+      storeProduct.priceCost = changes.newPrice;
+    } else {
+      storeProduct.priceList = changes.newPrice;
+    }
+    await manager.save(storeProduct);
+
+    return savedHistory;
   }
 
   async getPriceHistory(storeID: string, variationID: string) {

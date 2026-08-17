@@ -5,11 +5,9 @@ import {
   Param,
   ParseUUIDPipe,
   Patch,
-  Post,
   Query,
 } from '@nestjs/common';
 import { StoreProductService } from './storeproduct.service';
-import { TransferStockDto } from './dto/transfer-stock.dto';
 import { UpdateStoreProductDto } from './dto/update-store-product.dto';
 import {
   ApiOperation,
@@ -25,25 +23,6 @@ import { Product } from '../../products/entities/product.entity';
 @Controller('storeproduct')
 export class StoreProductController {
   constructor(private readonly storeProductService: StoreProductService) {}
-
-  @Post('transfer')
-  @ApiOperation({
-    summary: 'Transferir stock de la central a una tienda',
-    description:
-      'Realiza una transferencia gratuita de productos desde el stock central hacia una tienda específica. Útil para movimientos internos sin transacción comercial.',
-  })
-  @ApiResponse({
-    status: 201,
-    description: 'Transferencia realizada exitosamente.',
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Stock insuficiente o datos inválidos.',
-  })
-  @ApiResponse({ status: 404, description: 'Tienda o Producto no encontrado.' })
-  transferStock(@Body() transferStockDto: TransferStockDto) {
-    return this.storeProductService.transferStock(transferStockDto);
-  }
 
   @Get('inventory')
   @ApiOperation({

@@ -254,7 +254,7 @@ describe('TransfersService', () => {
           tenantID: 'tenant-1',
           store: { storeID: 'store-b' },
           variation: { variationID: 'var-1' },
-          stock: 2,
+          stock: 0,
           priceCost: 0,
           priceList: 0,
         }),

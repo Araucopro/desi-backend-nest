@@ -3,15 +3,15 @@ import { StoreProductService } from './storeproduct.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { StoreProduct } from './entities/storeproduct.entity';
 import { DataSource, Repository } from 'typeorm';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { Product } from '../../products/entities/product.entity';
-import { Store } from '../../stores/entities/store.entity';
-import { ProductVariation } from '../../products/entities/product-variation.entity';
+import { PricingService } from '../../pricing/pricing.service';
+import { InventoryMovement, InventoryMovementReason } from '../../inventory/entities/inventory-movement.entity';
 
 describe('StoreProductService', () => {
   let service: StoreProductService;
-  let storeStockRepository: Repository<StoreProduct>;
   let productRepository: Repository<Product>;
+  let pricingService: { calculatePrice: jest.Mock; applyPriceChange: jest.Mock };
 
   const mockStoreStockRepository = {
     findOne: jest.fn(),
@@ -26,8 +26,26 @@ describe('StoreProductService', () => {
     transaction: jest.fn(),
   };
 
+  const mockManager = {
+    findOne: jest.fn(),
+    create: jest.fn(),
+    save: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
+
+    pricingService = {
+      calculatePrice: jest.fn(),
+      applyPriceChange: jest.fn().mockResolvedValue({ historyID: 'history-1' }),
+    };
+    mockManager.create.mockImplementation(
+      (_entity: unknown, values: object) => ({ ...values }),
+    );
+    mockManager.save.mockImplementation(async (entity: unknown) => entity);
+    mockDataSource.transaction.mockImplementation(async (cb) =>
+      cb(mockManager),
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -44,13 +62,14 @@ describe('StoreProductService', () => {
           provide: DataSource,
           useValue: mockDataSource,
         },
+        {
+          provide: PricingService,
+          useValue: pricingService,
+        },
       ],
     }).compile();
 
     service = module.get<StoreProductService>(StoreProductService);
-    storeStockRepository = module.get<Repository<StoreProduct>>(
-      getRepositoryToken(StoreProduct),
-    );
     productRepository = module.get<Repository<Product>>(
       getRepositoryToken(Product),
     );
@@ -61,18 +80,17 @@ describe('StoreProductService', () => {
   });
 
   describe('update', () => {
-    it('should update a store product', async () => {
+    it('updates stock through an ADJUSTMENT movement and prices through PricingService', async () => {
       const existingSP = {
         storeProductID: 'sp-1',
+        tenantID: 'tenant-1',
         stock: 10,
         priceCost: 100,
         priceList: 150,
-      } as StoreProduct;
-
-      mockStoreStockRepository.findOne.mockResolvedValue(existingSP);
-      mockStoreStockRepository.save.mockImplementation((sp) =>
-        Promise.resolve(sp),
-      );
+        store: { storeID: 'store-1' },
+        variation: { variationID: 'var-1' },
+      };
+      mockManager.findOne.mockResolvedValue(existingSP);
 
       const result = await service.update('sp-1', {
         stock: 20,
@@ -80,14 +98,38 @@ describe('StoreProductService', () => {
         priceList: 160,
       });
 
-      expect(result.stock).toBe(20);
-      expect(result.priceCost).toBe(110);
-      expect(result.priceList).toBe(160);
-      expect(mockStoreStockRepository.save).toHaveBeenCalled();
+      expect(mockManager.findOne).toHaveBeenCalledWith(
+        StoreProduct,
+        expect.objectContaining({
+          where: { storeProductID: 'sp-1' },
+          lock: { mode: 'pessimistic_write' },
+        }),
+      );
+      expect(mockManager.create).toHaveBeenCalledWith(
+        InventoryMovement,
+        expect.objectContaining({
+          store: { storeID: 'store-1' },
+          variation: { variationID: 'var-1' },
+          delta: 10,
+          reason: InventoryMovementReason.ADJUSTMENT,
+          referenceID: 'sp-1',
+        }),
+      );
+      expect(pricingService.applyPriceChange).toHaveBeenCalledTimes(2);
+      expect(pricingService.applyPriceChange).toHaveBeenCalledWith(
+        mockManager,
+        existingSP,
+        expect.objectContaining({
+          priceType: 'cost',
+          oldPrice: 100,
+          newPrice: 110,
+        }),
+      );
+      expect(result).toEqual(expect.objectContaining({ stock: 20 }));
     });
 
     it('should throw NotFoundException if store product not found', async () => {
-      mockStoreStockRepository.findOne.mockResolvedValue(null);
+      mockManager.findOne.mockResolvedValue(null);
 
       await expect(service.update('not-found', {})).rejects.toThrow(
         NotFoundException,
@@ -95,47 +137,50 @@ describe('StoreProductService', () => {
     });
   });
 
-  describe('transferStock', () => {
-    it('should perform stock transfer between stores', async () => {
-      const mockManager = {
-        findOne: jest.fn(),
-        create: jest.fn(),
-        save: jest.fn(),
+  describe('getStoreInventory', () => {
+    it('calculates prices only through PricingService', async () => {
+      const product = {
+        productID: 'product-1',
+        name: 'Producto A',
+        variations: [
+          {
+            variationID: 'var-1',
+            storeProducts: [
+              {
+                storeProductID: 'sp-1',
+                priceCost: 100,
+                priceList: 150,
+              },
+            ],
+          },
+        ],
       };
-
-      mockDataSource.transaction.mockImplementation(async (cb) => {
-        // Mock target store lookup
-        mockManager.findOne.mockResolvedValueOnce({ storeID: 'target-1' });
-        // Mock variation lookup
-        mockManager.findOne.mockResolvedValueOnce({ variationID: 'var-1' });
-        // Mock central store lookup
-        mockManager.findOne.mockResolvedValueOnce({
-          storeID: 'central-1',
-          isCentralStore: true,
-        });
-        // Mock central stock lookup
-        mockManager.findOne.mockResolvedValueOnce({
-          storeProductID: 'sp-central',
-          stock: 100,
-        });
-        // Mock target stock lookup (doesn't exist)
-        mockManager.findOne.mockResolvedValueOnce(null);
-
-        mockManager.create.mockReturnValue({
-          store: { storeID: 'target-1' },
-          variation: { variationID: 'var-1' },
-          stock: 0,
-        });
-
-        return cb(mockManager);
+      const queryBuilderMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([product]),
+      };
+      mockProductRepository.createQueryBuilder.mockReturnValue(queryBuilderMock);
+      pricingService.calculatePrice.mockResolvedValue({
+        finalPrice: 140,
+        discountApplied: true,
+        discountsApplied: [],
+        discountDetails: null,
+        breakdown: [],
       });
 
-      await service.transferStock({
-        targetStoreID: 'target-1',
-        items: [{ variationID: 'var-1', stock: 10, priceCost: 50 }],
-      });
+      const result = await service.getStoreInventory('store-1');
 
-      expect(mockDataSource.transaction).toHaveBeenCalled();
+      expect(pricingService.calculatePrice).toHaveBeenCalledWith({
+        storeProductID: 'sp-1',
+        quantity: 1,
+      });
+      expect(result[0].variations[0].storeProducts[0]).toEqual(
+        expect.objectContaining({
+          finalPrice: 140,
+          discountApplied: true,
+        }),
+      );
     });
   });
 });

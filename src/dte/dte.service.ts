@@ -26,7 +26,7 @@ import { isUniqueViolation } from '../common/utils/db-errors.util';
 import {
   reserveStockAndSnapshotCosts,
   revertReservedStock,
-} from '../inventory/inventory-stock.helper';
+} from '../inventory/inventory-repository.helpers';
 import {
   OpenfacturaCallResult,
   OpenfacturaClientService,
