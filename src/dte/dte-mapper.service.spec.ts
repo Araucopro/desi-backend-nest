@@ -50,12 +50,15 @@ describe('DteMapperService', () => {
 
     expect(encabezado.IdDoc.TipoDTE).toBe(39);
     expect(encabezado.IdDoc).not.toHaveProperty('FmaPago');
+    expect(encabezado.IdDoc).toMatchObject({ IndServicio: '3' });
     expect(encabezado.Emisor).toMatchObject({
       RznSocEmisor: 'Tienda Demo SpA',
       GiroEmisor: 'VENTA AL POR MENOR',
     });
     expect(encabezado.Emisor).not.toHaveProperty('RznSoc');
     expect(encabezado.Emisor).not.toHaveProperty('GiroEmis');
+    expect(encabezado.Emisor).not.toHaveProperty('Acteco');
+    expect(encabezado.Emisor).not.toHaveProperty('Telefono');
     expect(encabezado.Receptor).toEqual({
       RUTRecep: '66666666-6',
       RznSocRecep: 'Anonimo',
@@ -69,7 +72,10 @@ describe('DteMapperService', () => {
       MntNeto: 1681,
       IVA: 319,
       MntTotal: 2000,
+      VlrPagar: 2000,
     });
+    expect(encabezado.Totales).not.toHaveProperty('TasaIVA');
+    expect(encabezado.Totales).not.toHaveProperty('MontoPeriodo');
     expect(Number.isInteger(encabezado.Totales!.MntNeto)).toBe(true);
     expect(Number.isInteger(encabezado.Totales!.IVA)).toBe(true);
     expect(Number.isInteger(encabezado.Totales!.MntTotal)).toBe(true);
@@ -89,6 +95,10 @@ describe('DteMapperService', () => {
     });
     expect(encabezado.Emisor).not.toHaveProperty('RznSocEmisor');
     expect(encabezado.Emisor).not.toHaveProperty('GiroEmisor');
+    expect(encabezado.Emisor).toMatchObject({
+      Acteco: ['479100'],
+      Telefono: '+56 2 1234 5678',
+    });
     expect(encabezado.Receptor).toMatchObject({
       RUTRecep: '66666666-6',
       RznSocRecep: 'Cliente Ejemplo',
@@ -99,8 +109,11 @@ describe('DteMapperService', () => {
     });
     expect(encabezado.Totales).toMatchObject({
       MntNeto: 1681,
+      TasaIVA: '19',
       IVA: 319,
       MntTotal: 2000,
+      MontoPeriodo: 2000,
+      VlrPagar: 2000,
     });
     expect(Number.isInteger(encabezado.Totales!.MntNeto)).toBe(true);
     expect(Number.isInteger(encabezado.Totales!.IVA)).toBe(true);

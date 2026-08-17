@@ -52,4 +52,11 @@ type TpoTranVenta = 1 | 2 | 3;
 // 2: Corrige Texto Documento de Referencia
 // 3: Corrige montos
 type CodRef = 1 | 2 | 3;
+
+// Indica si la transacción corresponde a la prestación de un servicio
+// 1: Factura de servicios periódicos domiciliarios
+// 2: Factura de otros servicios periódicos
+// 3: Factura de Servicios. (en caso de Factura de Exportación: Servicios calificados como tal por Aduana)
+
+type IndServicio = 1 | 2 | 3;
 ```

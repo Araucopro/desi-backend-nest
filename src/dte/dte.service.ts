@@ -312,8 +312,9 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Auto-completar/construir datos del Emisor a partir de la tienda (Store),
-    // respetando el esquema de Boleta (RznSocEmisor/GiroEmisor) o Factura
-    // (RznSoc/GiroEmis) que exige Openfactura.
+    // respetando el esquema de Boleta (RznSocEmisor/GiroEmisor, sin
+    // Acteco/Telefono) o Factura (RznSoc/GiroEmis con Acteco/Telefono) que
+    // exige Openfactura.
     const encabezado = dto.dte.Encabezado;
     if (isBoletaEncabezado(encabezado)) {
       const existing = encabezado.Emisor;
@@ -321,14 +322,34 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
         RUTEmisor: store.rut,
         RznSocEmisor: store.businessName || store.name,
         GiroEmisor: store.giro || existing?.GiroEmisor || 'VENTA AL POR MENOR',
-        Acteco: store.acteco
-          ? store.acteco.split(',').map((a) => a.trim())
-          : existing?.Acteco || ['479100'],
         DirOrigen: store.address || existing?.DirOrigen || 'DIRECCION',
         CmnaOrigen: store.city || existing?.CmnaOrigen || 'SANTIAGO',
-        Telefono: store.phone || existing?.Telefono || '0 0',
         CdgSIISucur: store.cdgSIISucur || existing?.CdgSIISucur || undefined,
       };
+
+      // La Boleta 39 exige IndServicio en IdDoc y no acepta campos propios de
+      // Factura en Totales (TasaIVA, MontoPeriodo).
+      encabezado.IdDoc = {
+        TipoDTE: 39 as const,
+        ...(encabezado.IdDoc.Folio !== undefined
+          ? { Folio: encabezado.IdDoc.Folio }
+          : {}),
+        FchEmis: encabezado.IdDoc.FchEmis,
+        IndServicio: encabezado.IdDoc.IndServicio ?? '3',
+      };
+
+      if (encabezado.Totales) {
+        const { MntNeto, MntExe, IVA, MontoNF, MntTotal, VlrPagar } =
+          encabezado.Totales;
+        encabezado.Totales = {
+          ...(MntNeto !== undefined ? { MntNeto } : {}),
+          ...(MntExe !== undefined ? { MntExe } : {}),
+          ...(IVA !== undefined ? { IVA } : {}),
+          ...(MontoNF !== undefined ? { MontoNF } : {}),
+          ...(MntTotal !== undefined ? { MntTotal } : {}),
+          ...(VlrPagar !== undefined ? { VlrPagar } : {}),
+        };
+      }
     } else {
       const existing = encabezado.Emisor;
       encabezado.Emisor = {

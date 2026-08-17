@@ -48,8 +48,11 @@ function createDteDto(
         },
         Totales: {
           MntNeto: 1000,
+          TasaIVA: '19',
           IVA: 190,
           MntTotal: 1190,
+          MontoPeriodo: 1190,
+          VlrPagar: 1190,
         },
       },
       Detalle: [
@@ -125,6 +128,13 @@ function createMockManager(
           tenantID: 'tenant-1',
           rut: '76123456-7',
           name: 'Tienda Central',
+          businessName: 'Tienda Central SpA',
+          giro: 'VENTA AL POR MENOR',
+          acteco: '479100',
+          address: 'Av. Siempre Viva 123',
+          city: 'Santiago',
+          phone: '+56 2 1234 5678',
+          cdgSIISucur: '0',
           location: null,
         };
       }
@@ -581,6 +591,68 @@ describe('DteService', () => {
     expect(findSavedDocument(DteDocumentStatus.EMITIDO).paymentType).toBe(
       'Credito',
     );
+  });
+
+  it('sends a boleta Emisor without Acteco or Telefono to Openfactura', async () => {
+    const service = createService();
+
+    await service.create(
+      'store-1',
+      undefined,
+      createDteDto({ tipoDTE: 39, noFmaPago: true }) as any,
+    );
+
+    const body = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
+    expect(body.dte.Encabezado.IdDoc).toMatchObject({
+      TipoDTE: 39,
+      IndServicio: '3',
+    });
+    expect(body.dte.Encabezado.IdDoc).not.toHaveProperty('FmaPago');
+    expect(body.dte.Encabezado.IdDoc).not.toHaveProperty('TpoTranVenta');
+    expect(body.dte.Encabezado.Emisor).toMatchObject({
+      RznSocEmisor: 'Tienda Central SpA',
+      GiroEmisor: 'VENTA AL POR MENOR',
+      DirOrigen: 'Av. Siempre Viva 123',
+      CmnaOrigen: 'Santiago',
+      CdgSIISucur: '0',
+    });
+    expect(body.dte.Encabezado.Emisor).not.toHaveProperty('RznSoc');
+    expect(body.dte.Encabezado.Emisor).not.toHaveProperty('Acteco');
+    expect(body.dte.Encabezado.Emisor).not.toHaveProperty('Telefono');
+    expect(body.dte.Encabezado.Totales).toMatchObject({
+      MntNeto: 1000,
+      IVA: 190,
+      MntTotal: 1190,
+      VlrPagar: 1190,
+    });
+    expect(body.dte.Encabezado.Totales).not.toHaveProperty('TasaIVA');
+    expect(body.dte.Encabezado.Totales).not.toHaveProperty('MontoPeriodo');
+  });
+
+  it('sends a factura Emisor with Acteco and Telefono to Openfactura', async () => {
+    const service = createService();
+
+    await service.create('store-1', undefined, createDteDto() as any);
+
+    const body = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
+    expect(body.dte.Encabezado.Emisor).toMatchObject({
+      RznSoc: 'Tienda Central SpA',
+      GiroEmis: 'VENTA AL POR MENOR',
+      Acteco: ['479100'],
+      Telefono: '+56 2 1234 5678',
+      DirOrigen: 'Av. Siempre Viva 123',
+      CmnaOrigen: 'Santiago',
+      CdgSIISucur: '0',
+    });
+    expect(body.dte.Encabezado.Emisor).not.toHaveProperty('RznSocEmisor');
+    expect(body.dte.Encabezado.Totales).toMatchObject({
+      MntNeto: 1000,
+      TasaIVA: '19',
+      IVA: 190,
+      MntTotal: 1190,
+      MontoPeriodo: 1190,
+      VlrPagar: 1190,
+    });
   });
 
   it('stores the full Openfactura error in DB/log but truncates only the client message', async () => {

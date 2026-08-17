@@ -46,20 +46,13 @@ export class DteIdDocBoletaDto {
   FchEmis!: string;
 
   @ApiPropertyOptional({
-    description: 'Tipo de transacción compra',
-    example: '1',
+    description: 'Indicador de servicio (Boleta 39)',
+    example: '3',
   })
   @IsOptional()
   @IsString()
-  TpoTranCompra?: string;
-
-  @ApiPropertyOptional({
-    description: 'Tipo de transacción venta',
-    example: '1',
-  })
-  @IsOptional()
-  @IsString()
-  TpoTranVenta?: string;
+  @IsIn(['1', '2', '3'])
+  IndServicio?: string;
 }
 
 export class DteIdDocFacturaDto {
@@ -124,14 +117,6 @@ export class DteEmisorBoletaDto {
   GiroEmisor?: string;
 
   @ApiPropertyOptional({
-    description: 'Códigos de actividad',
-    example: ['479100'],
-  })
-  @IsOptional()
-  @IsArray()
-  Acteco?: string[];
-
-  @ApiPropertyOptional({
     description: 'Dirección origen',
     example: 'ARTURO PRAT 527 CURICO',
   })
@@ -143,11 +128,6 @@ export class DteEmisorBoletaDto {
   @IsOptional()
   @IsString()
   CmnaOrigen?: string;
-
-  @ApiPropertyOptional({ description: 'Teléfono', example: '0 0' })
-  @IsOptional()
-  @IsString()
-  Telefono?: string;
 
   @ApiPropertyOptional({
     description: 'Código sucursal SII',
@@ -245,7 +225,45 @@ class DteReceptorDto {
   CmnaRecep?: string;
 }
 
-class DteTotalesDto {
+class DteTotalesBoletaDto {
+  @ApiPropertyOptional({ description: 'Monto neto', example: 21008 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  MntNeto?: number;
+
+  @ApiPropertyOptional({ description: 'Monto exento', example: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  MntExe?: number;
+
+  @ApiPropertyOptional({ description: 'IVA', example: 3992 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  IVA?: number;
+
+  @ApiPropertyOptional({ description: 'Monto no facturable', example: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  MontoNF?: number;
+
+  @ApiPropertyOptional({ description: 'Monto total', example: 25000 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  MntTotal?: number;
+
+  @ApiPropertyOptional({ description: 'Valor a pagar', example: 25000 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  VlrPagar?: number;
+}
+
+class DteTotalesFacturaDto {
   @ApiPropertyOptional({ description: 'Monto neto', example: 21008 })
   @IsOptional()
   @Type(() => Number)
@@ -354,11 +372,11 @@ export class BoletaEncabezadoDto {
   @Type(() => DteReceptorDto)
   Receptor!: DteReceptorDto;
 
-  @ApiPropertyOptional({ type: DteTotalesDto })
+  @ApiPropertyOptional({ type: DteTotalesBoletaDto })
   @IsOptional()
   @ValidateNested()
-  @Type(() => DteTotalesDto)
-  Totales?: DteTotalesDto;
+  @Type(() => DteTotalesBoletaDto)
+  Totales?: DteTotalesBoletaDto;
 }
 
 export class FacturaEncabezadoDto {
@@ -380,11 +398,11 @@ export class FacturaEncabezadoDto {
   @Type(() => DteReceptorDto)
   Receptor!: DteReceptorDto;
 
-  @ApiPropertyOptional({ type: DteTotalesDto })
+  @ApiPropertyOptional({ type: DteTotalesFacturaDto })
   @IsOptional()
   @ValidateNested()
-  @Type(() => DteTotalesDto)
-  Totales?: DteTotalesDto;
+  @Type(() => DteTotalesFacturaDto)
+  Totales?: DteTotalesFacturaDto;
 }
 
 export type DteEncabezadoDto = BoletaEncabezadoDto | FacturaEncabezadoDto;

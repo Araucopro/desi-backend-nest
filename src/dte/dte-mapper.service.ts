@@ -34,7 +34,8 @@ export type SaleDteInput = {
  * Construye el payload Openfactura a partir de una venta ya calculada.
  *
  * - Boleta (39): ítems con precios que incluyen IVA y RUTRecep genérico
- *   `66666666-6`, con totales desglosados neto + IVA 19%.
+ *   `66666666-6`, `IndServicio: '3'` en IdDoc y totales sin `TasaIVA` ni
+ *   `MontoPeriodo`.
  * - Factura (33): ítems netos y receptor obligatorio con RUT válido.
  */
 @Injectable()
@@ -104,30 +105,7 @@ export class DteMapperService {
 
     const mntTotal = this.toInteger(sale.total);
     const mntNeto = this.toInteger(sale.total / (1 + TAX_RATE));
-    const totals = {
-      MntNeto: mntNeto,
-      IVA: mntTotal - mntNeto,
-      TasaIVA: '19',
-      MntTotal: mntTotal,
-      MontoPeriodo: mntTotal,
-      VlrPagar: mntTotal,
-    };
-
-    const emisorBase = {
-      RUTEmisor: store.rut,
-      ...(store.acteco
-        ? {
-            Acteco: store.acteco
-              .split(',')
-              .map((code) => code.trim())
-              .filter(Boolean),
-          }
-        : {}),
-      ...(store.address ? { DirOrigen: store.address } : {}),
-      ...(store.city ? { CmnaOrigen: store.city } : {}),
-      ...(store.phone ? { Telefono: store.phone } : {}),
-      ...(store.cdgSIISucur ? { CdgSIISucur: store.cdgSIISucur } : {}),
-    };
+    const iva = mntTotal - mntNeto;
 
     const encabezado = isBoleta
       ? {
@@ -135,14 +113,24 @@ export class DteMapperService {
             TipoDTE: 39 as const,
             Folio: 0,
             FchEmis: this.toDateOnly(sale.issueDate),
+            // Openfactura exige IndServicio en la Boleta 39 (su ejemplo usa '3').
+            IndServicio: '3',
           },
           Emisor: {
-            ...emisorBase,
+            RUTEmisor: store.rut,
             RznSocEmisor: store.businessName || store.name,
             ...(store.giro ? { GiroEmisor: store.giro } : {}),
+            ...(store.address ? { DirOrigen: store.address } : {}),
+            ...(store.city ? { CmnaOrigen: store.city } : {}),
+            ...(store.cdgSIISucur ? { CdgSIISucur: store.cdgSIISucur } : {}),
           },
           Receptor: receptor,
-          Totales: totals,
+          Totales: {
+            MntNeto: mntNeto,
+            IVA: iva,
+            MntTotal: mntTotal,
+            VlrPagar: mntTotal,
+          },
         }
       : {
           IdDoc: {
@@ -152,12 +140,31 @@ export class DteMapperService {
             FmaPago: this.mapFmaPago(sale.paymentType),
           },
           Emisor: {
-            ...emisorBase,
+            RUTEmisor: store.rut,
             RznSoc: store.businessName || store.name,
             ...(store.giro ? { GiroEmis: store.giro } : {}),
+            ...(store.acteco
+              ? {
+                  Acteco: store.acteco
+                    .split(',')
+                    .map((code) => code.trim())
+                    .filter(Boolean),
+                }
+              : {}),
+            ...(store.address ? { DirOrigen: store.address } : {}),
+            ...(store.city ? { CmnaOrigen: store.city } : {}),
+            ...(store.phone ? { Telefono: store.phone } : {}),
+            ...(store.cdgSIISucur ? { CdgSIISucur: store.cdgSIISucur } : {}),
           },
           Receptor: receptor,
-          Totales: totals,
+          Totales: {
+            MntNeto: mntNeto,
+            TasaIVA: '19',
+            IVA: iva,
+            MntTotal: mntTotal,
+            MontoPeriodo: mntTotal,
+            VlrPagar: mntTotal,
+          },
         };
 
     return {

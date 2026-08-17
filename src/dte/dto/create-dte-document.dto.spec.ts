@@ -60,10 +60,96 @@ describe('CreateDteDocumentDto', () => {
               TipoDTE: 39,
               FchEmis: '2026-08-03',
               FmaPago: '1',
+              TpoTranVenta: '1',
             },
             Emisor: {
               RUTEmisor: '76123456-7',
               RznSoc: 'Tienda Demo SpA',
+            },
+            Receptor: {
+              RUTRecep: '66666666-6',
+              RznSocRecep: 'Anonimo',
+            },
+            Totales: {
+              MntNeto: 1000,
+              TasaIVA: '19',
+              IVA: 190,
+              MntTotal: 1190,
+              MontoPeriodo: 1190,
+            },
+          },
+          Detalle: [
+            {
+              NroLinDet: 1,
+              NmbItem: 'Producto A',
+              QtyItem: 1,
+              PrcItem: 1000,
+              MontoItem: 1000,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects a boleta with factura-only totals', async () => {
+    const errors = await validateDto(
+      basePayload({
+        dte: {
+          Encabezado: {
+            IdDoc: {
+              TipoDTE: 39,
+              FchEmis: '2026-08-03',
+              IndServicio: '3',
+            },
+            Emisor: {
+              RUTEmisor: '76123456-7',
+              RznSocEmisor: 'Tienda Demo SpA',
+            },
+            Receptor: {
+              RUTRecep: '66666666-6',
+              RznSocRecep: 'Anonimo',
+            },
+            Totales: {
+              MntNeto: 1000,
+              TasaIVA: '19',
+              IVA: 190,
+              MntTotal: 1190,
+              MontoPeriodo: 1190,
+            },
+          },
+          Detalle: [
+            {
+              NroLinDet: 1,
+              NmbItem: 'Producto A',
+              QtyItem: 1,
+              PrcItem: 1000,
+              MontoItem: 1000,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects a boleta with Acteco or Telefono in Emisor', async () => {
+    const errors = await validateDto(
+      basePayload({
+        dte: {
+          Encabezado: {
+            IdDoc: {
+              TipoDTE: 39,
+              FchEmis: '2026-08-03',
+            },
+            Emisor: {
+              RUTEmisor: '76123456-7',
+              RznSocEmisor: 'Tienda Demo SpA',
+              Acteco: ['479100'],
+              Telefono: '0 0',
             },
             Receptor: {
               RUTRecep: '66666666-6',
@@ -86,6 +172,60 @@ describe('CreateDteDocumentDto', () => {
     expect(errors.length).toBeGreaterThan(0);
   });
 
+  it('accepts a boleta with allowed optional Emisor fields', async () => {
+    const payload = basePayload();
+    Object.assign((payload.dte as any).Encabezado.Emisor, {
+      GiroEmisor: 'VENTA AL POR MENOR',
+      DirOrigen: 'Av. Siempre Viva 123',
+      CmnaOrigen: 'Santiago',
+      CdgSIISucur: '0',
+    });
+
+    const errors = await validateDto(payload);
+    expect(errors).toEqual([]);
+  });
+
+  it('accepts a boleta with IndServicio and boleta totals', async () => {
+    const errors = await validateDto(
+      basePayload({
+        dte: {
+          Encabezado: {
+            IdDoc: {
+              TipoDTE: 39,
+              FchEmis: '2026-08-03',
+              IndServicio: '3',
+            },
+            Emisor: {
+              RUTEmisor: '76123456-7',
+              RznSocEmisor: 'Tienda Demo SpA',
+            },
+            Receptor: {
+              RUTRecep: '66666666-6',
+              RznSocRecep: 'Anonimo',
+            },
+            Totales: {
+              MntNeto: 1000,
+              IVA: 190,
+              MntTotal: 1190,
+              VlrPagar: 1190,
+            },
+          },
+          Detalle: [
+            {
+              NroLinDet: 1,
+              NmbItem: 'Producto A',
+              QtyItem: 1,
+              PrcItem: 1000,
+              MontoItem: 1000,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(errors).toEqual([]);
+  });
+
   it('accepts a valid factura (33) with FmaPago', async () => {
     const errors = await validateDto(
       basePayload({
@@ -103,6 +243,14 @@ describe('CreateDteDocumentDto', () => {
             Receptor: {
               RUTRecep: '66666666-6',
               RznSocRecep: 'Cliente SpA',
+            },
+            Totales: {
+              MntNeto: 1000,
+              TasaIVA: '19',
+              IVA: 190,
+              MntTotal: 1190,
+              MontoPeriodo: 1190,
+              VlrPagar: 1190,
             },
           },
           Detalle: [
