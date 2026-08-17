@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  Optional,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   Brackets,
@@ -34,10 +30,7 @@ import {
   validateDateRange,
   validateOfferConfiguration,
 } from './offer-engine';
-import type {
-  OfferCartContext,
-  OfferValidationInput,
-} from './offer.types';
+import type { OfferCartContext, OfferValidationInput } from './offer.types';
 
 export type {
   OfferCartContext,
@@ -532,5 +525,4 @@ export class OfferService {
     if (!offer) throw new NotFoundException('Oferta especial no encontrada');
     return offer;
   }
-
 }

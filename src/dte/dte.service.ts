@@ -11,7 +11,6 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { randomBytes, randomInt } from 'crypto';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { CreateDteDocumentDto } from './dto/create-dte-document.dto';
 import { DteDocumentResponseDto } from './dto/dte-document-response.dto';
@@ -34,16 +33,26 @@ import {
 } from './openfactura-client.service';
 import {
   applyFinalStatusToNormalized,
-  buildNormalizedPayload,
   buildResponse,
-  formatJson,
-  NormalizedDteItem,
-  normalizeStatus,
-  previewText,
 } from './dte-response.mapper';
 import { mapToDocumentPayload } from './dte-item-resolver';
+import {
+  buildDteFinalizePlan,
+  buildDtePreparationValues,
+  buildLocalToken,
+  costSnapshotChanged,
+  LOCAL_TOKEN_PREFIX,
+  readNormalizedItems,
+  resolveFolio,
+} from './dte-engine';
+import { findExistingDteDocument } from './dte-repository.helpers';
+import {
+  DteCreateOptions,
+  DteFinalizePlan,
+  DtePreparationValues,
+} from './dte.types';
 
-const LOCAL_TOKEN_PREFIX = 'local-';
+export type { DteCreateOptions } from './dte.types';
 
 type DtePreparation = {
   document: DteDocument;
@@ -58,15 +67,6 @@ type DteCreateOutcome =
 type DteFinalizeOutcome =
   | { kind: 'success'; response: DteDocumentResponseDto }
   | { kind: 'error'; message: string; response: DteDocumentResponseDto };
-
-export type DteCreateOptions = {
-  /** Cuando es false, el stock ya salió (conversión de nota de venta). */
-  reserveStock?: boolean;
-  /** Venta asociada, para trazabilidad e idempotencia de conversión. */
-  saleID?: string;
-  /** Forma de pago real del POS, preservada aunque el payload boleta no incluya FmaPago. */
-  paymentType?: DteDocumentPaymentType;
-};
 
 @Injectable()
 export class DteService implements OnModuleInit, OnModuleDestroy {
@@ -129,19 +129,6 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       : this.dataSource.transaction(callback);
   }
 
-  private toDateOnly(value: string): Date {
-    const date = new Date(`${value}T12:00:00`);
-    return Number.isNaN(date.getTime()) ? new Date() : date;
-  }
-
-  private buildToken(): string {
-    return `${LOCAL_TOKEN_PREFIX}${randomBytes(28).toString('hex')}`;
-  }
-
-  private buildFolio(existing?: number | null): number {
-    return existing && existing > 0 ? existing : randomInt(100000, 999999);
-  }
-
   private mapPaymentType(fmaPago?: string): DteDocumentPaymentType {
     const value = fmaPago?.trim();
     if (value === '1') return DteDocumentPaymentType.CASH;
@@ -150,32 +137,6 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       `FmaPago ausente o no reconocido ('${value ?? ''}'); se usará Efectivo`,
     );
     return DteDocumentPaymentType.CASH;
-  }
-
-  private async findExistingDocument(
-    manager: EntityManager,
-    idempotencyKey: string | undefined,
-    purchaseOrderID: string | undefined,
-  ): Promise<DteDocument | null> {
-    if (idempotencyKey) {
-      const byKey = await manager.findOne(DteDocument, {
-        where: { idempotencyKey },
-      });
-      if (byKey) return byKey;
-    }
-    if (purchaseOrderID) {
-      const byPO = await manager.findOne(DteDocument, {
-        where: { purchaseOrderID },
-      });
-      if (byPO) return byPO;
-    }
-    return null;
-  }
-
-  private readNormalizedItems(document: DteDocument): NormalizedDteItem[] {
-    const items = (document.payloadNormalized as { items?: unknown } | null)
-      ?.items;
-    return Array.isArray(items) ? (items as NormalizedDteItem[]) : [];
   }
 
   private async prepare(
@@ -187,7 +148,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     options?: DteCreateOptions,
   ): Promise<DteCreateOutcome> {
     const reserveStock = options?.reserveStock !== false;
-    const existing = await this.findExistingDocument(
+    const existing = await findExistingDteDocument(
       manager,
       idempotencyKey,
       dto.purchaseOrderID,
@@ -221,9 +182,9 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     const token =
       existing?.token && !existing.token.startsWith(LOCAL_TOKEN_PREFIX)
         ? existing.token
-        : this.buildToken();
+        : buildLocalToken();
     const folio =
-      existing?.folio ?? this.buildFolio(dto.dte.Encabezado.IdDoc.Folio);
+      existing?.folio ?? resolveFolio(dto.dte.Encabezado.IdDoc.Folio);
     const paymentType =
       options?.paymentType ??
       this.mapPaymentType(
@@ -234,38 +195,21 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
 
     const tenantID = this.tenantContext?.getTenantId() ?? store.tenantID;
 
-    const values = {
+    const values: DtePreparationValues = buildDtePreparationValues({
+      dto,
+      store,
+      normalizedItems,
+      totals,
       tenantID,
       apikey: this.openfacturaClient.maskApikey(apikey),
       idempotencyKey: idempotencyKeyToUse,
-      purchaseOrderID: dto.purchaseOrderID ?? null,
-      saleID: options?.saleID ?? null,
-      stockReserved: reserveStock,
+      purchaseOrderID: dto.purchaseOrderID,
+      saleID: options?.saleID,
+      reserveStock,
       token,
       folio,
-      store: { storeID: store.storeID },
-      storeID: store.storeID,
-      status: DteDocumentStatus.PENDIENTE,
-      documentType: dto.dte.Encabezado.IdDoc.TipoDTE ?? null,
       paymentType,
-      total: totals.total,
-      netTotal: totals.net,
-      taxTotal: totals.tax,
-      cogsTotal: totals.cogsTotal,
-      issueDate: this.toDateOnly(dto.dte.Encabezado.IdDoc.FchEmis),
-      payloadRaw: dto as unknown as Record<string, unknown>,
-      payloadNormalized: buildNormalizedPayload(
-        dto,
-        store,
-        normalizedItems,
-        totals,
-        token,
-        folio,
-        paymentType,
-        DteDocumentStatus.PENDIENTE,
-      ) as unknown as Record<string, unknown>,
-      errorDetail: null,
-    };
+    });
 
     let document: DteDocument | null = null;
 
@@ -281,7 +225,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       } catch (error) {
         await manager.query('ROLLBACK TO SAVEPOINT dte_document_insert');
         if (isUniqueViolation(error)) {
-          const concurrent = await this.findExistingDocument(
+          const concurrent = await findExistingDteDocument(
             manager,
             idempotencyKey,
             dto.purchaseOrderID,
@@ -321,17 +265,11 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
         document.dteDocumentID,
         this.tenantContext?.getTenantId(),
       );
-      const currentItems = this.readNormalizedItems(document);
-      const costsChanged =
-        reservedCogsTotal !== document.cogsTotal ||
-        normalizedItems.some((item, index) => {
-          const current = currentItems[index];
-          return (
-            !current ||
-            current.costPrice !== item.costPrice ||
-            current.costTotal !== item.costTotal
-          );
-        });
+      const costsChanged = costSnapshotChanged(
+        document,
+        normalizedItems,
+        reservedCogsTotal,
+      );
 
       if (costsChanged) {
         document.cogsTotal = reservedCogsTotal;
@@ -390,17 +328,14 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const payloadStatus = result.ok
-      ? normalizeStatus(result.payload.status)
-      : DteDocumentStatus.ERROR;
+    const plan: DteFinalizePlan = buildDteFinalizePlan(document, result);
 
-    if (result.ok && payloadStatus !== DteDocumentStatus.ERROR) {
-      document.status = payloadStatus;
-      const responseToken = result.payload.TOKEN ?? result.payload.token;
-      const responseFolio = result.payload.FOLIO ?? result.payload.folio;
-      if (responseToken) document.token = responseToken;
-      if (responseFolio !== undefined) document.folio = Number(responseFolio);
-      document.errorDetail = null;
+    document.status = plan.status;
+    document.token = plan.token;
+    document.folio = plan.folio;
+    document.errorDetail = plan.errorDetail;
+
+    if (plan.kind === 'success') {
       document.payloadNormalized = applyFinalStatusToNormalized(document);
 
       const saved = await manager.save(document);
@@ -413,21 +348,10 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       );
       return {
         kind: 'success',
-        response: buildResponse(saved, result.ok ? result.payload : undefined),
+        response: buildResponse(saved, plan.extraPayload),
       };
     }
 
-    document.status = DteDocumentStatus.ERROR;
-    const statusPreview = result.ok ? formatJson(result.payload) : '';
-    document.errorDetail = result.ok
-      ? `Openfactura reportó estado ERROR${
-          statusPreview ? `: ${statusPreview}` : ''
-        }`
-      : result.errorDetail;
-    if (!result.ok) {
-      if (result.token) document.token = result.token;
-      if (result.folio !== undefined) document.folio = Number(result.folio);
-    }
     document.payloadNormalized = applyFinalStatusToNormalized(
       document,
       document.errorDetail,
@@ -438,7 +362,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       await revertReservedStock(
         manager,
         saved.storeID,
-        this.readNormalizedItems(saved),
+        readNormalizedItems(saved),
         saved.dteDocumentID,
         this.tenantContext?.getTenantId() ?? saved.tenantID,
         (variationID) => {
@@ -454,7 +378,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     );
     return {
       kind: 'error',
-      message: `Openfactura no pudo emitir el documento ${saved.dteDocumentID}: ${previewText(document.errorDetail)}`,
+      message: plan.message,
       response: buildResponse(saved),
     };
   }

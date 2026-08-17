@@ -79,9 +79,7 @@ export type CountTotalAggregate = {
   total: number;
 };
 
-export function toNumber(
-  value: string | number | null | undefined,
-): number {
+export function toNumber(value: string | number | null | undefined): number {
   return Number(value ?? 0);
 }
 
@@ -175,9 +173,7 @@ export function buildTotals(
       cogs: toMoney(acc.cogs + month.cogs),
       grossProfit: toMoney(acc.grossProfit + month.grossProfit),
       expenses: toMoney(acc.expenses + month.expenses),
-      rejectedExpenses: toMoney(
-        acc.rejectedExpenses + month.rejectedExpenses,
-      ),
+      rejectedExpenses: toMoney(acc.rejectedExpenses + month.rejectedExpenses),
       purchases: toMoney(acc.purchases + month.purchases),
       creditTax: toMoney(acc.creditTax + month.creditTax),
       net: toMoney(acc.net + month.net),
@@ -344,9 +340,7 @@ export async function aggregateSaleNoteCountAndTotal(
   return { count: Number(raw.count || 0), total: Number(raw.total || 0) };
 }
 
-export function serializeDocument(
-  document: DteDocument,
-): DteDocumentListItem {
+export function serializeDocument(document: DteDocument): DteDocumentListItem {
   const payloadNormalized = document.payloadNormalized ?? {};
   const items = Array.isArray(payloadNormalized.items)
     ? (payloadNormalized.items as Array<Record<string, unknown>>)

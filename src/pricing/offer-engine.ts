@@ -7,9 +7,7 @@ import {
 } from './entities/special-offer.entity';
 import { OfferCartItem, OfferValidationInput } from './offer.types';
 
-export function validateOfferConfiguration(
-  config: OfferValidationInput,
-): void {
+export function validateOfferConfiguration(config: OfferValidationInput): void {
   const targetScope = config.targetScope ?? OfferTargetScope.VARIATION;
 
   if (config.discountType === DiscountType.BUY_X_GET_Y) {
@@ -121,9 +119,7 @@ export function simulateOfferPrice(
         return Math.max(
           0,
           currentPrice -
-            groups *
-              (offer.buyQuantity - offer.payQuantity) *
-              currentUnitPrice,
+            groups * (offer.buyQuantity - offer.payQuantity) * currentUnitPrice,
         );
       }
       return currentPrice;
@@ -149,10 +145,7 @@ export function resolveOfferPriority(offer: SpecialOffer): number {
   return priority;
 }
 
-export function sortOffers(
-  left: SpecialOffer,
-  right: SpecialOffer,
-): number {
+export function sortOffers(left: SpecialOffer, right: SpecialOffer): number {
   const priorityDiff = (left.priority ?? 0) - (right.priority ?? 0);
   if (priorityDiff !== 0) return priorityDiff;
   const startDiff =

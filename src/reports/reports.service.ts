@@ -274,10 +274,7 @@ export class ReportsService {
           saleStatusQuery.groupBy('sale.status').getRawMany(),
         ]);
 
-      const groupedByPaymentType = mergeGrouped(
-        paymentRaw,
-        salePaymentRaw,
-      );
+      const groupedByPaymentType = mergeGrouped(paymentRaw, salePaymentRaw);
       const groupedByStatus = mergeGrouped(statusRaw, saleStatusRaw);
 
       const now = new Date();
