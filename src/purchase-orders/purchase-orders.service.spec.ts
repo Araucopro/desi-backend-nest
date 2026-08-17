@@ -12,6 +12,10 @@ import { NotFoundException } from '@nestjs/common';
 import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
 import { ProductVariation } from '../products/entities/product-variation.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import {
+  InventoryMovement,
+  InventoryMovementReason,
+} from '../inventory/entities/inventory-movement.entity';
 
 describe('PurchaseOrdersService', () => {
   let service: PurchaseOrdersService;
@@ -42,6 +46,7 @@ describe('PurchaseOrdersService', () => {
 
   const mockPurchaseOrder: Partial<PurchaseOrder> = {
     purchaseOrderID: 'po-uuid-1',
+    tenantID: 'tenant-uuid-1',
     store: { storeID: 'store-uuid-1' } as any,
     folio: 'abc123',
     paymentStatus: PurchaseOrderPaymentStatus.PENDIENTE,
@@ -223,6 +228,12 @@ describe('PurchaseOrdersService', () => {
       paidAt?: Date | null;
       discount?: number;
       dto?: Record<string, unknown>;
+      items?: Array<{
+        variation: { variationID: string };
+        quantityRequested: number;
+        unitPrice: number;
+        subtotal: number;
+      }>;
     }) {
       const item = {
         variation: { variationID: 'var-1' },
@@ -230,6 +241,7 @@ describe('PurchaseOrdersService', () => {
         unitPrice: 100,
         subtotal: 200,
       };
+      const items = options.items ?? [item];
 
       return {
         findOne: jest.fn().mockImplementation(async (entity: unknown) => {
@@ -251,7 +263,7 @@ describe('PurchaseOrdersService', () => {
             stock: 5,
           };
         }),
-        find: jest.fn().mockResolvedValue([item]),
+        find: jest.fn().mockResolvedValue(items),
         create: jest.fn((_entity: unknown, values: unknown) => values),
         save: jest.fn(async (entity: unknown) => entity),
       };
@@ -345,6 +357,129 @@ describe('PurchaseOrdersService', () => {
         mockManager,
         expect.objectContaining({ netTotal: 150 }),
         paidAt,
+      );
+    });
+
+    it('creates one PURCHASE movement per item when moving to Pagado', async () => {
+      const mockManager = buildPaidUpdateManager({
+        previousPaymentStatus: PurchaseOrderPaymentStatus.PENDIENTE,
+        items: [
+          {
+            variation: { variationID: 'var-1' },
+            quantityRequested: 2,
+            unitPrice: 100,
+            subtotal: 200,
+          },
+          {
+            variation: { variationID: 'var-2' },
+            quantityRequested: 3,
+            unitPrice: 50,
+            subtotal: 150,
+          },
+        ],
+      });
+      mockDataSource.transaction.mockImplementation(async (cb) =>
+        cb(mockManager),
+      );
+      jest
+        .spyOn(service, 'findOne')
+        .mockResolvedValue(mockPurchaseOrder as PurchaseOrder);
+
+      await service.update('po-uuid-1', {
+        paymentStatus: PurchaseOrderPaymentStatus.PAGADO,
+      });
+
+      const movementCalls = mockManager.create.mock.calls.filter(
+        ([entity]) => entity === InventoryMovement,
+      );
+
+      expect(movementCalls).toHaveLength(2);
+      expect(movementCalls[0][1]).toEqual(
+        expect.objectContaining({
+          tenantID: 'tenant-uuid-1',
+          store: { storeID: 'store-uuid-1' },
+          variation: { variationID: 'var-1' },
+          delta: 2,
+          reason: InventoryMovementReason.PURCHASE,
+          referenceID: 'po-uuid-1',
+        }),
+      );
+      expect(movementCalls[1][1]).toEqual(
+        expect.objectContaining({
+          tenantID: 'tenant-uuid-1',
+          store: { storeID: 'store-uuid-1' },
+          variation: { variationID: 'var-2' },
+          delta: 3,
+          reason: InventoryMovementReason.PURCHASE,
+          referenceID: 'po-uuid-1',
+        }),
+      );
+    });
+
+    it('creates one ADJUSTMENT movement per item when reverting from Pagado', async () => {
+      const mockManager = buildPaidUpdateManager({
+        previousPaymentStatus: PurchaseOrderPaymentStatus.PAGADO,
+        paidAt: new Date('2026-01-10T12:00:00Z'),
+      });
+      mockDataSource.transaction.mockImplementation(async (cb) =>
+        cb(mockManager),
+      );
+      jest
+        .spyOn(service, 'findOne')
+        .mockResolvedValue(mockPurchaseOrder as PurchaseOrder);
+
+      await service.update('po-uuid-1', {
+        paymentStatus: PurchaseOrderPaymentStatus.PENDIENTE,
+      });
+
+      const movementCalls = mockManager.create.mock.calls.filter(
+        ([entity]) => entity === InventoryMovement,
+      );
+
+      expect(movementCalls).toHaveLength(1);
+      expect(movementCalls[0][1]).toEqual(
+        expect.objectContaining({
+          tenantID: 'tenant-uuid-1',
+          store: { storeID: 'store-uuid-1' },
+          variation: { variationID: 'var-1' },
+          delta: -2,
+          reason: InventoryMovementReason.ADJUSTMENT,
+          referenceID: 'po-uuid-1',
+        }),
+      );
+      expect(
+        mockFinancialMovementsService.removePurchaseOrder,
+      ).toHaveBeenCalledWith(mockManager, 'po-uuid-1');
+    });
+
+    it('does not duplicate stock or movements when editing an already paid order', async () => {
+      const mockManager = buildPaidUpdateManager({
+        previousPaymentStatus: PurchaseOrderPaymentStatus.PAGADO,
+        paidAt: new Date('2026-01-10T12:00:00Z'),
+        discount: 50,
+      });
+      mockDataSource.transaction.mockImplementation(async (cb) =>
+        cb(mockManager),
+      );
+      jest
+        .spyOn(service, 'findOne')
+        .mockResolvedValue(mockPurchaseOrder as PurchaseOrder);
+
+      await service.update('po-uuid-1', { discount: 50 });
+
+      const movementCalls = mockManager.create.mock.calls.filter(
+        ([entity]) => entity === InventoryMovement,
+      );
+      expect(movementCalls).toHaveLength(0);
+      expect(mockManager.save).not.toHaveBeenCalledWith(
+        expect.objectContaining({ storeProductID: 'sp-1' }),
+      );
+      expect(
+        mockFinancialMovementsService.recordPurchaseOrder,
+      ).toHaveBeenCalledWith(
+        mockManager,
+        expect.objectContaining({ netTotal: 150 }),
+        new Date('2026-01-10T12:00:00Z'),
       );
     });
   });
