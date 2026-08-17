@@ -30,6 +30,7 @@ import {
 import { UpdateSpecialOfferDto } from './dto/update-special-offer.dto';
 import { SpecialOfferListQueryDto } from './dto/special-offer-list.query.dto';
 import { TenantContextService } from '../multitenant/tenant-context.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 
 export type OfferCartItem = {
   storeProductID: string;
@@ -75,11 +76,16 @@ export class OfferService {
     @InjectRepository(Category)
     private readonly categoryRepository: Repository<Category>,
     @Optional() private readonly tenantContext?: TenantContextService,
+    @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
 
   private runInTransaction<T>(
     callback: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
+    if (this.transactionRunner) {
+      return this.transactionRunner.run(callback);
+    }
+
     if (this.tenantContext) {
       return this.tenantContext.transaction(callback);
     }

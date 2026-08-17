@@ -13,19 +13,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes, randomInt } from 'crypto';
 import { DataSource, EntityManager, Repository } from 'typeorm';
-import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
-import { Store } from '../stores/entities/store.entity';
-import { Product } from '../products/entities/product.entity';
-import { ProductVariation } from '../products/entities/product-variation.entity';
-import {
-  PurchaseOrder,
-  PurchaseOrderCommercialStatus,
-} from '../purchase-orders/entities/purchase-order.entity';
-import {
-  BoletaEncabezadoDto,
-  CreateDteDocumentDto,
-  DteEncabezadoDto,
-} from './dto/create-dte-document.dto';
+import { CreateDteDocumentDto } from './dto/create-dte-document.dto';
 import { DteDocumentResponseDto } from './dto/dte-document-response.dto';
 import {
   DteDocument,
@@ -34,52 +22,28 @@ import {
 } from './entities/dte-document.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import { isUniqueViolation } from '../common/utils/db-errors.util';
 import {
   reserveStockAndSnapshotCosts,
   revertReservedStock,
 } from '../inventory/inventory-stock.helper';
+import {
+  OpenfacturaCallResult,
+  OpenfacturaClientService,
+} from './openfactura-client.service';
+import {
+  applyFinalStatusToNormalized,
+  buildNormalizedPayload,
+  buildResponse,
+  formatJson,
+  NormalizedDteItem,
+  normalizeStatus,
+  previewText,
+} from './dte-response.mapper';
+import { mapToDocumentPayload } from './dte-item-resolver';
 
-const OPENFACTURA_TIMEOUT_MS = 15_000;
 const LOCAL_TOKEN_PREFIX = 'local-';
-const ERROR_DETAIL_PREVIEW_LIMIT = 300;
-const BINARY_RESPONSE_KEYS = ['PDF', 'XML', 'TIMBRE'];
-
-type NormalizedDteItem = {
-  NroLinDet: number;
-  NmbItem: string;
-  QtyItem: number;
-  PrcItem: number;
-  MontoItem: number;
-  costPrice: number;
-  costTotal: number;
-  variationID: string;
-  sku?: string;
-  productName?: string;
-  resolvedByName?: boolean;
-};
-
-type OpenfacturaDocumentResponse = {
-  TOKEN?: string;
-  FOLIO?: number;
-  PDF?: number;
-  XML?: number;
-  token?: string;
-  folio?: number;
-  status?: string;
-  [key: string]: unknown;
-};
-
-type OpenfacturaCallResult =
-  | {
-      ok: true;
-      payload: OpenfacturaDocumentResponse;
-    }
-  | {
-      ok: false;
-      errorDetail: string;
-      token?: string;
-      folio?: number;
-    };
 
 type DtePreparation = {
   document: DteDocument;
@@ -104,16 +68,11 @@ export type DteCreateOptions = {
   paymentType?: DteDocumentPaymentType;
 };
 
-function isBoletaEncabezado(
-  encabezado: DteEncabezadoDto,
-): encabezado is BoletaEncabezadoDto {
-  return encabezado.IdDoc.TipoDTE === 39;
-}
-
 @Injectable()
 export class DteService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DteService.name);
   private reconcileTimer?: ReturnType<typeof setInterval>;
+  private readonly openfacturaClient: OpenfacturaClientService;
 
   constructor(
     @InjectRepository(DteDocument)
@@ -122,7 +81,12 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     private readonly dataSource: DataSource,
     private readonly financialMovementsService: FinancialMovementsService,
     @Optional() private readonly tenantContext?: TenantContextService,
-  ) {}
+    @Optional() private readonly transactionRunner?: TransactionRunnerService,
+    @Optional() openfacturaClient?: OpenfacturaClientService,
+  ) {
+    this.openfacturaClient =
+      openfacturaClient ?? new OpenfacturaClientService(this.configService);
+  }
 
   onModuleInit(): void {
     const enabled =
@@ -156,27 +120,18 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
   private runInTransaction<T>(
     callback: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
+    if (this.transactionRunner) {
+      return this.transactionRunner.run(callback);
+    }
+
     return this.tenantContext
       ? this.tenantContext.transaction(callback)
       : this.dataSource.transaction(callback);
   }
 
-  private toMoney(value: number): number {
-    return Math.round((value + Number.EPSILON) * 100) / 100;
-  }
-
   private toDateOnly(value: string): Date {
     const date = new Date(`${value}T12:00:00`);
     return Number.isNaN(date.getTime()) ? new Date() : date;
-  }
-
-  private normalizeRut(rut: string): string {
-    return rut.trim().toUpperCase();
-  }
-
-  private maskApikey(apikey: string): string {
-    if (apikey.length <= 8) return '****';
-    return `${apikey.slice(0, 4)}...${apikey.slice(-4)}`;
   }
 
   private buildToken(): string {
@@ -195,267 +150,6 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       `FmaPago ausente o no reconocido ('${value ?? ''}'); se usará Efectivo`,
     );
     return DteDocumentPaymentType.CASH;
-  }
-
-  private normalizeName(value: string): string {
-    return value.trim().replace(/\s+/g, ' ').toLowerCase();
-  }
-
-  private async resolveVariation(
-    manager: EntityManager,
-    item: CreateDteDocumentDto['dte']['Detalle'][number],
-    stats: { count: number },
-  ): Promise<
-    ProductVariation & { product?: Product; resolvedByName?: boolean }
-  > {
-    const code = item.CdgItem?.VlrCodigo?.trim();
-
-    if (code) {
-      const bySku = await manager.findOne(ProductVariation, {
-        where: { sku: code },
-        relations: ['product'],
-      });
-      if (!bySku) {
-        throw new BadRequestException(
-          `No se pudo resolver la variación para el SKU "${code}"`,
-        );
-      }
-      return bySku;
-    }
-
-    const normalizedName = this.normalizeName(item.NmbItem);
-    const candidates = await manager
-      .createQueryBuilder(Product, 'product')
-      .innerJoinAndSelect('product.variations', 'variations')
-      .where(
-        `LOWER(REPLACE(product.name, ' ', '')) = LOWER(REPLACE(:name, ' ', ''))`,
-        { name: normalizedName },
-      )
-      .getMany();
-    const byName = candidates.find(
-      (product) => this.normalizeName(product.name) === normalizedName,
-    );
-
-    if (candidates.length > 1 || byName?.variations?.length !== 1) {
-      const detail = byName
-        ? `El ítem "${item.NmbItem}" tiene ${byName.variations?.length ?? 0} variaciones; usa SKU para resolverlo`
-        : candidates.length > 1
-          ? `El nombre "${item.NmbItem}" es ambiguo; usa SKU para resolverlo`
-          : `No se pudo resolver la variación para el item "${item.NmbItem}"`;
-      throw new BadRequestException(detail);
-    }
-
-    if (byName) {
-      stats.count += 1;
-      const variation = byName.variations[0];
-      this.logger.warn(
-        `Resolución de ítem por nombre | item="${item.NmbItem}" | variationID=${variation.variationID} | sku=${variation.sku}`,
-      );
-      return { ...variation, product: byName, resolvedByName: true };
-    }
-
-    throw new BadRequestException(
-      `No se pudo resolver la variación para el item "${item.NmbItem}"`,
-    );
-  }
-
-  private async mapToDocumentPayload(
-    manager: EntityManager,
-    dto: CreateDteDocumentDto,
-    storeID: string,
-  ): Promise<{
-    normalizedItems: NormalizedDteItem[];
-    store: Store;
-    totals: {
-      subtotal: number;
-      net: number;
-      tax: number;
-      total: number;
-      cogsTotal: number;
-    };
-  }> {
-    const store = await manager.findOne(Store, {
-      where: { storeID },
-    });
-
-    if (!store) {
-      throw new NotFoundException(`Tienda con ID ${storeID} no encontrada`);
-    }
-
-    if (
-      dto.dte.Encabezado.Emisor?.RUTEmisor &&
-      this.normalizeRut(dto.dte.Encabezado.Emisor.RUTEmisor) !==
-        this.normalizeRut(store.rut)
-    ) {
-      throw new BadRequestException(
-        `El RUTEmisor del payload no coincide con el RUT de la tienda de sesión`,
-      );
-    }
-
-    if (dto.purchaseOrderID) {
-      const po = await manager.findOne(PurchaseOrder, {
-        where: {
-          purchaseOrderID: dto.purchaseOrderID,
-          store: { storeID: store.storeID },
-        },
-      });
-      if (!po) {
-        throw new BadRequestException(
-          `Orden de compra ${dto.purchaseOrderID} no encontrada para esta tienda`,
-        );
-      }
-      if (po.status !== PurchaseOrderCommercialStatus.ACEPTADO) {
-        throw new BadRequestException(
-          `La orden de compra ${dto.purchaseOrderID} no está en estado Aceptado (actual: ${po.status})`,
-        );
-      }
-    }
-
-    // Auto-completar/construir datos del Emisor a partir de la tienda (Store),
-    // respetando el esquema de Boleta (RznSocEmisor/GiroEmisor, sin
-    // Acteco/Telefono) o Factura (RznSoc/GiroEmis con Acteco/Telefono) que
-    // exige Openfactura.
-    const encabezado = dto.dte.Encabezado;
-    if (isBoletaEncabezado(encabezado)) {
-      const existing = encabezado.Emisor;
-      encabezado.Emisor = {
-        RUTEmisor: store.rut,
-        RznSocEmisor: store.businessName || store.name,
-        GiroEmisor: store.giro || existing?.GiroEmisor || 'VENTA AL POR MENOR',
-        DirOrigen: store.address || existing?.DirOrigen || 'DIRECCION',
-        CmnaOrigen: store.city || existing?.CmnaOrigen || 'SANTIAGO',
-        CdgSIISucur: store.cdgSIISucur || existing?.CdgSIISucur || undefined,
-      };
-
-      // La Boleta 39 exige IndServicio en IdDoc y no acepta campos propios de
-      // Factura en Totales (TasaIVA, MontoPeriodo).
-      encabezado.IdDoc = {
-        TipoDTE: 39 as const,
-        ...(encabezado.IdDoc.Folio !== undefined
-          ? { Folio: encabezado.IdDoc.Folio }
-          : {}),
-        FchEmis: encabezado.IdDoc.FchEmis,
-        IndServicio: encabezado.IdDoc.IndServicio ?? '3',
-      };
-
-      if (encabezado.Totales) {
-        const { MntNeto, MntExe, IVA, MontoNF, MntTotal, VlrPagar } =
-          encabezado.Totales;
-        encabezado.Totales = {
-          ...(MntNeto !== undefined ? { MntNeto } : {}),
-          ...(MntExe !== undefined ? { MntExe } : {}),
-          ...(IVA !== undefined ? { IVA } : {}),
-          ...(MontoNF !== undefined ? { MontoNF } : {}),
-          ...(MntTotal !== undefined ? { MntTotal } : {}),
-          ...(VlrPagar !== undefined ? { VlrPagar } : {}),
-        };
-      }
-    } else {
-      const existing = encabezado.Emisor;
-      encabezado.Emisor = {
-        RUTEmisor: store.rut,
-        RznSoc: store.businessName || store.name,
-        GiroEmis: store.giro || existing?.GiroEmis || 'VENTA AL POR MENOR',
-        Acteco: store.acteco
-          ? store.acteco.split(',').map((a) => a.trim())
-          : existing?.Acteco || ['479100'],
-        DirOrigen: store.address || existing?.DirOrigen || 'DIRECCION',
-        CmnaOrigen: store.city || existing?.CmnaOrigen || 'SANTIAGO',
-        Telefono: store.phone || existing?.Telefono || '0 0',
-        CdgSIISucur: store.cdgSIISucur || existing?.CdgSIISucur || undefined,
-      };
-    }
-
-    const nameFallbackStats = { count: 0 };
-    const normalizedItems: NormalizedDteItem[] = [];
-    let subtotal = 0;
-
-    for (const item of dto.dte.Detalle) {
-      const variation = await this.resolveVariation(
-        manager,
-        item,
-        nameFallbackStats,
-      );
-      const quantity = Number(item.QtyItem);
-      const unitPrice =
-        item.PrcItem !== undefined
-          ? Number(item.PrcItem)
-          : item.MontoItem !== undefined && quantity > 0
-            ? Number(item.MontoItem) / quantity
-            : 0;
-      const amount = this.toMoney(
-        item.MontoItem !== undefined
-          ? Number(item.MontoItem)
-          : unitPrice * quantity,
-      );
-
-      subtotal += amount;
-      normalizedItems.push({
-        NroLinDet: item.NroLinDet,
-        NmbItem: item.NmbItem,
-        QtyItem: quantity,
-        PrcItem: this.toMoney(unitPrice),
-        MontoItem: amount,
-        costPrice: 0,
-        costTotal: 0,
-        variationID: variation.variationID,
-        sku: variation.sku,
-        productName: variation.product?.name,
-        resolvedByName: variation.resolvedByName ?? false,
-      });
-    }
-
-    if (nameFallbackStats.count > 0) {
-      this.logger.warn(
-        `DTE: ${nameFallbackStats.count} ítem(s) resuelto(s) por nombre en este documento; auditar payloads para migrar a SKU`,
-      );
-    }
-
-    const { items: normalizedItemsWithCosts, cogsTotal } =
-      await this.snapshotItemCosts(manager, store.storeID, normalizedItems);
-
-    const net = this.toMoney(dto.dte.Encabezado.Totales?.MntNeto ?? subtotal);
-    const tax = this.toMoney(dto.dte.Encabezado.Totales?.IVA ?? 0);
-    const total = this.toMoney(
-      dto.dte.Encabezado.Totales?.MntTotal ?? subtotal + tax,
-    );
-
-    return {
-      normalizedItems: normalizedItemsWithCosts,
-      store,
-      totals: {
-        subtotal: this.toMoney(subtotal),
-        net,
-        tax,
-        total,
-        cogsTotal,
-      },
-    };
-  }
-
-  private async snapshotItemCosts(
-    manager: EntityManager,
-    storeID: string,
-    items: NormalizedDteItem[],
-  ): Promise<{ items: NormalizedDteItem[]; cogsTotal: number }> {
-    let cogsTotal = 0;
-
-    for (const item of items) {
-      const storeProduct = await manager.findOne(StoreProduct, {
-        where: {
-          store: { storeID },
-          variation: { variationID: item.variationID },
-        },
-      });
-
-      const costPrice = this.toMoney(Number(storeProduct?.priceCost ?? 0));
-      const costTotal = this.toMoney(costPrice * item.QtyItem);
-      item.costPrice = costPrice;
-      item.costTotal = costTotal;
-      cogsTotal = this.toMoney(cogsTotal + costTotal);
-    }
-
-    return { items, cogsTotal };
   }
 
   private async findExistingDocument(
@@ -478,259 +172,10 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     return null;
   }
 
-  private isUniqueViolation(error: unknown): boolean {
-    const code =
-      (error as { code?: string })?.code ??
-      (error as { driverError?: { code?: string } })?.driverError?.code;
-    return code === '23505';
-  }
-
   private readNormalizedItems(document: DteDocument): NormalizedDteItem[] {
     const items = (document.payloadNormalized as { items?: unknown } | null)
       ?.items;
     return Array.isArray(items) ? (items as NormalizedDteItem[]) : [];
-  }
-
-  private buildResponse(
-    document: DteDocument,
-    extraPayload?: OpenfacturaDocumentResponse,
-  ): DteDocumentResponseDto {
-    const base: DteDocumentResponseDto = {
-      dteDocumentID: document.dteDocumentID,
-      TOKEN: document.token,
-      FOLIO: document.folio,
-      STATUS: document.status,
-      saleID: document.saleID,
-    };
-
-    if (extraPayload) {
-      if (extraPayload.PDF) base.PDF = String(extraPayload.PDF);
-      if (extraPayload.XML) base.XML = String(extraPayload.XML);
-      if (Array.isArray(extraPayload.WARNING))
-        base.WARNING = extraPayload.WARNING;
-      // Copiar cualquier otra clave devuelta por Openfactura
-      for (const [key, value] of Object.entries(extraPayload)) {
-        if (
-          !['TOKEN', 'FOLIO', 'status', 'STATUS', 'token', 'folio'].includes(
-            key,
-          )
-        ) {
-          base[key] = value;
-        }
-      }
-    }
-
-    return base;
-  }
-
-  private normalizeStatus(status?: string): DteDocumentStatus {
-    if (status === DteDocumentStatus.ERROR) return DteDocumentStatus.ERROR;
-    if (status === DteDocumentStatus.PENDIENTE) {
-      return DteDocumentStatus.PENDIENTE;
-    }
-    return DteDocumentStatus.EMITIDO;
-  }
-
-  private buildNormalizedPayload(
-    dto: CreateDteDocumentDto,
-    store: Store,
-    normalizedItems: NormalizedDteItem[],
-    totals: {
-      subtotal: number;
-      net: number;
-      tax: number;
-      total: number;
-      cogsTotal: number;
-    },
-    token: string,
-    folio: number,
-    paymentType: DteDocumentPaymentType,
-    status: DteDocumentStatus,
-  ) {
-    return {
-      token,
-      folio,
-      status,
-      paymentType,
-      total: totals.total,
-      cogsTotal: totals.cogsTotal,
-      store: {
-        storeID: store.storeID,
-        rut: store.rut,
-        name: store.name,
-        location: store.location,
-      },
-      dte: dto.dte,
-      customer: dto.customer ?? null,
-      customizePage: dto.customizePage ?? null,
-      response: dto.response,
-      totals,
-      items: normalizedItems,
-    };
-  }
-
-  private applyFinalStatusToNormalized(
-    document: DteDocument,
-    errorDetail?: string | null,
-  ): Record<string, unknown> {
-    const current =
-      document.payloadNormalized &&
-      typeof document.payloadNormalized === 'object'
-        ? { ...document.payloadNormalized }
-        : {};
-    current.status = document.status;
-    current.token = document.token;
-    current.folio = document.folio;
-    if (errorDetail !== undefined) current.errorDetail = errorDetail;
-    return current;
-  }
-
-  private formatJson(payload: OpenfacturaDocumentResponse): string {
-    try {
-      const safePayload = Object.fromEntries(
-        Object.entries(payload).filter(
-          ([key]) => !BINARY_RESPONSE_KEYS.includes(key),
-        ),
-      );
-      return JSON.stringify(safePayload) ?? '';
-    } catch {
-      return '';
-    }
-  }
-
-  private previewText(text: string): string {
-    const clean = text.trim();
-    if (!clean) return '';
-    return clean.length > ERROR_DETAIL_PREVIEW_LIMIT
-      ? `${clean.slice(0, ERROR_DETAIL_PREVIEW_LIMIT)}...`
-      : clean;
-  }
-
-  private async callOpenfactura(
-    url: string,
-    init: {
-      method: string;
-      headers: Record<string, string>;
-      body?: string;
-    },
-  ): Promise<OpenfacturaCallResult> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), OPENFACTURA_TIMEOUT_MS);
-    timer.unref?.();
-
-    try {
-      const response = await fetch(url, {
-        ...init,
-        signal: controller.signal,
-      });
-      const text = await response.text();
-      let payload: OpenfacturaDocumentResponse = {};
-
-      if (text) {
-        try {
-          payload = JSON.parse(text) as OpenfacturaDocumentResponse;
-        } catch {
-          payload = { status: response.status.toString() };
-        }
-      }
-
-      if (!response.ok) {
-        const detailBody = this.formatJson(payload) || text.trim();
-        const detail = `Openfactura respondió con estado ${response.status}${
-          detailBody ? `: ${detailBody}` : ''
-        }`;
-        this.logger.error(
-          `Openfactura respondió error | url=${url} | detail=${detail}`,
-        );
-        return {
-          ok: false,
-          errorDetail: detail,
-          token: payload.TOKEN ?? payload.token,
-          folio: payload.FOLIO ?? payload.folio,
-        };
-      }
-
-      this.logger.log(
-        `Openfactura respondió OK | url=${url} | TOKEN=${
-          payload.TOKEN ?? payload.token ?? 'none'
-        } | FOLIO=${payload.FOLIO ?? payload.folio ?? 'none'} | status=${
-          payload.status ?? 'none'
-        }`,
-      );
-      return { ok: true, payload };
-    } catch (error) {
-      const aborted = error instanceof Error && error.name === 'AbortError';
-      const detail = aborted
-        ? `Timeout llamando a Openfactura (${OPENFACTURA_TIMEOUT_MS} ms)`
-        : `Error de red llamando a Openfactura: ${
-            error instanceof Error ? error.message : String(error)
-          }`;
-      this.logger.error(
-        `Openfactura no respondió | url=${url} | detail=${detail}`,
-      );
-      return { ok: false, errorDetail: detail };
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  private createOpenfacturaDocument(
-    apikey: string,
-    idempotencyKey: string | null,
-    dto: CreateDteDocumentDto,
-  ): Promise<OpenfacturaCallResult> {
-    const baseUrl = this.configService.get<string>(
-      'OPENFACTURA_BASE_URL',
-      'https://dev-api.haulmer.com',
-    );
-    const url = `${baseUrl.replace(/\/$/, '')}/v2/dte/document`;
-    this.logger.log(`Enviando documento a Openfactura | url=${url}`);
-
-    return this.callOpenfactura(url, {
-      method: 'POST',
-      headers: {
-        apikey,
-        'content-type': 'application/json',
-        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
-      },
-      body: JSON.stringify(dto),
-    });
-  }
-
-  private getOpenfacturaDocument(
-    apikey: string,
-    token: string,
-  ): Promise<OpenfacturaCallResult> {
-    const baseUrl = this.configService.get<string>(
-      'OPENFACTURA_BASE_URL',
-      'https://dev-api.haulmer.com',
-    );
-    const url = `${baseUrl.replace(/\/$/, '')}/dte/document/${encodeURIComponent(
-      token,
-    )}/json`;
-    this.logger.log(`Consultando documento en Openfactura | url=${url}`);
-
-    return this.callOpenfactura(url, {
-      method: 'GET',
-      headers: {
-        apikey,
-        accept: 'application/json',
-      },
-    });
-  }
-
-  private requireApikey(): string {
-    const apikey = this.configService.get<string>('OPENFACTURA_APIKEY');
-    if (!apikey?.trim()) {
-      this.logger.error('OPENFACTURA_APIKEY no está configurada');
-      throw new InternalServerErrorException(
-        'OPENFACTURA_APIKEY no está configurada',
-      );
-    }
-    this.logger.log(
-      `OPENFACTURA_APIKEY detectada | length=${apikey.length} | preview=${this.maskApikey(apikey)}`,
-    );
-    return apikey;
   }
 
   private async prepare(
@@ -752,10 +197,10 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(
         `Documento existente reutilizado | dteDocumentID=${existing.dteDocumentID} | status=${existing.status}`,
       );
-      return { kind: 'existing', response: this.buildResponse(existing) };
+      return { kind: 'existing', response: buildResponse(existing) };
     }
 
-    const { normalizedItems, store, totals } = await this.mapToDocumentPayload(
+    const { normalizedItems, store, totals } = await mapToDocumentPayload(
       manager,
       dto,
       storeID,
@@ -791,7 +236,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
 
     const values = {
       tenantID,
-      apikey: this.maskApikey(apikey),
+      apikey: this.openfacturaClient.maskApikey(apikey),
       idempotencyKey: idempotencyKeyToUse,
       purchaseOrderID: dto.purchaseOrderID ?? null,
       saleID: options?.saleID ?? null,
@@ -809,7 +254,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       cogsTotal: totals.cogsTotal,
       issueDate: this.toDateOnly(dto.dte.Encabezado.IdDoc.FchEmis),
       payloadRaw: dto as unknown as Record<string, unknown>,
-      payloadNormalized: this.buildNormalizedPayload(
+      payloadNormalized: buildNormalizedPayload(
         dto,
         store,
         normalizedItems,
@@ -835,7 +280,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
         document = await manager.save(candidate);
       } catch (error) {
         await manager.query('ROLLBACK TO SAVEPOINT dte_document_insert');
-        if (this.isUniqueViolation(error)) {
+        if (isUniqueViolation(error)) {
           const concurrent = await this.findExistingDocument(
             manager,
             idempotencyKey,
@@ -848,7 +293,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
               );
               return {
                 kind: 'existing',
-                response: this.buildResponse(concurrent),
+                response: buildResponse(concurrent),
               };
             }
             document = await manager.save(
@@ -936,7 +381,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       document.status === DteDocumentStatus.EMITIDO ||
       document.status === DteDocumentStatus.ERROR
     ) {
-      return { kind: 'success', response: this.buildResponse(document) };
+      return { kind: 'success', response: buildResponse(document) };
     }
 
     if (document.status !== DteDocumentStatus.PENDIENTE) {
@@ -946,7 +391,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const payloadStatus = result.ok
-      ? this.normalizeStatus(result.payload.status)
+      ? normalizeStatus(result.payload.status)
       : DteDocumentStatus.ERROR;
 
     if (result.ok && payloadStatus !== DteDocumentStatus.ERROR) {
@@ -956,7 +401,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       if (responseToken) document.token = responseToken;
       if (responseFolio !== undefined) document.folio = Number(responseFolio);
       document.errorDetail = null;
-      document.payloadNormalized = this.applyFinalStatusToNormalized(document);
+      document.payloadNormalized = applyFinalStatusToNormalized(document);
 
       const saved = await manager.save(document);
       if (saved.status === DteDocumentStatus.EMITIDO) {
@@ -968,15 +413,12 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       );
       return {
         kind: 'success',
-        response: this.buildResponse(
-          saved,
-          result.ok ? result.payload : undefined,
-        ),
+        response: buildResponse(saved, result.ok ? result.payload : undefined),
       };
     }
 
     document.status = DteDocumentStatus.ERROR;
-    const statusPreview = result.ok ? this.formatJson(result.payload) : '';
+    const statusPreview = result.ok ? formatJson(result.payload) : '';
     document.errorDetail = result.ok
       ? `Openfactura reportó estado ERROR${
           statusPreview ? `: ${statusPreview}` : ''
@@ -986,7 +428,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       if (result.token) document.token = result.token;
       if (result.folio !== undefined) document.folio = Number(result.folio);
     }
-    document.payloadNormalized = this.applyFinalStatusToNormalized(
+    document.payloadNormalized = applyFinalStatusToNormalized(
       document,
       document.errorDetail,
     );
@@ -1012,8 +454,8 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     );
     return {
       kind: 'error',
-      message: `Openfactura no pudo emitir el documento ${saved.dteDocumentID}: ${this.previewText(document.errorDetail)}`,
-      response: this.buildResponse(saved),
+      message: `Openfactura no pudo emitir el documento ${saved.dteDocumentID}: ${previewText(document.errorDetail)}`,
+      response: buildResponse(saved),
     };
   }
 
@@ -1023,7 +465,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     dto: CreateDteDocumentDto,
     options?: DteCreateOptions,
   ): Promise<DteDocumentResponseDto> {
-    const apikey = this.requireApikey();
+    const apikey = this.openfacturaClient.requireApikey();
     this.logger.log(
       `create() iniciado | storeID=${storeID} | idempotencyKey=${
         idempotencyKey ?? 'none'
@@ -1041,8 +483,15 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     const { document, idempotencyKeyToUse, checkExistingToken } =
       outcome.preparation;
     const callResult = checkExistingToken
-      ? await this.getOpenfacturaDocument(apikey, checkExistingToken)
-      : await this.createOpenfacturaDocument(apikey, idempotencyKeyToUse, dto);
+      ? await this.openfacturaClient.getOpenfacturaDocument(
+          apikey,
+          checkExistingToken,
+        )
+      : await this.openfacturaClient.createOpenfacturaDocument(
+          apikey,
+          idempotencyKeyToUse,
+          dto,
+        );
 
     const finalOutcome = await this.runInTransaction((manager) =>
       this.finalizeInTransaction(manager, document.dteDocumentID, callResult),
@@ -1058,7 +507,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     dteDocumentID: string,
     storeID: string,
   ): Promise<DteDocumentResponseDto> {
-    const apikey = this.requireApikey();
+    const apikey = this.openfacturaClient.requireApikey();
 
     const document = await this.runInTransaction((manager) =>
       manager.findOne(DteDocument, {
@@ -1073,7 +522,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (document.status !== DteDocumentStatus.PENDIENTE) {
-      return this.buildResponse(document);
+      return buildResponse(document);
     }
 
     if (!document.token || document.token.startsWith(LOCAL_TOKEN_PREFIX)) {
@@ -1082,7 +531,10 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const result = await this.getOpenfacturaDocument(apikey, document.token);
+    const result = await this.openfacturaClient.getOpenfacturaDocument(
+      apikey,
+      document.token,
+    );
     const finalOutcome = await this.runInTransaction((manager) =>
       this.finalizeInTransaction(manager, dteDocumentID, result),
     );

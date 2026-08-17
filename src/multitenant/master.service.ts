@@ -1,14 +1,6 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-  UnauthorizedException,
-  OnModuleInit,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { ConfigService } from '@nestjs/config';
@@ -22,15 +14,30 @@ import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { QueryTenantsDto } from './dto/query-tenants.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { TenantContextService } from './tenant-context.service';
-import { Store } from '../stores/entities/store.entity';
-import { User } from '../users/entities/user.entity';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { UpdateUserDto } from '../users/dto/update-user.dto';
 import { CreateStoreDto } from '../stores/dto/create-store.dto';
 import { UpdateStoreDto } from '../stores/dto/update-store.dto';
-import { UserStore } from '../relations/userstores/entities/userstore.entity';
-import { Category } from '../categories/entities/category.entity';
-import { Product } from '../products/entities/product.entity';
+import { User } from '../users/entities/user.entity';
+import { Store } from '../stores/entities/store.entity';
+import { loginMaster, impersonate } from './master-auth.helper';
+import {
+  createTenant,
+  exportTenantData,
+  findAllTenants,
+  findTenantById,
+  getTenantMetrics,
+  setStatus,
+  updateSubscription,
+  updateTenant,
+} from './tenant-crud.helper';
+import {
+  createTenantStore,
+  createTenantUser,
+  provisionTenant,
+  updateTenantStore,
+  updateTenantUser,
+} from './tenant-provisioning.helper';
 
 @Injectable()
 export class MasterService implements OnModuleInit {
@@ -84,151 +91,19 @@ export class MasterService implements OnModuleInit {
   }
 
   async loginMaster(dto: LoginMasterDto) {
-    const masterUser = await this.masterUsers.findOne({
-      where: { email: dto.email },
-    });
-    if (!masterUser)
-      throw new UnauthorizedException('Invalid master credentials');
-
-    const isMatch = await bcrypt.compare(dto.password, masterUser.password);
-    if (!isMatch) throw new UnauthorizedException('Invalid master credentials');
-
-    const accessToken = await this.jwt.signAsync({
-      type: 'master',
-      masterUserId: masterUser.masterUserID,
-      role: masterUser.role,
-      sessionVersion: masterUser.sessionVersion,
-    });
-
-    return {
-      masterUser: {
-        masterUserID: masterUser.masterUserID,
-        email: masterUser.email,
-        role: masterUser.role,
-      },
-      accessToken,
-    };
-  }
-
-  private generateSlugBase(text: string): string {
-    return (
-      text
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '') || 'tenant'
-    );
-  }
-
-  private async generateUniqueSlug(baseText: string): Promise<string> {
-    const baseSlug = this.generateSlugBase(baseText);
-    let candidate = baseSlug;
-    let counter = 1;
-
-    while (await this.tenants.exists({ where: { slug: candidate } })) {
-      counter++;
-      candidate = `${baseSlug}-${counter}`;
-    }
-
-    return candidate;
+    return loginMaster(this.masterUsers, this.jwt, dto);
   }
 
   async createTenant(dto: CreateTenantDto) {
-    const slug = await this.generateUniqueSlug(dto.name);
-
-    const tenant = this.tenants.create({
-      name: dto.name,
-      slug,
-      status: dto.status ?? TenantStatus.ACTIVE,
-      maxStores: dto.maxStores ?? 5,
-      maxUsers: dto.maxUsers ?? 5,
-      timeZone: dto.timeZone ?? 'America/Santiago',
-      locale: dto.locale ?? 'es-CL',
-    });
-
-    return this.tenants.save(tenant);
-  }
-
-  private async getTenantUsersAndStores(tenantID: string) {
-    return this.tenantContext.run(
-      { tenantId: tenantID, impersonating: false },
-      () =>
-        this.tenantContext.transaction(async (manager) => {
-          const users = await manager.find(User, {
-            where: { tenantID },
-            select: [
-              'userID',
-              'tenantID',
-              'email',
-              'name',
-              'role',
-              'userImg',
-              'sessionVersion',
-              'createdAt',
-              'updatedAt',
-            ],
-          });
-          const stores = await manager.find(Store, {
-            where: { tenantID },
-          });
-          return { users, stores };
-        }),
-    );
+    return createTenant(this.tenants, dto);
   }
 
   async findAllTenants(query: QueryTenantsDto) {
-    const { limit = 10, offset = 0, status, search } = query;
-
-    const queryBuilder = this.tenants.createQueryBuilder('tenant');
-
-    if (status) {
-      queryBuilder.andWhere('tenant.status = :status', { status });
-    }
-
-    if (search) {
-      queryBuilder.andWhere(
-        '(tenant.name ILIKE :search OR tenant.slug ILIKE :search)',
-        { search: `%${search}%` },
-      );
-    }
-
-    queryBuilder.orderBy('tenant.createdAt', 'DESC').take(limit).skip(offset);
-
-    const [tenantsList, total] = await queryBuilder.getManyAndCount();
-
-    const items = await Promise.all(
-      tenantsList.map(async (tenant) => {
-        const { users, stores } = await this.getTenantUsersAndStores(
-          tenant.tenantID,
-        );
-        return {
-          ...tenant,
-          users,
-          stores,
-        };
-      }),
-    );
-
-    return {
-      items,
-      total,
-      limit,
-      offset,
-    };
+    return findAllTenants(this.tenants, this.tenantContext, query);
   }
 
   async findTenantById(tenantID: string) {
-    const tenant = await this.tenants.findOne({ where: { tenantID } });
-    if (!tenant) throw new NotFoundException('Tenant not found');
-
-    const { users, stores } = await this.getTenantUsersAndStores(tenantID);
-
-    return {
-      ...tenant,
-      users,
-      stores,
-    };
+    return findTenantById(this.tenants, this.tenantContext, tenantID);
   }
 
   async updateTenant(
@@ -236,30 +111,7 @@ export class MasterService implements OnModuleInit {
     dto: UpdateTenantDto,
     masterUserID: string,
   ) {
-    const tenant = await this.tenants.findOne({ where: { tenantID } });
-    if (!tenant) throw new NotFoundException('Tenant not found');
-
-    if (dto.name !== undefined) tenant.name = dto.name;
-    if (dto.status !== undefined) tenant.status = dto.status;
-    if (dto.maxStores !== undefined) tenant.maxStores = dto.maxStores;
-    if (dto.maxUsers !== undefined) tenant.maxUsers = dto.maxUsers;
-    if (dto.timeZone !== undefined) tenant.timeZone = dto.timeZone;
-    if (dto.locale !== undefined) tenant.locale = dto.locale;
-
-    const updatedTenant = await this.tenants.save(tenant);
-
-    await this.audit.save(
-      this.audit.create({
-        tenantID,
-        masterUserID,
-        action: 'UPDATE_TENANT',
-        endpoint: 'master/tenants',
-        result: 'SUCCESS',
-        reason: 'Master tenant update',
-      }),
-    );
-
-    return updatedTenant;
+    return updateTenant(this.tenants, this.audit, tenantID, dto, masterUserID);
   }
 
   async setStatus(
@@ -267,46 +119,18 @@ export class MasterService implements OnModuleInit {
     status: TenantStatus,
     masterUserID: string,
   ) {
-    const tenant = await this.tenants.findOne({ where: { tenantID } });
-    if (!tenant) throw new NotFoundException('Tenant not found');
-    tenant.status = status;
-    const result = await this.tenants.save(tenant);
-    await this.audit.save(
-      this.audit.create({
-        tenantID,
-        masterUserID,
-        action: 'STATUS',
-        endpoint: 'master/tenants',
-        result: status,
-        reason: 'master status change',
-      }),
-    );
-    return result;
+    return setStatus(this.tenants, this.audit, tenantID, status, masterUserID);
   }
 
   async impersonate(tenantID: string, masterUserID: string, reason?: string) {
-    const tenant = await this.tenants.findOne({
-      where: { tenantID, status: TenantStatus.ACTIVE },
-    });
-    if (!tenant) throw new NotFoundException('Tenant not found or inactive');
-    await this.audit.save(
-      this.audit.create({
-        tenantID,
-        masterUserID,
-        action: 'IMPERSONATE',
-        endpoint: 'master/impersonate',
-        result: 'ISSUED',
-        reason: reason ?? 'N/A',
-      }),
+    return impersonate(
+      this.tenants,
+      this.audit,
+      this.jwt,
+      tenantID,
+      masterUserID,
+      reason,
     );
-    return this.jwt.signAsync({
-      type: 'master',
-      masterUserId: masterUserID,
-      role: 'SUPPORT',
-      sessionVersion: 1,
-      impersonatingTenantId: tenantID,
-      impersonatedBy: masterUserID,
-    });
   }
 
   async provisionTenant(
@@ -314,79 +138,12 @@ export class MasterService implements OnModuleInit {
     dto: ProvisionTenantDto,
     masterUserID: string,
   ) {
-    const tenant = await this.tenants.findOne({ where: { tenantID } });
-    if (!tenant) throw new NotFoundException('Tenant not found');
-    if (tenant.status === TenantStatus.ACTIVE) {
-      throw new ConflictException('Tenant is already active and provisioned');
-    }
-
-    const passwordHash = await bcrypt.hash(dto.user.password, 10);
-
-    return this.tenantContext.run(
-      { tenantId: tenantID, masterUserId: masterUserID, impersonating: false },
-      () =>
-        this.tenantContext.transaction(async (manager) => {
-          const store = manager.create(Store, {
-            ...dto.store,
-            tenantID,
-          });
-          const savedStore = await manager.save(Store, store);
-
-          const user = manager.create(User, {
-            tenantID,
-            email: dto.user.email,
-            name: dto.user.name,
-            password: passwordHash,
-            role: dto.user.role,
-            userImg: dto.user.userImg ?? null,
-            sessionVersion: 1,
-          });
-          const savedUser = await manager.save(User, user);
-
-          const userStore = manager.create(UserStore, {
-            tenantID,
-            user: savedUser,
-            store: savedStore,
-          });
-          await manager.save(UserStore, userStore);
-
-          const defaultCategory = manager.create(Category, {
-            tenantID,
-            name: 'General',
-          });
-          await manager.save(Category, defaultCategory);
-
-          tenant.status = TenantStatus.ACTIVE;
-          await manager.save(Tenant, tenant);
-
-          await manager.save(
-            AuditEvent,
-            manager.create(AuditEvent, {
-              tenantID,
-              masterUserID,
-              action: 'PROVISION_TENANT',
-              endpoint: 'master/tenants/provision',
-              result: 'SUCCESS',
-              reason: 'Initial onboarding completed',
-            }),
-          );
-
-          return {
-            message: 'Tenant provisioned successfully',
-            tenantID: tenant.tenantID,
-            centralStoreID: savedStore.storeID,
-            adminUserID: savedUser.userID,
-            status: tenant.status,
-          };
-        }),
-    );
-  }
-
-  private isUniqueViolation(error: unknown): boolean {
-    return (
-      error instanceof QueryFailedError &&
-      (error as { driverError?: { code?: string } }).driverError?.code ===
-        '23505'
+    return provisionTenant(
+      this.tenants,
+      this.tenantContext,
+      tenantID,
+      dto,
+      masterUserID,
     );
   }
 
@@ -395,62 +152,7 @@ export class MasterService implements OnModuleInit {
     dto: CreateUserDto,
     masterUserID: string,
   ): Promise<User> {
-    const passwordHash = await bcrypt.hash(dto.password, 10);
-
-    return this.tenantContext.run(
-      { tenantId: tenantID, masterUserId: masterUserID, impersonating: false },
-      () =>
-        this.tenantContext.transaction(async (manager) => {
-          const tenant = await manager.getRepository(Tenant).findOne({
-            where: { tenantID },
-            lock: { mode: 'pessimistic_write' },
-          });
-          if (!tenant) throw new NotFoundException('Tenant not found');
-          if (tenant.status !== TenantStatus.ACTIVE)
-            throw new ConflictException('Tenant is not active');
-
-          const userRepository = manager.getRepository(User);
-          const userCount = await userRepository.count({
-            where: { tenantID },
-          });
-          if (userCount >= tenant.maxUsers)
-            throw new ForbiddenException(
-              `Tenant user limit (${tenant.maxUsers}) exceeded`,
-            );
-
-          let savedUser: User;
-          try {
-            savedUser = await userRepository.save(
-              userRepository.create({
-                ...dto,
-                tenantID,
-                password: passwordHash,
-                sessionVersion: 1,
-              }),
-            );
-          } catch (error) {
-            if (this.isUniqueViolation(error))
-              throw new ConflictException(
-                `User with email ${dto.email} already exists`,
-              );
-            throw error;
-          }
-
-          await manager.save(
-            AuditEvent,
-            manager.create(AuditEvent, {
-              tenantID,
-              masterUserID,
-              action: 'CREATE_USER',
-              endpoint: 'master/tenants/:tenantId/users',
-              result: 'SUCCESS',
-              reason: `Master created user ${savedUser.email}`,
-            }),
-          );
-
-          return savedUser;
-        }),
-    );
+    return createTenantUser(this.tenantContext, tenantID, dto, masterUserID);
   }
 
   async updateTenantUser(
@@ -459,37 +161,12 @@ export class MasterService implements OnModuleInit {
     dto: UpdateUserDto,
     masterUserID: string,
   ): Promise<User> {
-    return this.tenantContext.run(
-      { tenantId: tenantID, masterUserId: masterUserID, impersonating: false },
-      () =>
-        this.tenantContext.transaction(async (manager) => {
-          const user = await manager.getRepository(User).findOne({
-            where: { userID, tenantID },
-          });
-          if (!user) throw new NotFoundException('User not found');
-
-          const updates = { ...dto };
-          if (updates.password) {
-            updates.password = await bcrypt.hash(updates.password, 10);
-          }
-          Object.assign(user, updates);
-
-          const savedUser = await manager.getRepository(User).save(user);
-
-          await manager.save(
-            AuditEvent,
-            manager.create(AuditEvent, {
-              tenantID,
-              masterUserID,
-              action: 'UPDATE_USER',
-              endpoint: 'master/tenants/:tenantId/users/:userId',
-              result: 'SUCCESS',
-              reason: `Master updated user ${savedUser.email}`,
-            }),
-          );
-
-          return savedUser;
-        }),
+    return updateTenantUser(
+      this.tenantContext,
+      tenantID,
+      userID,
+      dto,
+      masterUserID,
     );
   }
 
@@ -498,58 +175,7 @@ export class MasterService implements OnModuleInit {
     dto: CreateStoreDto,
     masterUserID: string,
   ): Promise<Store> {
-    return this.tenantContext.run(
-      { tenantId: tenantID, masterUserId: masterUserID, impersonating: false },
-      () =>
-        this.tenantContext.transaction(async (manager) => {
-          const tenant = await manager.getRepository(Tenant).findOne({
-            where: { tenantID },
-            lock: { mode: 'pessimistic_write' },
-          });
-          if (!tenant) throw new NotFoundException('Tenant not found');
-          if (tenant.status !== TenantStatus.ACTIVE)
-            throw new ConflictException('Tenant is not active');
-
-          const storeRepository = manager.getRepository(Store);
-          const storeCount = await storeRepository.count({
-            where: { tenantID },
-          });
-          if (storeCount >= tenant.maxStores)
-            throw new ForbiddenException(
-              `Tenant store limit (${tenant.maxStores}) exceeded`,
-            );
-
-          let savedStore: Store;
-          try {
-            savedStore = await storeRepository.save(
-              storeRepository.create({
-                ...dto,
-                tenantID,
-              }),
-            );
-          } catch (error) {
-            if (this.isUniqueViolation(error))
-              throw new ConflictException(
-                `Store with email ${dto.email} or name ${dto.name} already exists`,
-              );
-            throw error;
-          }
-
-          await manager.save(
-            AuditEvent,
-            manager.create(AuditEvent, {
-              tenantID,
-              masterUserID,
-              action: 'CREATE_STORE',
-              endpoint: 'master/tenants/:tenantId/stores',
-              result: 'SUCCESS',
-              reason: `Master created store ${savedStore.name}`,
-            }),
-          );
-
-          return savedStore;
-        }),
-    );
+    return createTenantStore(this.tenantContext, tenantID, dto, masterUserID);
   }
 
   async updateTenantStore(
@@ -558,133 +184,17 @@ export class MasterService implements OnModuleInit {
     dto: UpdateStoreDto,
     masterUserID: string,
   ): Promise<Store> {
-    return this.tenantContext.run(
-      { tenantId: tenantID, masterUserId: masterUserID, impersonating: false },
-      () =>
-        this.tenantContext.transaction(async (manager) => {
-          const storeRepository = manager.getRepository(Store);
-          const store = await storeRepository.findOne({
-            where: { storeID, tenantID },
-          });
-          if (!store) throw new NotFoundException('Store not found');
-
-          if (
-            dto.email !== undefined &&
-            dto.email !== store.email &&
-            (await storeRepository.exists({
-              where: { email: dto.email, tenantID },
-            }))
-          ) {
-            throw new ConflictException(
-              `Store with email ${dto.email} already exists`,
-            );
-          }
-
-          if (
-            dto.name !== undefined &&
-            dto.name !== store.name &&
-            (await storeRepository.exists({
-              where: { name: dto.name, tenantID },
-            }))
-          ) {
-            throw new ConflictException(
-              `Store with name ${dto.name} already exists`,
-            );
-          }
-
-          Object.assign(store, dto);
-
-          let savedStore: Store;
-          try {
-            savedStore = await storeRepository.save(store);
-          } catch (error) {
-            if (this.isUniqueViolation(error))
-              throw new ConflictException(
-                'Store with email or name already exists',
-              );
-            throw error;
-          }
-
-          await manager.save(
-            AuditEvent,
-            manager.create(AuditEvent, {
-              tenantID,
-              masterUserID,
-              action: 'UPDATE_STORE',
-              endpoint: 'master/tenants/:tenantId/stores/:storeId',
-              result: 'SUCCESS',
-              reason: `Master updated store ${savedStore.name}`,
-            }),
-          );
-
-          return savedStore;
-        }),
+    return updateTenantStore(
+      this.tenantContext,
+      tenantID,
+      storeID,
+      dto,
+      masterUserID,
     );
   }
 
   async getTenantMetrics(tenantID: string) {
-    const tenant = await this.tenants.findOne({ where: { tenantID } });
-    if (!tenant) throw new NotFoundException('Tenant not found');
-
-    return this.tenantContext.run(
-      { tenantId: tenantID, impersonating: false },
-      () =>
-        this.tenantContext.transaction(async (manager) => {
-          const storesCount = await manager.count(Store, {
-            where: { tenantID },
-          });
-          const usersCount = await manager.count(User, { where: { tenantID } });
-          const productsCount = await manager.count(Product, {
-            where: { tenantID },
-          });
-
-          const storesUsagePct = Math.round(
-            (storesCount / tenant.maxStores) * 100,
-          );
-          const usersUsagePct = Math.round(
-            (usersCount / tenant.maxUsers) * 100,
-          );
-          const warningThresholdReached =
-            storesUsagePct >= 80 || usersUsagePct >= 80;
-
-          const now = new Date();
-          const daysRemaining = tenant.subscriptionExpiresAt
-            ? Math.max(
-                0,
-                Math.ceil(
-                  (new Date(tenant.subscriptionExpiresAt).getTime() -
-                    now.getTime()) /
-                    (1000 * 60 * 60 * 24),
-                ),
-              )
-            : null;
-
-          return {
-            tenantID: tenant.tenantID,
-            name: tenant.name,
-            slug: tenant.slug,
-            status: tenant.status,
-            usage: {
-              storesCount,
-              maxStores: tenant.maxStores,
-              storesUsagePct,
-              usersCount,
-              maxUsers: tenant.maxUsers,
-              usersUsagePct,
-              warningThresholdReached,
-            },
-            activity: {
-              productsCount,
-            },
-            subscription: {
-              planType: tenant.planType,
-              expiresAt: tenant.subscriptionExpiresAt,
-              daysRemaining,
-              autoRenew: tenant.autoRenew,
-            },
-          };
-        }),
-    );
+    return getTenantMetrics(this.tenants, this.tenantContext, tenantID);
   }
 
   async updateSubscription(
@@ -692,56 +202,16 @@ export class MasterService implements OnModuleInit {
     dto: UpdateSubscriptionDto,
     masterUserID: string,
   ) {
-    const tenant = await this.tenants.findOne({ where: { tenantID } });
-    if (!tenant) throw new NotFoundException('Tenant not found');
-
-    if (dto.planType !== undefined) tenant.planType = dto.planType;
-    if (dto.subscriptionExpiresAt !== undefined) {
-      tenant.subscriptionExpiresAt = new Date(dto.subscriptionExpiresAt);
-    }
-    if (dto.autoRenew !== undefined) tenant.autoRenew = dto.autoRenew;
-
-    const result = await this.tenants.save(tenant);
-    await this.audit.save(
-      this.audit.create({
-        tenantID,
-        masterUserID,
-        action: 'UPDATE_SUBSCRIPTION',
-        endpoint: 'master/tenants/subscription',
-        result: 'SUCCESS',
-        reason: `Subscription updated to plan ${tenant.planType}`,
-      }),
+    return updateSubscription(
+      this.tenants,
+      this.audit,
+      tenantID,
+      dto,
+      masterUserID,
     );
-
-    return result;
   }
 
   async exportTenantData(tenantID: string) {
-    const tenant = await this.tenants.findOne({ where: { tenantID } });
-    if (!tenant) throw new NotFoundException('Tenant not found');
-
-    return this.tenantContext.run(
-      { tenantId: tenantID, impersonating: false },
-      () =>
-        this.tenantContext.transaction(async (manager) => {
-          const stores = await manager.find(Store, { where: { tenantID } });
-          const users = await manager.find(User, { where: { tenantID } });
-          const categories = await manager.find(Category, {
-            where: { tenantID },
-          });
-          const products = await manager.find(Product, { where: { tenantID } });
-
-          return {
-            exportedAt: new Date().toISOString(),
-            tenant,
-            data: {
-              stores,
-              users,
-              categories,
-              products,
-            },
-          };
-        }),
-    );
+    return exportTenantData(this.tenants, this.tenantContext, tenantID);
   }
 }

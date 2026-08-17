@@ -8,6 +8,7 @@ import { Store } from '../../stores/entities/store.entity';
 import { Product } from '../../products/entities/product.entity';
 import { PricingModule } from '../../pricing/pricing.module';
 import { MultitenantModule } from '../../multitenant/multitenant.module';
+import { TransactionRunnerService } from '../../common/services/transaction-runner.service';
 
 @Module({
   imports: [
@@ -16,6 +17,6 @@ import { MultitenantModule } from '../../multitenant/multitenant.module';
     PricingModule,
   ],
   controllers: [StoreProductController],
-  providers: [StoreProductService],
+  providers: [StoreProductService, TransactionRunnerService],
 })
 export class StoreProductModule {}

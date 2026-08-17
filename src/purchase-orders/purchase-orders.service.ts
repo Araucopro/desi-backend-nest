@@ -22,6 +22,7 @@ import {
 } from './entities/purchase-order.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 
 const TAX_RATE = 0.19;
 
@@ -33,11 +34,16 @@ export class PurchaseOrdersService {
     private readonly dataSource: DataSource,
     private readonly financialMovementsService: FinancialMovementsService,
     @Optional() private readonly tenantContext?: TenantContextService,
+    @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
 
   private runInTransaction<T>(
     callback: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
+    if (this.transactionRunner) {
+      return this.transactionRunner.run(callback);
+    }
+
     return this.tenantContext
       ? this.tenantContext.transaction(callback)
       : this.dataSource.transaction(callback);

@@ -11,6 +11,7 @@ import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { DiscountType } from '../pricing/entities/special-offer.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 
 @Injectable()
 export class ProductsService {
@@ -22,11 +23,16 @@ export class ProductsService {
     private readonly entityManager: EntityManager,
     @Optional() private readonly pricingService?: PricingService,
     @Optional() private readonly tenantContext?: TenantContextService,
+    @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
 
   private runInTransaction<T>(
     callback: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
+    if (this.transactionRunner) {
+      return this.transactionRunner.run(callback);
+    }
+
     return this.tenantContext
       ? this.tenantContext.transaction(callback)
       : this.entityManager.transaction(callback);

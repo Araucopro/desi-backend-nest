@@ -17,6 +17,7 @@ import { ListTransfersFilterDto } from './dto/list-transfers-filter.dto';
 import { InventoryService } from '../inventory/inventory.service';
 import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 
 @Injectable()
 export class TransfersService {
@@ -28,11 +29,16 @@ export class TransfersService {
     private readonly inventoryService: InventoryService,
     private readonly dataSource: DataSource,
     @Optional() private readonly tenantContext?: TenantContextService,
+    @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
 
   private runInTransaction<T>(
     callback: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
+    if (this.transactionRunner) {
+      return this.transactionRunner.run(callback);
+    }
+
     return this.tenantContext
       ? this.tenantContext.transaction(callback)
       : this.dataSource.transaction(callback);

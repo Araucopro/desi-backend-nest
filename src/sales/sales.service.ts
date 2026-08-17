@@ -21,6 +21,8 @@ import {
 import { DteDocumentResponseDto } from '../dte/dto/dte-document-response.dto';
 import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
 import { TenantContextService } from '../multitenant/tenant-context.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { reserveStockAndSnapshotCosts } from '../inventory/inventory-stock.helper';
 import {
   Sale,
@@ -78,11 +80,16 @@ export class SalesService {
     private readonly dteMapperService: DteMapperService,
     private readonly financialMovementsService: FinancialMovementsService,
     @Optional() private readonly tenantContext?: TenantContextService,
+    @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
 
   private runInTransaction<T>(
     callback: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
+    if (this.transactionRunner) {
+      return this.transactionRunner.run(callback);
+    }
+
     return this.tenantContext
       ? this.tenantContext.transaction(callback)
       : this.dataSource.transaction(callback);
@@ -111,13 +118,6 @@ export class SalesService {
       return DteDocumentPaymentType.DEBIT;
     }
     return DteDocumentPaymentType.CASH;
-  }
-
-  private isUniqueViolation(error: unknown): boolean {
-    const code =
-      (error as { code?: string })?.code ??
-      (error as { driverError?: { code?: string } })?.driverError?.code;
-    return code === '23505';
   }
 
   private async buildPreparedSale(
@@ -319,7 +319,7 @@ export class SalesService {
           }),
         );
       } catch (error) {
-        if (!this.isUniqueViolation(error)) throw error;
+        if (!isUniqueViolation(error)) throw error;
         counter = await manager.findOne(SaleFolioCounter, {
           where: { storeID },
           lock: { mode: 'pessimistic_write' },
@@ -455,7 +455,7 @@ export class SalesService {
       try {
         await manager.save(sale);
       } catch (error) {
-        if (!this.isUniqueViolation(error)) throw error;
+        if (!isUniqueViolation(error)) throw error;
         const concurrent = await manager.getRepository(Sale).findOne({
           where: { idempotencyKey },
         });

@@ -13,6 +13,7 @@ import { MultitenantModule } from '../multitenant/multitenant.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { FinancialMovementsModule } from '../financial-movements/financial-movements.module';
 import { DteModule } from '../dte/dte.module';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 
 @Module({
   imports: [
@@ -31,7 +32,7 @@ import { DteModule } from '../dte/dte.module';
     DteModule,
   ],
   controllers: [SalesController],
-  providers: [SalesService],
+  providers: [SalesService, TransactionRunnerService],
   exports: [SalesService],
 })
 export class SalesModule {}

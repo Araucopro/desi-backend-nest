@@ -11,6 +11,7 @@ import { CreateStoreMonthlyTargetDto } from './dto/create-store-monthly-target.d
 import { UpdateStoreMonthlyTargetDto } from './dto/update-store-monthly-target.dto';
 import { Store } from '../stores/entities/store.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 
 @Injectable()
 export class StoreMonthlyTargetsService {
@@ -20,11 +21,16 @@ export class StoreMonthlyTargetsService {
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
     @Optional() private readonly tenantContext?: TenantContextService,
+    @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
 
   private runInTransaction<T>(
     callback: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
+    if (this.transactionRunner) {
+      return this.transactionRunner.run(callback);
+    }
+
     if (this.tenantContext) {
       return this.tenantContext.transaction(callback);
     }

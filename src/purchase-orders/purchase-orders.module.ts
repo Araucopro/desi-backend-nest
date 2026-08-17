@@ -9,6 +9,7 @@ import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 import { FinancialMovementsModule } from '../financial-movements/financial-movements.module';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 
 @Module({
   imports: [
@@ -23,6 +24,6 @@ import { FinancialMovementsModule } from '../financial-movements/financial-movem
     ]),
   ],
   controllers: [PurchaseOrdersController],
-  providers: [PurchaseOrdersService],
+  providers: [PurchaseOrdersService, TransactionRunnerService],
 })
 export class PurchaseOrdersModule {}

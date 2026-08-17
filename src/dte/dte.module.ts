@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { DteController } from './dte.controller';
 import { DteService } from './dte.service';
 import { DteMapperService } from './dte-mapper.service';
+import { OpenfacturaClientService } from './openfactura-client.service';
 import { DteDocument } from './entities/dte-document.entity';
 import { Store } from '../stores/entities/store.entity';
 import { Product } from '../products/entities/product.entity';
@@ -14,6 +15,7 @@ import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity
 import { MultitenantModule } from '../multitenant/multitenant.module';
 import { UserstoresModule } from '../relations/userstores/userstores.module';
 import { FinancialMovementsModule } from '../financial-movements/financial-movements.module';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 
 @Module({
   imports: [
@@ -32,7 +34,12 @@ import { FinancialMovementsModule } from '../financial-movements/financial-movem
     ]),
   ],
   controllers: [DteController],
-  providers: [DteService, DteMapperService],
-  exports: [DteService, DteMapperService],
+  providers: [
+    DteService,
+    DteMapperService,
+    OpenfacturaClientService,
+    TransactionRunnerService,
+  ],
+  exports: [DteService, DteMapperService, OpenfacturaClientService],
 })
 export class DteModule {}

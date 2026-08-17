@@ -17,6 +17,7 @@ import {
 import { ExpenseSummaryQueryDto } from './dto/expense-summary-query.dto';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 
 type ExpenseSummaryRow = {
   month: string | number;
@@ -31,11 +32,16 @@ export class ExpensesService {
     private readonly expenseRepository: Repository<Expense>,
     private readonly financialMovementsService: FinancialMovementsService,
     @Optional() private readonly tenantContext?: TenantContextService,
+    @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
 
   private runInTransaction<T>(
     callback: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
+    if (this.transactionRunner) {
+      return this.transactionRunner.run(callback);
+    }
+
     if (this.tenantContext) {
       return this.tenantContext.transaction(callback);
     }

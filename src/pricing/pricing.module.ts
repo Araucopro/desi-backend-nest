@@ -13,6 +13,7 @@ import { MarginValidator } from './validators/margin.validator';
 import { UserDiscountValidator } from './validators/user-discount.validator';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 import { Category } from '../categories/entities/category.entity';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { Category } from '../categories/entities/category.entity';
     OfferService,
     MarginValidator,
     UserDiscountValidator,
+    TransactionRunnerService,
   ],
   exports: [TypeOrmModule, PricingService, OfferService],
 })

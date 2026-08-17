@@ -15,14 +15,8 @@ import {
 import { PriceHistory, PriceType } from './entities/price-history.entity';
 import { UpdatePriceDto } from './dto/update-price.dto';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
-import { StoreType } from '../stores/entities/store.entity';
+import { DiscountType } from './entities/special-offer.entity';
 import {
-  DiscountScope,
-  DiscountType,
-  SpecialOffer,
-} from './entities/special-offer.entity';
-import {
-  AppliedDiscount,
   BreakdownEntry,
   CalculateCartInput,
   CalculateCartResult,
@@ -36,27 +30,15 @@ import { MarginValidator } from './validators/margin.validator';
 import { UserDiscountValidator } from './validators/user-discount.validator';
 import { PricingListQueryDto } from './dto/pricing-list.query.dto';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-
-type MutableCartLine = {
-  storeProductID: string;
-  storeID: string;
-  storeType?: StoreType;
-  variationID: string;
-  productID: string;
-  productName: string;
-  sku: string;
-  categoryID?: string | null;
-  brand?: string | null;
-  model?: string | null;
-  quantity: number;
-  baseUnitPrice: number;
-  unitCost: number;
-  basePrice: number;
-  currentTotal: number;
-  discountsApplied: AppliedDiscount[];
-  breakdown: BreakdownEntry[];
-  storeProduct: StoreProduct;
-};
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import {
+  applyBundle,
+  applyBuyXGetY,
+  applyManualDiscount,
+  applyStandardOffer,
+  MutableCartLine,
+  recordManualIgnored,
+} from './discount-engine';
 
 @Injectable()
 export class PricingService {
@@ -68,11 +50,16 @@ export class PricingService {
     private readonly marginValidator: MarginValidator,
     private readonly userDiscountValidator: UserDiscountValidator,
     @Optional() private readonly tenantContext?: TenantContextService,
+    @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
 
   private runInTransaction<T>(
     callback: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
+    if (this.transactionRunner) {
+      return this.transactionRunner.run(callback);
+    }
+
     return this.tenantContext
       ? this.tenantContext.transaction(callback)
       : this.dataSource.transaction(callback);
@@ -237,12 +224,12 @@ export class PricingService {
         if (!applicableLines.length) continue;
 
         if (offer.discountType === DiscountType.BUY_X_GET_Y) {
-          this.applyBuyXGetY(applicableLines, offer);
+          applyBuyXGetY(applicableLines, offer);
         } else if (offer.discountType === DiscountType.BUNDLE) {
-          this.applyBundle(applicableLines, offer);
+          applyBundle(applicableLines, offer);
         } else {
           for (const line of applicableLines) {
-            this.applyStandardOffer(line, offer);
+            applyStandardOffer(line, offer);
           }
         }
 
@@ -255,7 +242,7 @@ export class PricingService {
       if (input.manualDiscount !== undefined && input.manualDiscount !== null) {
         if (exclusiveApplied) {
           for (const line of lines) {
-            this.recordManualIgnored(line, input.manualDiscount);
+            recordManualIgnored(line, input.manualDiscount);
           }
         } else {
           for (const line of lines) {
@@ -267,7 +254,7 @@ export class PricingService {
               currentUnitPrice: line.currentTotal / line.quantity,
               quantity: line.quantity,
             });
-            this.applyManualDiscount(line, input.manualDiscount);
+            applyManualDiscount(line, input.manualDiscount);
           }
         }
       }
@@ -499,208 +486,6 @@ export class PricingService {
       });
     }
     return grouped;
-  }
-
-  private applyStandardOffer(line: MutableCartLine, offer: SpecialOffer) {
-    const scope: DiscountScope = offer.scope ?? DiscountScope.UNIT;
-    const currentUnitPrice = line.currentTotal / line.quantity;
-    const previousPrice = line.currentTotal;
-    let nextPrice = previousPrice;
-
-    switch (offer.discountType) {
-      case DiscountType.PERCENTAGE:
-        if (scope === DiscountScope.UNIT) {
-          nextPrice =
-            currentUnitPrice * (1 - offer.value / 100) * line.quantity;
-        } else {
-          nextPrice = previousPrice * (1 - offer.value / 100);
-        }
-        break;
-      case DiscountType.FIXED_AMOUNT:
-        if (scope === DiscountScope.UNIT) {
-          nextPrice =
-            Math.max(0, currentUnitPrice - offer.value) * line.quantity;
-        } else {
-          nextPrice = Math.max(0, previousPrice - offer.value);
-        }
-        break;
-      case DiscountType.FIXED_PRICE:
-        nextPrice =
-          scope === DiscountScope.UNIT
-            ? offer.value * line.quantity
-            : offer.value;
-        break;
-      default:
-        return;
-    }
-
-    nextPrice = this.toMoney(Math.max(0, nextPrice));
-    line.currentTotal = nextPrice;
-    this.recordAutomaticDiscount(line, offer, previousPrice, nextPrice, scope);
-  }
-
-  private applyBuyXGetY(lines: MutableCartLine[], offer: SpecialOffer) {
-    const buyQuantity = offer.buyQuantity ?? 0;
-    const payQuantity = offer.payQuantity ?? 0;
-    if (buyQuantity <= 0 || payQuantity <= 0 || buyQuantity <= payQuantity) {
-      return;
-    }
-    const totalUnits = lines.reduce((acc, line) => acc + line.quantity, 0);
-    const groups = Math.floor(totalUnits / buyQuantity);
-    const freeUnits = groups * (buyQuantity - payQuantity);
-    if (freeUnits <= 0) return;
-    this.grantFreeUnits(lines, freeUnits, offer, 'buyXGetY', {
-      buyQuantity,
-      payQuantity,
-      groups,
-      freeUnits,
-    });
-  }
-
-  private applyBundle(lines: MutableCartLine[], offer: SpecialOffer) {
-    const bundleItems = offer.bundleItems ?? [];
-    if (bundleItems.length < 2) return;
-    const quantitiesByProduct = new Map<string, number>();
-    for (const line of lines) {
-      quantitiesByProduct.set(
-        line.productID,
-        (quantitiesByProduct.get(line.productID) ?? 0) + line.quantity,
-      );
-    }
-    let sets = Number.POSITIVE_INFINITY;
-    for (const item of bundleItems) {
-      const quantity = quantitiesByProduct.get(item.productID) ?? 0;
-      const required = Math.max(1, item.requiredQuantity);
-      sets = Math.min(sets, Math.floor(quantity / required));
-    }
-    if (!Number.isFinite(sets) || sets <= 0) return;
-    const freeUnits = sets;
-    this.grantFreeUnits(lines, freeUnits, offer, 'bundle', {
-      sets,
-      freeUnits,
-    });
-  }
-
-  private grantFreeUnits(
-    lines: MutableCartLine[],
-    count: number,
-    offer: SpecialOffer,
-    step: string,
-    details: Record<string, unknown>,
-  ) {
-    const candidates = lines
-      .map((line) => ({
-        line,
-        unitPrice: line.currentTotal / line.quantity,
-      }))
-      .filter((candidate) => candidate.unitPrice > 0)
-      .sort(
-        (left, right) =>
-          left.unitPrice - right.unitPrice ||
-          left.line.storeProductID.localeCompare(right.line.storeProductID),
-      );
-
-    let remaining = count;
-    for (const candidate of candidates) {
-      if (remaining <= 0) break;
-      const free = Math.min(candidate.line.quantity, remaining);
-      const previousPrice = candidate.line.currentTotal;
-      const freeValue = this.toMoney(free * candidate.unitPrice);
-      const nextPrice = this.toMoney(Math.max(0, previousPrice - freeValue));
-      if (nextPrice === previousPrice) continue;
-
-      candidate.line.currentTotal = nextPrice;
-      this.recordAutomaticDiscount(
-        candidate.line,
-        offer,
-        previousPrice,
-        nextPrice,
-        DiscountScope.TOTAL,
-        { ...details, freeUnits: free },
-      );
-      remaining -= free;
-    }
-  }
-
-  private recordAutomaticDiscount(
-    line: MutableCartLine,
-    offer: SpecialOffer,
-    previousPrice: number,
-    resultingPrice: number,
-    scope: DiscountScope,
-    details?: Record<string, unknown>,
-  ) {
-    line.discountsApplied.push({
-      source: 'AUTO',
-      applied: true,
-      previousPrice,
-      resultingPrice,
-      scope,
-      offerID: offer.offerID,
-      description: offer.description,
-      discountType: offer.discountType,
-      value: offer.value,
-      exclusive: !!offer.exclusive,
-      priority: offer.priority,
-      details,
-    });
-    line.breakdown.push({
-      step: details ? 'cartOffer' : 'automaticOffer',
-      previousPrice,
-      newPrice: resultingPrice,
-      delta: this.toMoney(resultingPrice - previousPrice),
-      scope,
-      details: details ?? {
-        offerID: offer.offerID,
-        type: offer.discountType,
-        value: offer.value,
-        priority: offer.priority,
-      },
-    });
-  }
-
-  private applyManualDiscount(line: MutableCartLine, manualDiscount: number) {
-    const previousPrice = line.currentTotal;
-    const resultingPrice = this.toMoney(
-      Math.max(0, previousPrice * (1 - manualDiscount / 100)),
-    );
-    line.currentTotal = resultingPrice;
-    line.discountsApplied.push({
-      source: 'MANUAL',
-      applied: true,
-      previousPrice,
-      resultingPrice,
-      scope: 'TOTAL',
-      manualDiscount,
-    });
-    line.breakdown.push({
-      step: 'manualDiscount',
-      previousPrice,
-      newPrice: resultingPrice,
-      delta: this.toMoney(resultingPrice - previousPrice),
-      scope: 'TOTAL',
-      details: { manualDiscount },
-    });
-  }
-
-  private recordManualIgnored(line: MutableCartLine, manualDiscount: number) {
-    line.discountsApplied.push({
-      source: 'MANUAL',
-      applied: false,
-      previousPrice: line.currentTotal,
-      resultingPrice: line.currentTotal,
-      scope: 'TOTAL',
-      manualDiscount,
-      reasonIgnored: 'exclusive_offer',
-    });
-    line.breakdown.push({
-      step: 'manualDiscount_ignored',
-      previousPrice: line.currentTotal,
-      newPrice: line.currentTotal,
-      delta: 0,
-      scope: 'TOTAL',
-      details: { reason: 'exclusive_offer' },
-    });
   }
 
   private parsePricingDate(value: string | Date): Date {

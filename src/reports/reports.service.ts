@@ -25,6 +25,7 @@ import {
 import { ReportsSaleFilterDto } from './dto/report-salesFilter.dto';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { Sale, SaleStatus, SaleType } from '../sales/entities/sale.entity';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 
 type FinancialMovementRow = {
   month: string | number;
@@ -88,14 +89,26 @@ export class ReportsService {
     @InjectRepository(Sale)
     private readonly saleRepository: Repository<Sale>,
     @Optional() private readonly tenantContext?: TenantContextService,
+    @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
 
   private runInTransaction<T>(
     callback: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
+    if (this.transactionRunner) {
+      return this.transactionRunner.run(callback, (cb) =>
+        cb(this.buildFallbackManager()),
+      );
+    }
+
     if (this.tenantContext) {
       return this.tenantContext.transaction(callback);
     }
+
+    return callback(this.buildFallbackManager());
+  }
+
+  private buildFallbackManager(): EntityManager {
     const manager = {
       getRepository: <T extends ObjectLiteral>(target: EntityTarget<T>) => {
         if (target === FinancialMovement) {
@@ -110,7 +123,7 @@ export class ReportsService {
         throw new Error('Repositorio no disponible fuera de contexto tenant');
       },
     } as unknown as EntityManager;
-    return callback(manager);
+    return manager;
   }
 
   private getYearBounds(year: number) {
