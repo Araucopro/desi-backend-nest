@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Injectable,
   NotFoundException,
   Optional,
@@ -16,53 +15,35 @@ import {
 } from 'typeorm';
 import {
   DiscountScope,
-  DiscountType,
   OfferTargetScope,
   SpecialOffer,
   SpecialOfferBundleItem,
   SpecialOfferProduct,
 } from './entities/special-offer.entity';
 import { Category } from '../categories/entities/category.entity';
-import {
-  CreateSpecialOfferBundleItemDto,
-  CreateSpecialOfferDto,
-} from './dto/create-special-offer.dto';
+import { CreateSpecialOfferDto } from './dto/create-special-offer.dto';
 import { UpdateSpecialOfferDto } from './dto/update-special-offer.dto';
 import { SpecialOfferListQueryDto } from './dto/special-offer-list.query.dto';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import {
+  matchesOffer,
+  resolveOfferPriority,
+  simulateOfferPrice,
+  sortOffers,
+  validateDateRange,
+  validateOfferConfiguration,
+} from './offer-engine';
+import type {
+  OfferCartContext,
+  OfferValidationInput,
+} from './offer.types';
 
-export type OfferCartItem = {
-  storeProductID: string;
-  storeID: string;
-  productID: string;
-  variationID: string;
-  categoryID?: string | null;
-  brand?: string | null;
-  model?: string | null;
-  quantity: number;
-  unitPrice: number;
-};
-
-export type OfferCartContext = {
-  storeID: string;
-  pricingDate: Date;
-  items: OfferCartItem[];
-};
-
-type OfferValidationInput = {
-  discountType: DiscountType;
-  targetScope?: OfferTargetScope;
-  storeProductID?: string | null;
-  storeID?: string | null;
-  productIDs?: string[];
-  categoryID?: string | null;
-  brand?: string | null;
-  model?: string | null;
-  buyQuantity?: number | null;
-  payQuantity?: number | null;
-  bundleItems?: CreateSpecialOfferBundleItemDto[];
-};
+export type {
+  OfferCartContext,
+  OfferCartItem,
+  OfferValidationInput,
+} from './offer.types';
 
 @Injectable()
 export class OfferService {
@@ -98,8 +79,8 @@ export class OfferService {
     const targetScope =
       createSpecialOfferDto.targetScope ?? OfferTargetScope.VARIATION;
     const config = { ...createSpecialOfferDto, targetScope };
-    this.validateOfferConfiguration(config);
-    this.validateDateRange(
+    validateOfferConfiguration(config);
+    validateDateRange(
       createSpecialOfferDto.startDate,
       createSpecialOfferDto.endDate,
     );
@@ -208,8 +189,8 @@ export class OfferService {
         bundleItems:
           updateSpecialOfferDto.bundleItems ?? offer.bundleItems ?? [],
       };
-      this.validateOfferConfiguration(config);
-      this.validateDateRange(
+      validateOfferConfiguration(config);
+      validateDateRange(
         updateSpecialOfferDto.startDate ?? offer.startDate,
         updateSpecialOfferDto.endDate ?? offer.endDate,
       );
@@ -393,8 +374,8 @@ export class OfferService {
     const rankedOffers = offers
       .map((offer) => ({
         offer,
-        finalPrice: this.simulateOfferPrice(offer, unitPrice, quantity),
-        priority: this.resolveOfferPriority(offer),
+        finalPrice: simulateOfferPrice(offer, unitPrice, quantity),
+        priority: resolveOfferPriority(offer),
       }))
       .sort((left, right) => {
         if (left.finalPrice !== right.finalPrice) {
@@ -468,10 +449,10 @@ export class OfferService {
           storeProductIDs.includes(offer.storeProductID ?? '');
         if (!matchesStore) return false;
         return cartContext.items.some((item) =>
-          this.matchesOffer(item, offer, categoryScopes),
+          matchesOffer(item, offer, categoryScopes),
         );
       })
-      .sort((left, right) => this.sortOffers(left, right));
+      .sort((left, right) => sortOffers(left, right));
   }
 
   async getApplicableStoreProductIDs(
@@ -492,39 +473,9 @@ export class OfferService {
     }
     return new Set(
       cartContext.items
-        .filter((item) => this.matchesOffer(item, offer, categoryScopes))
+        .filter((item) => matchesOffer(item, offer, categoryScopes))
         .map((item) => item.storeProductID),
     );
-  }
-
-  private matchesOffer(
-    item: OfferCartItem,
-    offer: SpecialOffer,
-    categoryScopes: Map<string, Set<string>>,
-  ): boolean {
-    switch (offer.targetScope) {
-      case OfferTargetScope.STORE:
-        return offer.storeID === item.storeID;
-      case OfferTargetScope.PRODUCT:
-        return Boolean(
-          offer.productTargets?.some(
-            (target) => target.productID === item.productID,
-          ),
-        );
-      case OfferTargetScope.CATEGORY:
-        if (!offer.categoryID) return false;
-        return (
-          categoryScopes.get(offer.categoryID)?.has(item.categoryID ?? '') ??
-          false
-        );
-      case OfferTargetScope.BRAND:
-        return Boolean(offer.brand && offer.brand === item.brand);
-      case OfferTargetScope.MODEL:
-        return Boolean(offer.model && offer.model === item.model);
-      case OfferTargetScope.VARIATION:
-      default:
-        return offer.storeProductID === item.storeProductID;
-    }
   }
 
   private async resolveCategoryScope(
@@ -560,18 +511,6 @@ export class OfferService {
     return scope;
   }
 
-  private sortOffers(left: SpecialOffer, right: SpecialOffer): number {
-    const priorityDiff = (left.priority ?? 0) - (right.priority ?? 0);
-    if (priorityDiff !== 0) return priorityDiff;
-    const startDiff =
-      (right.startDate?.getTime?.() ?? 0) - (left.startDate?.getTime?.() ?? 0);
-    if (startDiff !== 0) return startDiff;
-    const createdDiff =
-      (right.createdAt?.getTime?.() ?? 0) - (left.createdAt?.getTime?.() ?? 0);
-    if (createdDiff !== 0) return createdDiff;
-    return left.offerID.localeCompare(right.offerID);
-  }
-
   private async loadOffer(
     manager: EntityManager,
     offerID: string,
@@ -594,143 +533,4 @@ export class OfferService {
     return offer;
   }
 
-  private validateOfferConfiguration(config: OfferValidationInput) {
-    const targetScope = config.targetScope ?? OfferTargetScope.VARIATION;
-
-    if (config.discountType === DiscountType.BUY_X_GET_Y) {
-      const buy = config.buyQuantity;
-      const pay = config.payQuantity;
-      if (!buy || !pay || buy <= pay || pay < 1) {
-        throw new BadRequestException(
-          'BUY_X_GET_Y requiere buyQuantity > payQuantity >= 1',
-        );
-      }
-    }
-
-    if (config.discountType === DiscountType.BUNDLE) {
-      if (!config.bundleItems || config.bundleItems.length < 2) {
-        throw new BadRequestException('BUNDLE requiere al menos 2 bundleItems');
-      }
-      for (const item of config.bundleItems) {
-        if (!item.productID || (item.requiredQuantity ?? 1) < 1) {
-          throw new BadRequestException(
-            'Cada bundleItem requiere productID y requiredQuantity >= 1',
-          );
-        }
-      }
-    }
-
-    if (targetScope === OfferTargetScope.VARIATION) {
-      if (!config.storeProductID) {
-        throw new BadRequestException(
-          'targetScope VARIATION requiere storeProductID',
-        );
-      }
-      return;
-    }
-
-    if (!config.storeID) {
-      throw new BadRequestException(
-        'Los alcances distintos de VARIATION requieren storeID',
-      );
-    }
-
-    if (
-      targetScope === OfferTargetScope.PRODUCT &&
-      (!config.productIDs || config.productIDs.length === 0)
-    ) {
-      throw new BadRequestException(
-        'targetScope PRODUCT requiere al menos un productID',
-      );
-    }
-    if (targetScope === OfferTargetScope.CATEGORY && !config.categoryID) {
-      throw new BadRequestException('targetScope CATEGORY requiere categoryID');
-    }
-    if (targetScope === OfferTargetScope.BRAND && !config.brand) {
-      throw new BadRequestException('targetScope BRAND requiere brand');
-    }
-    if (targetScope === OfferTargetScope.MODEL && !config.model) {
-      throw new BadRequestException('targetScope MODEL requiere model');
-    }
-  }
-
-  private validateDateRange(
-    startDateValue: string | Date,
-    endDateValue?: string | Date | null,
-  ) {
-    if (!endDateValue) {
-      return;
-    }
-
-    const startDate = new Date(startDateValue);
-    const endDate = new Date(endDateValue);
-
-    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-      throw new BadRequestException('Rango de fechas invalido para la oferta');
-    }
-
-    if (endDate < startDate) {
-      throw new BadRequestException(
-        'La fecha de termino no puede ser anterior al inicio',
-      );
-    }
-  }
-
-  private simulateOfferPrice(
-    offer: SpecialOffer,
-    unitPrice: number,
-    quantity: number,
-  ): number {
-    const currentPrice = unitPrice * quantity;
-    const currentUnitPrice = quantity > 0 ? currentPrice / quantity : 0;
-    const scope = offer.scope ?? DiscountScope.UNIT;
-
-    switch (offer.discountType) {
-      case DiscountType.PERCENTAGE:
-        if (scope === DiscountScope.UNIT) {
-          return currentUnitPrice * (1 - offer.value / 100) * quantity;
-        }
-        return currentPrice * (1 - offer.value / 100);
-      case DiscountType.FIXED_AMOUNT:
-        if (scope === DiscountScope.UNIT) {
-          return Math.max(0, currentUnitPrice - offer.value) * quantity;
-        }
-        return Math.max(0, currentPrice - offer.value);
-      case DiscountType.FIXED_PRICE:
-        return scope === DiscountScope.UNIT
-          ? offer.value * quantity
-          : offer.value;
-      case DiscountType.BUY_X_GET_Y:
-        if (offer.buyQuantity && offer.payQuantity) {
-          const groups = Math.floor(quantity / offer.buyQuantity);
-          return Math.max(
-            0,
-            currentPrice -
-              groups *
-                (offer.buyQuantity - offer.payQuantity) *
-                currentUnitPrice,
-          );
-        }
-        return currentPrice;
-      case DiscountType.BUNDLE:
-      default:
-        return currentPrice;
-    }
-  }
-
-  private resolveOfferPriority(offer: SpecialOffer): number {
-    let priority = 0;
-
-    if (offer.exclusive) {
-      priority += 100;
-    }
-    if ((offer.scope ?? DiscountScope.UNIT) === DiscountScope.TOTAL) {
-      priority += 10;
-    }
-    if (offer.discountType === DiscountType.FIXED_PRICE) {
-      priority += 5;
-    }
-
-    return priority;
-  }
 }
