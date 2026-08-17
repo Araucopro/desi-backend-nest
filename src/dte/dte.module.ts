@@ -3,7 +3,6 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DteController } from './dte.controller';
 import { DteService } from './dte.service';
-import { DteMapperService } from './dte-mapper.service';
 import { OpenfacturaClientService } from './openfactura-client.service';
 import { DteDocument } from './entities/dte-document.entity';
 import { Store } from '../stores/entities/store.entity';
@@ -34,12 +33,7 @@ import { TransactionRunnerService } from '../common/services/transaction-runner.
     ]),
   ],
   controllers: [DteController],
-  providers: [
-    DteService,
-    DteMapperService,
-    OpenfacturaClientService,
-    TransactionRunnerService,
-  ],
-  exports: [DteService, DteMapperService, OpenfacturaClientService],
+  providers: [DteService, OpenfacturaClientService, TransactionRunnerService],
+  exports: [DteService, OpenfacturaClientService],
 })
 export class DteModule {}

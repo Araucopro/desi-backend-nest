@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { DteMapperService } from './dte-mapper.service';
-import { SalePaymentType, SaleType } from '../sales/entities/sale.entity';
+import { SalePaymentType, SaleType } from './entities/sale.entity';
 import { StoreType } from '../stores/entities/store.entity';
 
 const store = {

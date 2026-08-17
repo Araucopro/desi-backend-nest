@@ -4,11 +4,11 @@ import {
   SalePaymentType,
   SaleReceiver,
   SaleType,
-} from '../sales/entities/sale.entity';
+} from './entities/sale.entity';
 import {
   CreateDteDocumentDto,
   DteResponseValue,
-} from './dto/create-dte-document.dto';
+} from '../dte/dto/create-dte-document.dto';
 
 const TAX_RATE = 0.19;
 

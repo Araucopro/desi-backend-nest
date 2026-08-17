@@ -7,63 +7,43 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { randomUUID } from 'crypto';
 import { DataSource, EntityManager, Repository } from 'typeorm';
-import { Store } from '../stores/entities/store.entity';
 import { PricingService } from '../pricing/pricing.service';
 import { DteService } from '../dte/dte.service';
-import { DteMapperService } from '../dte/dte-mapper.service';
-import {
-  DteDocument,
-  DteDocumentPaymentType,
-  DteDocumentStatus,
-} from '../dte/entities/dte-document.entity';
+import { DteMapperService } from './dte-mapper.service';
+import { DteDocumentStatus } from '../dte/entities/dte-document.entity';
 import { DteDocumentResponseDto } from '../dte/dto/dte-document-response.dto';
 import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { reserveStockAndSnapshotCosts } from '../inventory/inventory-stock.helper';
-import {
-  Sale,
-  SalePaymentType,
-  SaleReceiver,
-  SaleStatus,
-  SaleType,
-} from './entities/sale.entity';
+import { Sale, SaleStatus, SaleType } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { ListSalesQueryDto } from './dto/list-sales.query.dto';
-import { ConvertDocumentType, ConvertSaleDto } from './dto/convert-sale.dto';
-
-const TAX_RATE = 0.19;
-
-type PreparedSaleItem = {
-  storeProductID: string;
-  variationID: string;
-  productName: string;
-  sku: string;
-  quantity: number;
-  unitPrice: number;
-  unitCost: number;
-  lineTotal: number;
-  baseTotal: number;
-};
-
-type PreparedSale = {
-  saleType: SaleType;
-  paymentType: SalePaymentType;
-  issueDate: Date;
-  receiver: SaleReceiver | null;
-  items: PreparedSaleItem[];
-  subtotal: number;
-  discount: number;
-  netTotal: number;
-  taxTotal: number;
-  total: number;
-  cogsTotal: number;
-};
+import { ConvertSaleDto } from './dto/convert-sale.dto';
+import {
+  buildPreparedSale,
+  createSaleId,
+  resolveConversionDocumentType,
+  toDateOnly,
+  toDtePaymentType,
+  validateFacturaReceiver,
+} from './sales-engine';
+import {
+  createSaleEntity,
+  createSaleItems,
+  findSaleByIdempotencyKey,
+  findSaleForConversion,
+  findStoreById,
+  listSales,
+  loadSale,
+  nextSaleFolio,
+} from './sales-repository.helpers';
+import { toSaleView } from './sales-view.mapper';
+import { PreparedSale } from './sales.types';
 
 @Injectable()
 export class SalesService {
@@ -95,52 +75,14 @@ export class SalesService {
       : this.dataSource.transaction(callback);
   }
 
-  private toMoney(value: number): number {
-    return Math.round((value + Number.EPSILON) * 100) / 100;
-  }
-
-  private toDateOnly(value: string | Date): Date {
-    const text =
-      value instanceof Date
-        ? value.toISOString().slice(0, 10)
-        : String(value).slice(0, 10);
-    const date = new Date(`${text}T12:00:00`);
-    return Number.isNaN(date.getTime()) ? new Date() : date;
-  }
-
-  private toDtePaymentType(
-    paymentType: SalePaymentType,
-  ): DteDocumentPaymentType {
-    if (paymentType === SalePaymentType.CREDIT) {
-      return DteDocumentPaymentType.CREDIT;
-    }
-    if (paymentType === SalePaymentType.DEBIT) {
-      return DteDocumentPaymentType.DEBIT;
-    }
-    return DteDocumentPaymentType.CASH;
-  }
-
-  private async buildPreparedSale(
+  private async prepareSale(
     manager: EntityManager,
     storeID: string,
     dto: CreateSaleDto,
     userId?: string,
-  ): Promise<PreparedSale> {
-    const store = await manager.findOne(Store, {
-      where: { storeID },
-    });
-    if (!store) {
-      throw new NotFoundException(`Tienda con ID ${storeID} no encontrada`);
-    }
-
-    if (
-      dto.saleType === SaleType.FACTURA &&
-      (!dto.receiver?.rut || !dto.receiver?.name)
-    ) {
-      throw new BadRequestException(
-        'La factura requiere receptor con RUT y nombre',
-      );
-    }
+  ) {
+    await findStoreById(manager, storeID);
+    validateFacturaReceiver(dto.saleType, dto.receiver);
 
     const pricing = await this.pricingService.calculateCart({
       storeID,
@@ -149,47 +91,10 @@ export class SalesService {
         quantity: item.quantity,
       })),
       userID: userId ?? null,
-      pricingDate: this.toDateOnly(dto.issueDate ?? new Date()),
+      pricingDate: toDateOnly(dto.issueDate ?? new Date()),
     });
 
-    const items: PreparedSaleItem[] = pricing.items.map((item) => ({
-      storeProductID: item.storeProductID,
-      variationID: item.variationID,
-      productName: item.productName,
-      sku: item.sku,
-      quantity: item.quantity,
-      unitPrice: item.finalUnitPrice,
-      unitCost: item.unitCost,
-      lineTotal: item.lineTotal,
-      baseTotal: item.basePrice,
-    }));
-    const cogsTotal = this.toMoney(
-      items.reduce((acc, item) => acc + item.unitCost * item.quantity, 0),
-    );
-
-    const total = Math.round(
-      items.reduce((acc, item) => acc + item.lineTotal, 0),
-    );
-    const subtotal = Math.round(
-      items.reduce((acc, item) => acc + item.baseTotal, 0),
-    );
-    const discount = Math.max(subtotal - total, 0);
-    const netTotal = Math.round(total / (1 + TAX_RATE));
-    const taxTotal = total - netTotal;
-
-    return {
-      saleType: dto.saleType,
-      paymentType: dto.paymentType,
-      issueDate: this.toDateOnly(dto.issueDate ?? new Date()),
-      receiver: dto.receiver ?? null,
-      items,
-      subtotal,
-      discount,
-      netTotal,
-      taxTotal,
-      total,
-      cogsTotal,
-    };
+    return buildPreparedSale(dto, pricing);
   }
 
   async create(
@@ -212,50 +117,46 @@ export class SalesService {
   ) {
     return this.runInTransaction(async (manager) => {
       if (idempotencyKey) {
-        const existing = await manager.getRepository(Sale).findOne({
-          where: { idempotencyKey },
-        });
+        const existing = await findSaleByIdempotencyKey(
+          manager,
+          idempotencyKey,
+        );
         if (existing) {
           if (existing.storeID !== storeID) {
             throw new BadRequestException(
               'La Idempotency-Key ya fue utilizada en otra tienda',
             );
           }
-          return this.toView(await this.loadSale(manager, existing.saleID));
+          return toSaleView(await loadSale(manager, existing.saleID));
         }
       }
 
-      const prepared = await this.buildPreparedSale(
-        manager,
-        storeID,
-        dto,
-        userId,
-      );
+      const prepared = await this.prepareSale(manager, storeID, dto, userId);
       const tenantID = this.tenantContext?.getTenantId();
-      const saleID = randomUUID();
-      const folio = await this.nextFolio(manager, storeID, tenantID);
+      const saleID = createSaleId();
+      const folio = await nextSaleFolio(manager, storeID, tenantID);
 
-      const sale = await manager.save(
-        manager.create(Sale, {
-          saleID,
-          tenantID,
-          store: { storeID },
-          userID: userId ?? null,
-          saleType: SaleType.NOTA_VENTA,
-          status: SaleStatus.EMITIDA,
-          paymentType: prepared.paymentType,
-          folio,
-          issueDate: prepared.issueDate,
-          receiver: prepared.receiver,
-          subtotal: prepared.subtotal,
-          discount: prepared.discount,
-          netTotal: prepared.netTotal,
-          taxTotal: prepared.taxTotal,
-          total: prepared.total,
-          cogsTotal: prepared.cogsTotal,
-          idempotencyKey: idempotencyKey ?? null,
-        }),
-      );
+      const sale = createSaleEntity(manager, {
+        saleID,
+        tenantID,
+        storeID,
+        userID: userId ?? null,
+        saleType: SaleType.NOTA_VENTA,
+        status: SaleStatus.EMITIDA,
+        paymentType: prepared.paymentType,
+        folio,
+        issueDate: prepared.issueDate,
+        receiver: prepared.receiver,
+        subtotal: prepared.subtotal,
+        discount: prepared.discount,
+        netTotal: prepared.netTotal,
+        taxTotal: prepared.taxTotal,
+        total: prepared.total,
+        cogsTotal: prepared.cogsTotal,
+        idempotencyKey: idempotencyKey ?? null,
+      });
+
+      await manager.save(sale);
 
       await reserveStockAndSnapshotCosts(
         manager,
@@ -269,20 +170,7 @@ export class SalesService {
       );
 
       await manager.save(
-        prepared.items.map((item) =>
-          manager.create(SaleItem, {
-            tenantID,
-            sale: { saleID },
-            storeProductID: item.storeProductID,
-            variationID: item.variationID,
-            productName: item.productName,
-            sku: item.sku,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            unitCost: item.unitCost,
-            lineTotal: item.lineTotal,
-          }),
-        ),
+        createSaleItems(manager, tenantID, saleID, prepared.items),
       );
 
       await this.financialMovementsService.recordSaleNote(manager, {
@@ -295,42 +183,8 @@ export class SalesService {
         cogsTotal: sale.cogsTotal,
       });
 
-      return this.toView(await this.loadSale(manager, saleID));
+      return toSaleView(await loadSale(manager, saleID));
     });
-  }
-
-  private async nextFolio(
-    manager: EntityManager,
-    storeID: string,
-    tenantID: string | undefined,
-  ): Promise<number> {
-    let counter = await manager.findOne(SaleFolioCounter, {
-      where: { storeID },
-      lock: { mode: 'pessimistic_write' },
-    });
-
-    if (!counter) {
-      try {
-        counter = await manager.save(
-          manager.create(SaleFolioCounter, {
-            tenantID,
-            storeID,
-            currentFolio: 0,
-          }),
-        );
-      } catch (error) {
-        if (!isUniqueViolation(error)) throw error;
-        counter = await manager.findOne(SaleFolioCounter, {
-          where: { storeID },
-          lock: { mode: 'pessimistic_write' },
-        });
-        if (!counter) throw error;
-      }
-    }
-
-    counter.currentFolio += 1;
-    await manager.save(counter);
-    return counter.currentFolio;
   }
 
   private async createElectronicSale(
@@ -341,9 +195,7 @@ export class SalesService {
   ) {
     if (idempotencyKey) {
       const existing = await this.runInTransaction((manager) =>
-        manager.getRepository(Sale).findOne({
-          where: { idempotencyKey },
-        }),
+        findSaleByIdempotencyKey(manager, idempotencyKey),
       );
       if (existing) {
         if (existing.storeID !== storeID) {
@@ -352,22 +204,19 @@ export class SalesService {
           );
         }
         const loaded = await this.runInTransaction((manager) =>
-          this.loadSale(manager, existing.saleID),
+          loadSale(manager, existing.saleID),
         );
-        return this.toView(loaded);
+        return toSaleView(loaded);
       }
     }
 
     const prepared = await this.runInTransaction((manager) =>
-      this.buildPreparedSale(manager, storeID, dto, userId),
+      this.prepareSale(manager, storeID, dto, userId),
     );
     const documentType = dto.saleType === SaleType.FACTURA ? 33 : 39;
     const store = await this.runInTransaction((manager) =>
-      manager.findOne(Store, { where: { storeID } }),
+      findStoreById(manager, storeID),
     );
-    if (!store) {
-      throw new NotFoundException(`Tienda con ID ${storeID} no encontrada`);
-    }
 
     const dteDto = this.dteMapperService.mapSaleToDte(
       {
@@ -390,7 +239,7 @@ export class SalesService {
       dteDto,
       {
         reserveStock: true,
-        paymentType: this.toDtePaymentType(prepared.paymentType),
+        paymentType: toDtePaymentType(prepared.paymentType),
       },
     );
 
@@ -403,7 +252,7 @@ export class SalesService {
       userId,
     );
 
-    return this.toView(sale, dteResponse);
+    return toSaleView(sale, dteResponse);
   }
 
   private async persistElectronicSale(
@@ -416,25 +265,26 @@ export class SalesService {
   ): Promise<Sale> {
     return this.runInTransaction(async (manager) => {
       if (idempotencyKey) {
-        const existing = await manager.getRepository(Sale).findOne({
-          where: { idempotencyKey },
-        });
+        const existing = await findSaleByIdempotencyKey(
+          manager,
+          idempotencyKey,
+        );
         if (existing) {
           if (existing.storeID !== storeID) {
             throw new BadRequestException(
               'La Idempotency-Key ya fue utilizada en otra tienda',
             );
           }
-          return this.loadSale(manager, existing.saleID);
+          return loadSale(manager, existing.saleID);
         }
       }
 
       const tenantID = this.tenantContext?.getTenantId();
-      const saleID = randomUUID();
-      const sale = manager.create(Sale, {
+      const saleID = createSaleId();
+      const sale = createSaleEntity(manager, {
         saleID,
         tenantID,
-        store: { storeID },
+        storeID,
         userID: userId ?? null,
         saleType: dto.saleType,
         status: SaleStatus.EMITIDA,
@@ -456,36 +306,25 @@ export class SalesService {
         await manager.save(sale);
       } catch (error) {
         if (!isUniqueViolation(error)) throw error;
-        const concurrent = await manager.getRepository(Sale).findOne({
-          where: { idempotencyKey },
-        });
+        if (!idempotencyKey) throw error;
+        const concurrent = await findSaleByIdempotencyKey(
+          manager,
+          idempotencyKey,
+        );
         if (!concurrent) throw error;
         if (concurrent.storeID !== storeID) {
           throw new BadRequestException(
             'La Idempotency-Key ya fue utilizada en otra tienda',
           );
         }
-        return this.loadSale(manager, concurrent.saleID);
+        return loadSale(manager, concurrent.saleID);
       }
 
       await manager.save(
-        prepared.items.map((item) =>
-          manager.create(SaleItem, {
-            tenantID,
-            sale: { saleID },
-            storeProductID: item.storeProductID,
-            variationID: item.variationID,
-            productName: item.productName,
-            sku: item.sku,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            unitCost: item.unitCost,
-            lineTotal: item.lineTotal,
-          }),
-        ),
+        createSaleItems(manager, tenantID, saleID, prepared.items),
       );
 
-      return this.loadSale(manager, saleID);
+      return loadSale(manager, saleID);
     });
   }
 
@@ -493,53 +332,26 @@ export class SalesService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
 
-    return this.runInTransaction(async (manager) => {
-      const qb = manager
-        .getRepository(Sale)
-        .createQueryBuilder('sale')
-        .leftJoinAndSelect('sale.items', 'items')
-        .leftJoinAndSelect('sale.store', 'store')
-        .leftJoinAndSelect('sale.dteDocument', 'dteDocument')
-        .where('sale.storeID = :storeID', { storeID });
+    const { sales, total } = await this.runInTransaction((manager) =>
+      listSales(manager, storeID, query),
+    );
 
-      if (query.saleType) {
-        qb.andWhere('sale.saleType = :saleType', {
-          saleType: query.saleType,
-        });
-      }
-      if (query.status) {
-        qb.andWhere('sale.status = :status', { status: query.status });
-      }
-      if (query.from) {
-        qb.andWhere('sale.createdAt >= :from', { from: query.from });
-      }
-      if (query.to) {
-        qb.andWhere('sale.createdAt < :to', { to: query.to });
-      }
-
-      const [sales, total] = await qb
-        .orderBy('sale.createdAt', 'DESC')
-        .skip((page - 1) * limit)
-        .take(limit)
-        .getManyAndCount();
-
-      return {
-        sales: sales.map((sale) => this.toView(sale)),
-        meta: { page, limit, total },
-      };
-    });
+    return {
+      sales: sales.map((sale) => toSaleView(sale)),
+      meta: { page, limit, total },
+    };
   }
 
   async findOne(saleID: string, storeID: string) {
     return this.runInTransaction(async (manager) => {
-      const sale = await this.loadSale(manager, saleID, storeID);
-      return this.toView(sale);
+      const sale = await loadSale(manager, saleID, storeID);
+      return toSaleView(sale);
     });
   }
 
   async convert(saleID: string, storeID: string, dto?: ConvertSaleDto) {
     const sale = await this.runInTransaction((manager) =>
-      this.loadSale(manager, saleID, storeID),
+      loadSale(manager, saleID, storeID),
     );
 
     if (sale.saleType !== SaleType.NOTA_VENTA) {
@@ -548,7 +360,7 @@ export class SalesService {
       );
     }
     if (sale.status === SaleStatus.CONVERTIDA) {
-      return this.toView(sale);
+      return toSaleView(sale);
     }
     if (sale.status !== SaleStatus.EMITIDA) {
       throw new BadRequestException(
@@ -559,20 +371,13 @@ export class SalesService {
       return this.finishConversion(saleID, storeID);
     }
 
-    const documentType =
-      dto?.documentType === ConvertDocumentType.BOLETA
-        ? 39
-        : dto?.documentType === ConvertDocumentType.FACTURA
-          ? 33
-          : sale.receiver?.rut
-            ? 33
-            : 39;
+    const documentType = resolveConversionDocumentType(sale, dto);
 
     const dteDto = this.dteMapperService.mapSaleToDte(sale, { documentType });
     const dteResponse = await this.dteService.create(storeID, saleID, dteDto, {
       reserveStock: false,
       saleID,
-      paymentType: this.toDtePaymentType(sale.paymentType),
+      paymentType: toDtePaymentType(sale.paymentType),
     });
 
     if (dteResponse.STATUS === 'PENDIENTE') {
@@ -603,16 +408,12 @@ export class SalesService {
     dteResponse?: DteDocumentResponseDto,
   ) {
     return this.runInTransaction(async (manager) => {
-      const sale = await manager.getRepository(Sale).findOne({
-        where: { saleID, store: { storeID } },
-        lock: { mode: 'pessimistic_write' },
-        relations: ['dteDocument'],
-      });
+      const sale = await findSaleForConversion(manager, saleID, storeID);
       if (!sale) {
         throw new NotFoundException(`Venta con ID ${saleID} no encontrada`);
       }
       if (sale.status === SaleStatus.CONVERTIDA) {
-        return this.toView(await this.loadSale(manager, saleID, storeID));
+        return toSaleView(await loadSale(manager, saleID, storeID));
       }
       if (sale.status !== SaleStatus.EMITIDA) {
         throw new BadRequestException(
@@ -633,49 +434,8 @@ export class SalesService {
       await manager.save(sale);
       await this.financialMovementsService.removeSaleNote(manager, saleID);
 
-      const updated = await this.loadSale(manager, saleID, storeID);
-      return this.toView(
-        updated,
-        dteResponse ?? this.dteSummary(updated.dteDocument),
-      );
+      const updated = await loadSale(manager, saleID, storeID);
+      return toSaleView(updated, dteResponse);
     });
-  }
-
-  private async loadSale(
-    manager: EntityManager,
-    saleID: string,
-    storeID?: string,
-  ): Promise<Sale> {
-    const sale = await manager.getRepository(Sale).findOne({
-      where: storeID ? { saleID, store: { storeID } } : { saleID },
-      relations: ['items', 'store', 'dteDocument'],
-    });
-    if (!sale) {
-      throw new NotFoundException(`Venta con ID ${saleID} no encontrada`);
-    }
-    return sale;
-  }
-
-  private dteSummary(
-    dte: DteDocument | null | undefined,
-  ): DteDocumentResponseDto | null {
-    if (!dte) return null;
-    return {
-      dteDocumentID: dte.dteDocumentID,
-      TOKEN: dte.token,
-      FOLIO: dte.folio,
-      STATUS: dte.status,
-      saleID: dte.saleID,
-    };
-  }
-
-  private toView(
-    sale: Sale,
-    dteResponse?: DteDocumentResponseDto | null,
-  ): { sale: Sale; dte: DteDocumentResponseDto | null } {
-    return {
-      sale,
-      dte: dteResponse ?? this.dteSummary(sale.dteDocument),
-    };
   }
 }
