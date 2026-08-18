@@ -156,8 +156,7 @@ describe('PurchaseOrdersEngine', () => {
 
       const v4 = plan.items.find(
         (planned) =>
-          planned.kind === 'new' &&
-          planned.values.variationID === 'v4',
+          planned.kind === 'new' && planned.values.variationID === 'v4',
       );
       expect(v4).toMatchObject({
         kind: 'new',

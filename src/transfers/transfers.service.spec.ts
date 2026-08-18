@@ -1,6 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { StoreTransfer, TransferStatus } from './entities/store-transfer.entity';
+import {
+  StoreTransfer,
+  TransferStatus,
+} from './entities/store-transfer.entity';
 import { StoreTransferItem } from './entities/store-transfer-item.entity';
 import { TransfersService } from './transfers.service';
 import {
@@ -122,9 +125,7 @@ describe('TransfersService', () => {
       transfer.completedAt = undefined;
     });
 
-    function mockStoreProducts(
-      products: Array<Partial<StoreProduct> | null>,
-    ) {
+    function mockStoreProducts(products: Array<Partial<StoreProduct> | null>) {
       let index = 0;
       mockManager.findOne.mockImplementation(async (entity: unknown) => {
         if (entity === StoreTransfer) {

@@ -9,7 +9,10 @@ import { EntityManager, Repository } from 'typeorm';
 import { NotFoundException } from '@nestjs/common';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { PricingService } from '../pricing/pricing.service';
-import { InventoryMovement, InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
+import {
+  InventoryMovement,
+  InventoryMovementReason,
+} from '../inventory/entities/inventory-movement.entity';
 import { CreateProductDto } from './dto/create-product.dto';
 
 describe('ProductsService', () => {
@@ -137,7 +140,10 @@ describe('ProductsService', () => {
         (_entity: unknown, values: object) => ({ ...values }),
       );
       mockEntityManager.save.mockImplementation(async (entity: unknown) => {
-        const candidate = entity as { variationID?: string; productID?: string };
+        const candidate = entity as {
+          variationID?: string;
+          productID?: string;
+        };
         if (!candidate.variationID) candidate.productID ??= 'product-1';
         if (candidate.productID && !candidate.variationID) {
           candidate.variationID = 'variation-1';
@@ -147,9 +153,7 @@ describe('ProductsService', () => {
 
       const result = await service.create(dto);
 
-      expect(result).toEqual(
-        expect.objectContaining({ name: 'New Product' }),
-      );
+      expect(result).toEqual(expect.objectContaining({ name: 'New Product' }));
       expect(mockEntityManager.save).toHaveBeenCalledWith(
         expect.objectContaining({ sku: 'SKU-1', product: expect.anything() }),
       );
@@ -211,7 +215,9 @@ describe('ProductsService', () => {
       mockEntityManager.create.mockImplementation(
         (_entity: unknown, values: object) => ({ ...values }),
       );
-      mockEntityManager.save.mockImplementation(async (entity: unknown) => entity);
+      mockEntityManager.save.mockImplementation(
+        async (entity: unknown) => entity,
+      );
       mockEntityManager.merge.mockImplementation(() => undefined);
 
       const result = await service.update('1', updateDto);

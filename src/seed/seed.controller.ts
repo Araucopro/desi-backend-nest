@@ -15,7 +15,18 @@ export class SeedController {
   @ApiOperation({
     summary: 'Ejecutar carga de datos masiva (Restringido a usuario MASTER)',
   })
-  @ApiResponse({ status: 200, description: 'Datos cargados correctamente' })
+  @ApiResponse({
+    status: 200,
+    description: 'Datos cargados correctamente',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Operación exitosa',
+        error: null,
+        data: 'SEED EXECUTED SUCCESSFULLY',
+      },
+    },
+  })
   executeSeed() {
     return this.seedService.runSeed();
   }

@@ -8,9 +8,9 @@ describe('InventoryService', () => {
   function createManagerMock(storeProduct?: Partial<StoreProduct> | null) {
     const manager = {
       findOne: jest.fn(async () => storeProduct ?? null),
-      create: jest.fn(
-        (_entity: unknown, values: Record<string, unknown>) => ({ ...values }),
-      ),
+      create: jest.fn((_entity: unknown, values: Record<string, unknown>) => ({
+        ...values,
+      })),
       save: jest.fn(async (entity: unknown) => entity),
     };
     return manager;
@@ -18,8 +18,8 @@ describe('InventoryService', () => {
 
   function createService(manager: ReturnType<typeof createManagerMock>) {
     const dataSource = {
-      transaction: jest.fn(
-        async (cb: (manager: unknown) => Promise<unknown>) => cb(manager),
+      transaction: jest.fn(async (cb: (manager: unknown) => Promise<unknown>) =>
+        cb(manager),
       ),
     };
     return new InventoryService(dataSource as any);

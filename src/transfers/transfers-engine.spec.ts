@@ -10,9 +10,7 @@ import {
   ensureTransferModifiable,
 } from './transfers-engine';
 
-function makeTransfer(
-  overrides: Partial<StoreTransfer> = {},
-): StoreTransfer {
+function makeTransfer(overrides: Partial<StoreTransfer> = {}): StoreTransfer {
   return {
     transferID: 'transfer-1',
     tenantID: 'tenant-1',
@@ -28,10 +26,7 @@ function makeTransfer(
   } as StoreTransfer;
 }
 
-function makeItem(
-  variationID: string,
-  quantity: number,
-): StoreTransferItem {
+function makeItem(variationID: string, quantity: number): StoreTransferItem {
   return {
     variation: { variationID } as StoreTransferItem['variation'],
     quantity,
@@ -53,12 +48,12 @@ describe('TransfersEngine', () => {
 
   describe('ensureTransferModifiable', () => {
     it('rejects non-pending transfers', () => {
-      expect(() =>
-        ensureTransferModifiable(TransferStatus.COMPLETED),
-      ).toThrow(BadRequestException);
-      expect(() =>
-        ensureTransferModifiable(TransferStatus.CANCELLED),
-      ).toThrow(BadRequestException);
+      expect(() => ensureTransferModifiable(TransferStatus.COMPLETED)).toThrow(
+        BadRequestException,
+      );
+      expect(() => ensureTransferModifiable(TransferStatus.CANCELLED)).toThrow(
+        BadRequestException,
+      );
     });
 
     it('allows pending transfers', () => {

@@ -28,6 +28,152 @@ import { UpdateStoreDto } from '../stores/dto/update-store.dto';
 import { Public } from '../auth/decorators/public.decorator';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 
+const TENANT_ID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+const MASTER_USER_ID = 'd3eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+const STORE_ID = 'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+const USER_ID = 'c2eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+const CATEGORY_ID = 'e4eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+const PRODUCT_ID = 'f5eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+
+const USER_EXAMPLE = {
+  userID: USER_ID,
+  tenantID: TENANT_ID,
+  email: 'admin@araucopro.com',
+  name: 'Administrador General',
+  role: 'admin',
+  userImg: null,
+  sessionVersion: 1,
+  createdAt: '2026-08-18T12:00:00.000Z',
+  updatedAt: '2026-08-18T12:00:00.000Z',
+};
+
+const STORE_EXAMPLE = {
+  storeID: STORE_ID,
+  tenantID: TENANT_ID,
+  location: 'Mall Costanera Center, Local 120',
+  rut: '77.777.777-7',
+  address: 'Av. Andrés Bello 2425, Providencia',
+  phone: '+56223456789',
+  city: 'Santiago',
+  storeImg: null,
+  email: 'central@araucopro.com',
+  name: 'Tienda Central',
+  type: 'central',
+  isCentralStore: true,
+  giro: 'Comercio al por menor de vestuario',
+  acteco: '471000',
+  cdgSIISucur: '8345',
+  businessName: 'Arauco Retail SpA',
+  createdAt: '2026-08-18T12:00:00.000Z',
+  updatedAt: '2026-08-18T12:00:00.000Z',
+};
+
+const TENANT_EXAMPLE = {
+  tenantID: TENANT_ID,
+  name: 'Arauco Retail',
+  slug: 'arauco-retail',
+  status: 'ACTIVE',
+  maxStores: 5,
+  maxUsers: 5,
+  planType: 'STANDARD',
+  subscriptionExpiresAt: '2027-08-18T00:00:00.000Z',
+  autoRenew: true,
+  timeZone: 'America/Santiago',
+  locale: 'es-CL',
+  createdAt: '2026-08-18T12:00:00.000Z',
+  updatedAt: '2026-08-18T12:00:00.000Z',
+};
+
+const TENANT_DETAIL_EXAMPLE = {
+  ...TENANT_EXAMPLE,
+  users: [USER_EXAMPLE],
+  stores: [STORE_EXAMPLE],
+};
+
+const CATEGORY_EXAMPLE = {
+  categoryID: CATEGORY_ID,
+  tenantID: TENANT_ID,
+  parentID: null,
+  name: 'General',
+};
+
+const PRODUCT_EXAMPLE = {
+  productID: PRODUCT_ID,
+  tenantID: TENANT_ID,
+  image: 'https://cdn.araucopro.com/polera-basica.jpg',
+  categoryID: CATEGORY_ID,
+  name: 'Polera básica algodón',
+  brand: 'Arauco',
+  genre: 'Unisex',
+  description: 'Polera de algodón peinado 100%',
+  createdAt: '2026-08-18T12:00:00.000Z',
+  updatedAt: '2026-08-18T12:00:00.000Z',
+};
+
+const METRICS_EXAMPLE = {
+  tenantID: TENANT_ID,
+  name: 'Arauco Retail',
+  slug: 'arauco-retail',
+  status: 'ACTIVE',
+  usage: {
+    storesCount: 1,
+    maxStores: 5,
+    storesUsagePct: 20,
+    usersCount: 1,
+    maxUsers: 5,
+    usersUsagePct: 20,
+    warningThresholdReached: false,
+  },
+  activity: {
+    productsCount: 120,
+  },
+  subscription: {
+    planType: 'STANDARD',
+    expiresAt: '2027-08-18T00:00:00.000Z',
+    daysRemaining: 365,
+    autoRenew: true,
+  },
+};
+
+const LOGIN_EXAMPLE = {
+  masterUser: {
+    masterUserID: MASTER_USER_ID,
+    email: 'soporte@araucopro.com',
+    role: 'SUPER_ADMIN',
+  },
+  accessToken:
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoibWFzdGVyIiwibWFzdGVyVXNlcklkIjoiZDNlZWJjOTktOWMwYi00ZWY4LWJiNmQtNmJiOWJkMzgwYTExIiwiaWF0IjoxNzUzOTAwMjI5LCJleHAiOjE3NTM5MDEwMjl9.ejemplo',
+};
+
+const PROVISION_EXAMPLE = {
+  message: 'Tenant provisioned successfully',
+  tenantID: TENANT_ID,
+  centralStoreID: STORE_ID,
+  adminUserID: USER_ID,
+  status: 'ACTIVE',
+};
+
+const EXPORT_EXAMPLE = {
+  exportedAt: '2026-08-18T15:30:00.000Z',
+  tenant: TENANT_EXAMPLE,
+  data: {
+    stores: [STORE_EXAMPLE],
+    users: [USER_EXAMPLE],
+    categories: [CATEGORY_EXAMPLE],
+    products: [PRODUCT_EXAMPLE],
+  },
+};
+
+const IMPERSONATE_TOKEN_EXAMPLE =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoibWFzdGVyIiwiaW1wZXJzb25hdGluZ1RlbmFudElkIjoiYTBlZWJjOTktOWMwYi00ZWY4LWJiNmQtNmJiOWJkMzgwYTExIiwiaWF0IjoxNzUzOTAwMjI5LCJleHAiOjE3NTM5MDEwMjl9.ejemplo';
+
+const responseExample = (data: unknown) => ({
+  statusCode: 200,
+  message: 'Operación exitosa',
+  error: null,
+  data,
+});
+
 @ApiTags('Master Platform Administration')
 @Controller('master')
 export class MasterController {
@@ -39,6 +185,7 @@ export class MasterController {
   @ApiResponse({
     status: 200,
     description: 'Token de acceso de plataforma de tipo master',
+    schema: { example: responseExample(LOGIN_EXAMPLE) },
   })
   login(@Body() dto: LoginMasterDto) {
     return this.service.loginMaster(dto);
@@ -51,6 +198,14 @@ export class MasterController {
   @ApiResponse({
     status: 200,
     description: 'Lista paginada de tenants incluyendo sus usuarios y tiendas',
+    schema: {
+      example: responseExample({
+        items: [TENANT_DETAIL_EXAMPLE],
+        total: 1,
+        limit: 10,
+        offset: 0,
+      }),
+    },
   })
   findAll(@Query() query: QueryTenantsDto) {
     return this.service.findAllTenants(query);
@@ -63,6 +218,7 @@ export class MasterController {
   @ApiResponse({
     status: 200,
     description: 'Detalles del tenant incluyendo sus usuarios y tiendas',
+    schema: { example: responseExample(TENANT_DETAIL_EXAMPLE) },
   })
   findOne(@Param('tenantId', ParseUUIDPipe) tenantId: string) {
     return this.service.findTenantById(tenantId);
@@ -72,7 +228,11 @@ export class MasterController {
   @UseGuards(MasterAuthGuard)
   @MasterRoute()
   @ApiOperation({ summary: 'Crear un nuevo tenant en la plataforma' })
-  @ApiResponse({ status: 201, description: 'Tenant creado exitosamente' })
+  @ApiResponse({
+    status: 201,
+    description: 'Tenant creado exitosamente',
+    schema: { example: responseExample(TENANT_EXAMPLE) },
+  })
   create(@Body() dto: CreateTenantDto) {
     return this.service.createTenant(dto);
   }
@@ -84,7 +244,11 @@ export class MasterController {
     summary:
       'Actualizar propiedades de un tenant (maxStores, maxUsers, status, etc.)',
   })
-  @ApiResponse({ status: 200, description: 'Tenant actualizado exitosamente' })
+  @ApiResponse({
+    status: 200,
+    description: 'Tenant actualizado exitosamente',
+    schema: { example: responseExample(TENANT_EXAMPLE) },
+  })
   update(
     @Param('tenantId', ParseUUIDPipe) tenantId: string,
     @Body() dto: UpdateTenantDto,
@@ -100,7 +264,11 @@ export class MasterController {
     summary:
       'Provisionar tienda central, usuario admin y datos base para un tenant',
   })
-  @ApiResponse({ status: 201, description: 'Tenant provisionado exitosamente' })
+  @ApiResponse({
+    status: 201,
+    description: 'Tenant provisionado exitosamente',
+    schema: { example: responseExample(PROVISION_EXAMPLE) },
+  })
   provision(
     @Param('tenantId', ParseUUIDPipe) tenantId: string,
     @Body() dto: ProvisionTenantDto,
@@ -128,6 +296,7 @@ export class MasterController {
   @ApiResponse({
     status: 201,
     description: 'Usuario creado exitosamente',
+    schema: { example: responseExample(USER_EXAMPLE) },
   })
   @ApiResponse({
     status: 403,
@@ -172,6 +341,7 @@ export class MasterController {
   @ApiResponse({
     status: 200,
     description: 'Usuario actualizado exitosamente',
+    schema: { example: responseExample(USER_EXAMPLE) },
   })
   @ApiResponse({
     status: 404,
@@ -206,6 +376,7 @@ export class MasterController {
   @ApiResponse({
     status: 201,
     description: 'Tienda creada exitosamente',
+    schema: { example: responseExample(STORE_EXAMPLE) },
   })
   @ApiResponse({
     status: 403,
@@ -250,6 +421,7 @@ export class MasterController {
   @ApiResponse({
     status: 200,
     description: 'Tienda actualizada exitosamente',
+    schema: { example: responseExample(STORE_EXAMPLE) },
   })
   @ApiResponse({
     status: 404,
@@ -279,6 +451,11 @@ export class MasterController {
   @ApiOperation({
     summary: 'Obtener métricas de uso y telemetría de un tenant',
   })
+  @ApiResponse({
+    status: 200,
+    description: 'Métricas de uso y suscripción del tenant',
+    schema: { example: responseExample(METRICS_EXAMPLE) },
+  })
   metrics(@Param('tenantId', ParseUUIDPipe) tenantId: string) {
     return this.service.getTenantMetrics(tenantId);
   }
@@ -288,6 +465,11 @@ export class MasterController {
   @MasterRoute()
   @ApiOperation({
     summary: 'Actualizar tipo de plan y vencimiento de suscripción',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Suscripción del tenant actualizada',
+    schema: { example: responseExample(TENANT_EXAMPLE) },
   })
   subscription(
     @Param('tenantId', ParseUUIDPipe) tenantId: string,
@@ -305,6 +487,11 @@ export class MasterController {
   @UseGuards(MasterAuthGuard)
   @MasterRoute()
   @ApiOperation({ summary: 'Exportar respaldo completo de datos de un tenant' })
+  @ApiResponse({
+    status: 200,
+    description: 'Respaldo completo de los datos del tenant',
+    schema: { example: responseExample(EXPORT_EXAMPLE) },
+  })
   exportData(@Param('tenantId', ParseUUIDPipe) tenantId: string) {
     return this.service.exportTenantData(tenantId);
   }
@@ -324,6 +511,7 @@ export class MasterController {
   @ApiResponse({
     status: 200,
     description: 'Estado del tenant actualizado correctamente',
+    schema: { example: responseExample(TENANT_EXAMPLE) },
   })
   @ApiResponse({
     status: 404,
@@ -357,6 +545,7 @@ export class MasterController {
     status: 201,
     description:
       'Token JWT de impersonación generado; incluye impersonatingTenantId',
+    schema: { example: responseExample(IMPERSONATE_TOKEN_EXAMPLE) },
   })
   @ApiResponse({
     status: 404,

@@ -6,12 +6,18 @@ import { DataSource, Repository } from 'typeorm';
 import { NotFoundException } from '@nestjs/common';
 import { Product } from '../../products/entities/product.entity';
 import { PricingService } from '../../pricing/pricing.service';
-import { InventoryMovement, InventoryMovementReason } from '../../inventory/entities/inventory-movement.entity';
+import {
+  InventoryMovement,
+  InventoryMovementReason,
+} from '../../inventory/entities/inventory-movement.entity';
 
 describe('StoreProductService', () => {
   let service: StoreProductService;
   let productRepository: Repository<Product>;
-  let pricingService: { calculatePrice: jest.Mock; applyPriceChange: jest.Mock };
+  let pricingService: {
+    calculatePrice: jest.Mock;
+    applyPriceChange: jest.Mock;
+  };
 
   const mockStoreStockRepository = {
     findOne: jest.fn(),
@@ -160,7 +166,9 @@ describe('StoreProductService', () => {
         innerJoinAndSelect: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([product]),
       };
-      mockProductRepository.createQueryBuilder.mockReturnValue(queryBuilderMock);
+      mockProductRepository.createQueryBuilder.mockReturnValue(
+        queryBuilderMock,
+      );
       pricingService.calculatePrice.mockResolvedValue({
         finalPrice: 140,
         discountApplied: true,
