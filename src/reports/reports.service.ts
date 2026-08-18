@@ -17,6 +17,7 @@ import {
   IncomeStatementExpenseDetailDto,
 } from './dto/income-statement.dto';
 import { ReportsSaleFilterDto } from './dto/report-salesFilter.dto';
+import { SalesReportResponseDto } from './dto/sales-report.dto';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { Sale, SaleStatus, SaleType } from '../sales/entities/sale.entity';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
@@ -203,7 +204,9 @@ export class ReportsService {
     });
   }
 
-  async getSalesReport(filter: ReportsSaleFilterDto) {
+  async getSalesReport(
+    filter: ReportsSaleFilterDto,
+  ): Promise<SalesReportResponseDto> {
     return this.runInTransaction(async (manager) => {
       const dteRepo = manager.getRepository(DteDocument);
       const saleRepo = manager.getRepository(Sale);

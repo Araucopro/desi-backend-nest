@@ -61,8 +61,10 @@ export function createVariationEntity(
     tenantID?: string;
   },
 ): ProductVariation {
+  const { barcode, ...dto } = values.dto;
   return manager.create(ProductVariation, {
-    ...values.dto,
+    ...dto,
+    barcode: barcode?.trim() ? barcode : dto.supplierSku?.trim() || dto.sku,
     product: values.product,
     ...(values.tenantID ? { tenantID: values.tenantID } : {}),
   });

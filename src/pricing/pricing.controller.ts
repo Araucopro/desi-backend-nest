@@ -12,9 +12,16 @@ import { OfferService } from './offer.service';
 import { UpdatePriceDto } from './dto/update-price.dto';
 import { CreateSpecialOfferDto } from './dto/create-special-offer.dto';
 import { UpdateSpecialOfferDto } from './dto/update-special-offer.dto';
-import { ApiBody, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CalculatePriceDto } from './dto/calculate-price.dto';
 import { CalculateCartDto } from './dto/calculate-cart.dto';
+import { CalculateCartResponseDto } from './dto/calculate-cart-response.dto';
 import { PricingListQueryDto } from './dto/pricing-list.query.dto';
 import { SpecialOfferListQueryDto } from './dto/special-offer-list.query.dto';
 
@@ -129,6 +136,12 @@ export class PricingController {
       'Calcular carrito completo con ofertas apilables, 2x1/3x2/6x5 y combos',
   })
   @ApiBody({ type: CalculateCartDto })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Carrito calculado con líneas detalladas, totales y contexto de pricing',
+    type: CalculateCartResponseDto,
+  })
   calculateCart(@Body() input: CalculateCartDto) {
     return this.pricingService.calculateCart(input);
   }

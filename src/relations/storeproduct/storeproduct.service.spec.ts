@@ -164,6 +164,7 @@ describe('StoreProductService', () => {
       const queryBuilderMock: any = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         innerJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([product]),
       };
       mockProductRepository.createQueryBuilder.mockReturnValue(
@@ -188,6 +189,44 @@ describe('StoreProductService', () => {
           finalPrice: 140,
           discountApplied: true,
         }),
+      );
+    });
+
+    it('filters inventory by search across product and variation fields', async () => {
+      const queryBuilderMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      };
+      mockProductRepository.createQueryBuilder.mockReturnValue(
+        queryBuilderMock,
+      );
+
+      await service.getStoreInventory('store-1', '7801234567890');
+
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('variations.barcode ILIKE :term'),
+        { term: '%7801234567890%' },
+      );
+    });
+
+    it('filters inventory by exact barcode for scanner support', async () => {
+      const queryBuilderMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      };
+      mockProductRepository.createQueryBuilder.mockReturnValue(
+        queryBuilderMock,
+      );
+
+      await service.getStoreInventory('store-1', undefined, '7801234567890');
+
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        'variations.barcode = :barcode',
+        { barcode: '7801234567890' },
       );
     });
   });

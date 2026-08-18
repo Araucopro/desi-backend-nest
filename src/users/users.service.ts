@@ -6,10 +6,17 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
-import { User } from './entities/user.entity';
+import {
+  DataSource,
+  EntityManager,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
+import { User, UserStatus } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UserListQueryDto } from './dto/user-list.query.dto';
+import { UserListResponseDto } from './dto/user-list-response.dto';
 import { Store, StoreType } from '../stores/entities/store.entity';
 import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
@@ -57,6 +64,7 @@ export class UsersService {
 
       const user = userRepository.create({
         ...dto,
+        status: dto.status ?? UserStatus.ACTIVE,
         password: hashedPassword,
         tenantID: tenantId,
       });
@@ -100,14 +108,63 @@ export class UsersService {
     });
   }
 
-  async findAll(): Promise<User[]> {
+  async findAll(query: UserListQueryDto = {}): Promise<UserListResponseDto> {
     const tenantId = this.tenantContext?.get(false)?.tenantId;
-    const where = tenantId ? { tenantID: tenantId } : {};
+    const { limit = 10, offset = 0, search, role, status } = query;
+
+    const applyFilters = (qb: SelectQueryBuilder<User>) => {
+      if (tenantId) {
+        qb.andWhere('user.tenantID = :tenantId', { tenantId });
+      }
+      if (search?.trim()) {
+        const term = `%${search.trim()}%`;
+        qb.andWhere('(user.name ILIKE :term OR user.email ILIKE :term)', {
+          term,
+        });
+      }
+      if (role) {
+        qb.andWhere('user.role = :role', { role });
+      }
+      if (status) {
+        qb.andWhere('user.status = :status', { status });
+      }
+      qb.orderBy('user.createdAt', 'DESC');
+      return qb;
+    };
+
+    const execute = async (
+      repo: Repository<User>,
+    ): Promise<UserListResponseDto> => {
+      const qb = applyFilters(repo.createQueryBuilder('user'));
+      const [users, total] = await qb
+        .take(limit)
+        .skip(offset)
+        .getManyAndCount();
+
+      return {
+        users: users.map((user) => ({
+          userID: user.userID,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          userImg: user.userImg,
+          status: user.status,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt,
+        })),
+        meta: {
+          page: Math.floor(offset / limit) + 1,
+          limit,
+          total,
+        },
+      };
+    };
+
     return this.tenantContext
       ? this.tenantContext.transaction((manager) =>
-          manager.getRepository(User).find({ where }),
+          execute(manager.getRepository(User)),
         )
-      : this.userRepo.find({ where });
+      : execute(this.userRepo);
   }
 
   async findOneByEmail(email: string): Promise<User> {

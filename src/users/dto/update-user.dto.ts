@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString, IsEnum, MinLength } from 'class-validator';
-import { UserRole } from '../entities/user.entity';
+import { UserRole, UserStatus } from '../entities/user.entity';
 
 export class UpdateUserDto {
   @ApiPropertyOptional({
@@ -19,6 +19,15 @@ export class UpdateUserDto {
   @IsOptional()
   @IsEnum(UserRole)
   role?: UserRole;
+
+  @ApiPropertyOptional({
+    description: 'Estado del usuario',
+    enum: UserStatus,
+    example: UserStatus.ACTIVE,
+  })
+  @IsOptional()
+  @IsEnum(UserStatus)
+  status?: UserStatus;
 
   @ApiPropertyOptional({
     description: 'URL de la imagen de perfil del usuario',

@@ -6,9 +6,11 @@ import {
   IsEnum,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -129,4 +131,18 @@ export class CreateSaleDto {
   @ValidateNested({ each: true })
   @Type(() => CreateSaleItemDto)
   items!: CreateSaleItemDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Descuento manual porcentual (0-100). Se valida contra el rol del usuario, su pertenencia a la tienda y el margen mínimo',
+    example: 10,
+    minimum: 0,
+    maximum: 100,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  manualDiscount?: number;
 }

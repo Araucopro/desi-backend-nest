@@ -42,6 +42,10 @@ export class ProductVariation {
   @Column({ type: 'varchar', length: 255, nullable: true })
   supplierSku?: string | null;
 
+  @Index(['tenantID', 'barcode'])
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  barcode?: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

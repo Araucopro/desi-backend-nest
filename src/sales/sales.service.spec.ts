@@ -258,6 +258,20 @@ describe('SalesService', () => {
     expect(result.dte).toBeNull();
   });
 
+  it('forwards a manual discount to the pricing engine with the authenticated user', async () => {
+    const service = createService();
+    const dto = { ...notaVentaDto(), manualDiscount: 10 };
+
+    await service.create('store-1', undefined, dto as any, 'user-1');
+
+    expect(pricingService.calculateCart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userID: 'user-1',
+        manualDiscount: 10,
+      }),
+    );
+  });
+
   it('persists automatic offer discounts from calculatePrice without manual discount', async () => {
     pricingService.calculateCart.mockResolvedValue({
       items: [

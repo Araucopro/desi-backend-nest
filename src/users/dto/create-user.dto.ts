@@ -7,7 +7,7 @@ import {
   IsString,
   MinLength,
 } from 'class-validator';
-import { UserRole } from '../entities/user.entity';
+import { UserRole, UserStatus } from '../entities/user.entity';
 
 export class CreateUserDto {
   @ApiProperty({
@@ -32,6 +32,16 @@ export class CreateUserDto {
   })
   @IsEnum(UserRole)
   role!: UserRole;
+
+  @ApiProperty({
+    description: 'Estado del usuario',
+    enum: UserStatus,
+    example: UserStatus.ACTIVE,
+    required: false,
+  })
+  @IsOptional()
+  @IsEnum(UserStatus)
+  status?: UserStatus;
 
   @ApiProperty({
     description: 'URL de la imagen de perfil del usuario (opcional).',

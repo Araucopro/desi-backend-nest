@@ -39,8 +39,12 @@ export class StoreProductService {
       : this.dataSource.transaction(callback);
   }
 
-  async getStoreInventory(storeID: string): Promise<Product[]> {
-    const products = await this.productRepository
+  async getStoreInventory(
+    storeID: string,
+    search?: string,
+    barcode?: string,
+  ): Promise<Product[]> {
+    const qb = this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
       .innerJoinAndSelect('product.variations', 'variations')
@@ -56,8 +60,23 @@ export class StoreProductService {
         'offer',
         '(offer.isActive = :isActive AND (offer.endDate IS NULL OR offer.endDate >= :now) AND offer.startDate <= :now)',
         { isActive: true, now: new Date() },
-      )
-      .getMany();
+      );
+
+    if (search?.trim()) {
+      const term = `%${search.trim()}%`;
+      qb.andWhere(
+        '(product.name ILIKE :term OR product.brand ILIKE :term OR category.name ILIKE :term OR variations.sku ILIKE :term OR variations.supplierSku ILIKE :term OR variations.barcode ILIKE :term)',
+        { term },
+      );
+    }
+
+    if (barcode?.trim()) {
+      qb.andWhere('variations.barcode = :barcode', {
+        barcode: barcode.trim(),
+      });
+    }
+
+    const products = await qb.getMany();
 
     for (const product of products) {
       for (const variation of product.variations) {

@@ -32,12 +32,28 @@ describe('CreateSaleDto', () => {
     expect((dto as CreateSaleDto).items).toHaveLength(1);
   });
 
-  it('rejects manualDiscount because sales only apply automatic offers', async () => {
+  it('accepts an optional manualDiscount between 0 and 100', async () => {
+    const dto = await pipe.transform(
+      {
+        ...validPayload(),
+        manualDiscount: 10,
+      },
+      {
+        type: 'body',
+        metatype: CreateSaleDto,
+      },
+    );
+
+    expect(dto).toBeInstanceOf(CreateSaleDto);
+    expect((dto as CreateSaleDto).manualDiscount).toBe(10);
+  });
+
+  it('rejects manualDiscount outside 0-100', async () => {
     await expect(
       pipe.transform(
         {
           ...validPayload(),
-          manualDiscount: 10,
+          manualDiscount: 101,
         },
         {
           type: 'body',

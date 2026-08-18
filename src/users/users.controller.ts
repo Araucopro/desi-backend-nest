@@ -8,10 +8,13 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
+  Query,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UserListQueryDto } from './dto/user-list.query.dto';
+import { UserListResponseDto } from './dto/user-list-response.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { Store } from '../stores/entities/store.entity';
 import { CustomMessage } from '../common/decorators/response-message';
@@ -41,14 +44,18 @@ export class UsersController {
   @Get()
   @Roles(UserRole.ADMIN)
   @CustomMessage('Lista de usuarios obtenida exitosamente')
-  @ApiOperation({ summary: 'Obtener todos los usuarios' })
+  @ApiOperation({
+    summary: 'Obtener usuarios con paginación, búsqueda y filtros',
+    description:
+      'Filtra por nombre/correo (search), rol y estado, con paginación limit/offset y meta con el total.',
+  })
   @ApiResponse({
     status: 200,
-    description: 'Lista de todos los usuarios.',
-    type: [User],
+    description: 'Lista paginada de usuarios.',
+    type: UserListResponseDto,
   })
-  findAll() {
-    return this.usersService.findAll();
+  findAll(@Query() query: UserListQueryDto) {
+    return this.usersService.findAll(query);
   }
 
   @Get(':id/stores')

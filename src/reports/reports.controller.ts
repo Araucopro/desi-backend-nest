@@ -4,6 +4,7 @@ import { ReportsService } from './reports.service';
 import { IncomeStatementQueryDto } from './dto/income-statement-query.dto';
 import { IncomeStatementDto } from './dto/income-statement.dto';
 import { ReportsSaleFilterDto } from './dto/report-salesFilter.dto';
+import { SalesReportResponseDto } from './dto/sales-report.dto';
 
 @Controller('reports')
 @ApiTags('Reportes')
@@ -70,7 +71,7 @@ export class ReportsController {
   @ApiResponse({
     status: 200,
     description: 'Reporte de ventas',
-    type: ReportsSaleFilterDto,
+    type: SalesReportResponseDto,
   })
   async salesReport(@Query() query: ReportsSaleFilterDto) {
     return this.reportsService.getSalesReport(query);

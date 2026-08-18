@@ -15,6 +15,11 @@ export enum UserRole {
   TERCERO = 'tercero',
 }
 
+export enum UserStatus {
+  ACTIVE = 'ACTIVE',
+  INACTIVE = 'INACTIVE',
+}
+
 @Entity({ name: 'Users' })
 export class User {
   @PrimaryGeneratedColumn('uuid', { name: 'userID' })
@@ -34,6 +39,13 @@ export class User {
     enum: UserRole,
   })
   role!: UserRole;
+
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: UserStatus.ACTIVE,
+  })
+  status!: UserStatus;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   userImg!: string | null;

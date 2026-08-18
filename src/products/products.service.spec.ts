@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ProductsService } from './products.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Product } from './entities/product.entity';
+import { Product, ProductGenre } from './entities/product.entity';
 import { ProductVariation } from './entities/product-variation.entity';
 import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
@@ -89,7 +89,7 @@ describe('ProductsService', () => {
   });
 
   describe('findAll', () => {
-    it('should return an array of products with pagination', async () => {
+    it('returns products with pagination meta', async () => {
       const result: Product[] = [];
       mockEntityManager.transaction.mockImplementation(async (cb) =>
         cb(mockEntityManager as any),
@@ -97,9 +97,10 @@ describe('ProductsService', () => {
 
       const queryBuilderMock: any = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
         take: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue(result),
+        getManyAndCount: jest.fn().mockResolvedValue([result, 0]),
       };
       mockProductRepository.createQueryBuilder.mockReturnValue(
         queryBuilderMock,
@@ -107,11 +108,96 @@ describe('ProductsService', () => {
 
       const paginationDto = { limit: 10, offset: 0 };
       const res = await service.findAll(paginationDto);
-      expect(res).toBe(result);
+      expect(res).toEqual({
+        products: result,
+        meta: { page: 1, limit: 10, total: 0 },
+      });
       expect(mockProductRepository.createQueryBuilder).toHaveBeenCalledWith(
         'product',
       );
-      expect(queryBuilderMock.getMany).toHaveBeenCalled();
+      expect(queryBuilderMock.getManyAndCount).toHaveBeenCalled();
+    });
+
+    it('applies a server-side search across product and variation fields', async () => {
+      const result: Product[] = [];
+      mockEntityManager.transaction.mockImplementation(async (cb) =>
+        cb(mockEntityManager as any),
+      );
+
+      const queryBuilderMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([result, 1]),
+      };
+      mockProductRepository.createQueryBuilder.mockReturnValue(
+        queryBuilderMock,
+      );
+
+      await service.findAll({ search: 'CEM-25' });
+
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('"pv"."sku" ILIKE :term'),
+        { term: '%CEM-25%' },
+      );
+    });
+
+    it('filters products by exact barcode', async () => {
+      const result: Product[] = [];
+      mockEntityManager.transaction.mockImplementation(async (cb) =>
+        cb(mockEntityManager as any),
+      );
+
+      const queryBuilderMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([result, 1]),
+      };
+      mockProductRepository.createQueryBuilder.mockReturnValue(
+        queryBuilderMock,
+      );
+
+      await service.findAll({ barcode: '7801234567890' });
+
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('"pv"."barcode" = :barcode'),
+        { barcode: '7801234567890' },
+      );
+    });
+
+    it('filters products by category and genre', async () => {
+      const result: Product[] = [];
+      mockEntityManager.transaction.mockImplementation(async (cb) =>
+        cb(mockEntityManager as any),
+      );
+
+      const queryBuilderMock: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([result, 0]),
+      };
+      mockProductRepository.createQueryBuilder.mockReturnValue(
+        queryBuilderMock,
+      );
+
+      await service.findAll({
+        categoryID: 'category-1',
+        genre: ProductGenre.UNISEX,
+      });
+
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        'product.categoryID = :categoryID',
+        { categoryID: 'category-1' },
+      );
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        'product.genre = :genre',
+        { genre: ProductGenre.UNISEX },
+      );
     });
   });
 
@@ -155,7 +241,11 @@ describe('ProductsService', () => {
 
       expect(result).toEqual(expect.objectContaining({ name: 'New Product' }));
       expect(mockEntityManager.save).toHaveBeenCalledWith(
-        expect.objectContaining({ sku: 'SKU-1', product: expect.anything() }),
+        expect.objectContaining({
+          sku: 'SKU-1',
+          barcode: 'SKU-1',
+          product: expect.anything(),
+        }),
       );
       expect(mockEntityManager.create).toHaveBeenCalledWith(
         InventoryMovement,

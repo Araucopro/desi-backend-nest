@@ -12,7 +12,8 @@ import {
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { PaginationDto } from '../common/dto/pagination.dto';
+import { ProductListQueryDto } from './dto/product-list.query.dto';
+import { ProductListResponseDto } from './dto/product-list-response.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { Product } from './entities/product.entity';
 import { Public } from '../auth/decorators/public.decorator';
@@ -34,14 +35,18 @@ export class ProductsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Obtener todos los productos' })
+  @ApiOperation({
+    summary: 'Obtener productos con paginación y búsqueda',
+    description:
+      'Filtra por nombre, marca, categoría, SKU, supplierSku o código de barras de las variantes.',
+  })
   @ApiResponse({
     status: 200,
     description: 'Lista de productos.',
-    type: [Product],
+    type: ProductListResponseDto,
   })
-  findAll(@Query() paginationDto: PaginationDto) {
-    return this.productsService.findAll(paginationDto);
+  findAll(@Query() query: ProductListQueryDto) {
+    return this.productsService.findAll(query);
   }
 
   @Get(':id')

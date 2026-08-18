@@ -35,13 +35,30 @@ export class StoreProductController {
     description: 'ID de la tienda para consultar inventario',
     type: String,
   })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description:
+      'Búsqueda parcial (sin distinguir mayúsculas) por nombre/marca/categoría del producto o SKU, supplierSku o código de barras de la variante',
+  })
+  @ApiQuery({
+    name: 'barcode',
+    required: false,
+    description:
+      'Código de barras exacto de la variante (EAN/UPC) para escaneo',
+    example: '7801234567890',
+  })
   @ApiResponse({
     status: 200,
     description: 'Inventario de la tienda.',
     type: [Product],
   })
-  getStoreInventory(@Query('storeID', ParseUUIDPipe) storeID: string) {
-    return this.storeProductService.getStoreInventory(storeID);
+  getStoreInventory(
+    @Query('storeID', ParseUUIDPipe) storeID: string,
+    @Query('search') search?: string,
+    @Query('barcode') barcode?: string,
+  ) {
+    return this.storeProductService.getStoreInventory(storeID, search, barcode);
   }
 
   @Patch(':id')

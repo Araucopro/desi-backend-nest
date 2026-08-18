@@ -6,7 +6,8 @@ import { ProductVariation } from './entities/product-variation.entity';
 import { CreateProductDto } from './dto/create-product.dto';
 import { PricingService } from '../pricing/pricing.service';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { PaginationDto } from '../common/dto/pagination.dto';
+import { ProductListQueryDto } from './dto/product-list.query.dto';
+import { ProductListResponseDto } from './dto/product-list-response.dto';
 import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
 import {
   applyInventoryMovement,
@@ -93,11 +94,18 @@ export class ProductsService {
     });
   }
 
-  async findAll(paginationDto: PaginationDto): Promise<Product[]> {
+  async findAll(query: ProductListQueryDto): Promise<ProductListResponseDto> {
     return this.runInTransaction(async (manager) => {
-      const { limit = 10, offset = 0 } = paginationDto;
+      const {
+        limit = 10,
+        offset = 0,
+        search,
+        barcode,
+        categoryID,
+        genre,
+      } = query;
 
-      const products = await manager
+      const qb = manager
         .getRepository(Product)
         .createQueryBuilder('product')
         .leftJoinAndSelect('product.category', 'category')
@@ -109,10 +117,42 @@ export class ProductsService {
           'offer',
           '(offer.isActive = :isActive AND (offer.endDate IS NULL OR offer.endDate >= :now) AND offer.startDate <= :now)',
           { isActive: true, now: new Date() },
-        )
+        );
+
+      if (search?.trim()) {
+        const term = `%${search.trim()}%`;
+        qb.andWhere(
+          `(product.name ILIKE :term OR product.brand ILIKE :term OR category.name ILIKE :term OR EXISTS (
+            SELECT 1 FROM "ProductVariations" "pv"
+            WHERE "pv"."productID" = "product"."productID"
+              AND ("pv"."sku" ILIKE :term OR "pv"."supplierSku" ILIKE :term OR "pv"."barcode" ILIKE :term)
+          ))`,
+          { term },
+        );
+      }
+
+      if (barcode?.trim()) {
+        qb.andWhere(
+          `EXISTS (
+            SELECT 1 FROM "ProductVariations" "pv"
+            WHERE "pv"."productID" = "product"."productID" AND "pv"."barcode" = :barcode
+          )`,
+          { barcode: barcode.trim() },
+        );
+      }
+
+      if (categoryID) {
+        qb.andWhere('product.categoryID = :categoryID', { categoryID });
+      }
+
+      if (genre) {
+        qb.andWhere('product.genre = :genre', { genre });
+      }
+
+      const [products, total] = await qb
         .take(limit)
         .skip(offset)
-        .getMany();
+        .getManyAndCount();
 
       for (const product of products) {
         if (!product.variations) continue;
@@ -136,7 +176,14 @@ export class ProductsService {
         }
       }
 
-      return products;
+      return {
+        products,
+        meta: {
+          page: Math.floor(offset / limit) + 1,
+          limit,
+          total,
+        },
+      };
     });
   }
 

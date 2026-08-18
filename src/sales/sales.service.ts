@@ -91,6 +91,9 @@ export class SalesService {
         quantity: item.quantity,
       })),
       userID: userId ?? null,
+      ...(dto.manualDiscount !== undefined && dto.manualDiscount > 0
+        ? { manualDiscount: dto.manualDiscount }
+        : {}),
       pricingDate: toDateOnly(dto.issueDate ?? new Date()),
     });
 
