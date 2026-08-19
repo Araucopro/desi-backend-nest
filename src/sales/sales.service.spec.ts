@@ -10,6 +10,7 @@ import { SaleItem } from './entities/sale-item.entity';
 import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
 import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import { InventoryService } from '../inventory/inventory.service';
 import {
   DteDocument,
   DteDocumentPaymentType,
@@ -211,6 +212,7 @@ describe('SalesService', () => {
       dteService as any,
       dteMapperService as any,
       financialMovementsService as any,
+      new InventoryService(undefined as any),
     );
   }
 

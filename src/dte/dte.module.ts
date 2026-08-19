@@ -10,6 +10,7 @@ import { Product } from '../products/entities/product.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { InventoryMovement } from '../inventory/entities/inventory-movement.entity';
+import { InventoryModule } from '../inventory/inventory.module';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 import { UserstoresModule } from '../relations/userstores/userstores.module';
@@ -22,6 +23,7 @@ import { TransactionRunnerService } from '../common/services/transaction-runner.
     MultitenantModule,
     UserstoresModule,
     FinancialMovementsModule,
+    InventoryModule,
     TypeOrmModule.forFeature([
       DteDocument,
       Store,

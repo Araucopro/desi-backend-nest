@@ -5,13 +5,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import {
-  DataSource,
-  EntityManager,
-  In,
-  Repository,
-  SelectQueryBuilder,
-} from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { PriceHistory, PriceType } from './entities/price-history.entity';
 import { UpdatePriceDto } from './dto/update-price.dto';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
@@ -39,6 +33,14 @@ import {
   MutableCartLine,
   recordManualIgnored,
 } from './discount-engine';
+import {
+  findCentralStoreProductsForVariations,
+  findPriceHistoryList,
+  findStoreProductByIdWithStore,
+  findStoreProductOrCreate,
+  findStoreProductsByStoreAndIDs,
+  recordPriceChange,
+} from './pricing-repository.helpers';
 
 @Injectable()
 export class PricingService {
@@ -70,22 +72,11 @@ export class PricingService {
       updatePriceDto;
 
     return this.runInTransaction(async (manager) => {
-      let storeProduct = await manager.findOne(StoreProduct, {
-        where: {
-          store: { storeID },
-          variation: { variationID },
-        },
-      });
-
-      if (!storeProduct) {
-        storeProduct = manager.create(StoreProduct, {
-          store: { storeID },
-          variation: { variationID },
-          stock: 0,
-          priceCost: 0,
-          priceList: 0,
-        });
-      }
+      const storeProduct = await findStoreProductOrCreate(
+        manager,
+        storeID,
+        variationID,
+      );
 
       const oldPrice =
         priceType === PriceType.COST
@@ -117,25 +108,7 @@ export class PricingService {
       changedBy?: string;
     },
   ): Promise<PriceHistory> {
-    const history = manager.create(PriceHistory, {
-      tenantID: storeProduct.tenantID,
-      storeProduct,
-      priceType: changes.priceType,
-      oldPrice: changes.oldPrice,
-      newPrice: changes.newPrice,
-      reason: changes.reason,
-      changedBy: changes.changedBy,
-    });
-    const savedHistory = await manager.save(history);
-
-    if (changes.priceType === PriceType.COST) {
-      storeProduct.priceCost = changes.newPrice;
-    } else {
-      storeProduct.priceList = changes.newPrice;
-    }
-    await manager.save(storeProduct);
-
-    return savedHistory;
+    return recordPriceChange(manager, storeProduct, changes);
   }
 
   async getPriceHistory(storeID: string, variationID: string) {
@@ -145,33 +118,7 @@ export class PricingService {
   async getPriceHistoryList(
     filters: PricingListQueryDto = {},
   ): Promise<PriceHistory[]> {
-    const query: SelectQueryBuilder<PriceHistory> = this.priceHistoryRepository
-      .createQueryBuilder('history')
-      .leftJoinAndSelect('history.storeProduct', 'storeProduct')
-      .leftJoinAndSelect('storeProduct.store', 'store')
-      .leftJoinAndSelect('storeProduct.variation', 'variation')
-      .leftJoinAndSelect('variation.product', 'product')
-      .orderBy('history.effectiveDate', 'DESC');
-
-    if (filters.storeProductID) {
-      query.andWhere('storeProduct.storeProductID = :storeProductID', {
-        storeProductID: filters.storeProductID,
-      });
-    }
-
-    if (filters.storeID) {
-      query.andWhere('store.storeID = :storeID', {
-        storeID: filters.storeID,
-      });
-    }
-
-    if (filters.variationID) {
-      query.andWhere('variation.variationID = :variationID', {
-        variationID: filters.variationID,
-      });
-    }
-
-    return query.getMany();
+    return findPriceHistoryList(this.priceHistoryRepository, filters);
   }
 
   async calculateCart(input: CalculateCartInput): Promise<CalculateCartResult> {
@@ -196,28 +143,21 @@ export class PricingService {
             'storeID es requerido cuando hay más de un ítem',
           );
         }
-        const single = await manager.findOne(StoreProduct, {
-          where: { storeProductID: storeProductIDs[0] },
-          relations: ['store'],
-        });
+        const single = await findStoreProductByIdWithStore(
+          manager,
+          storeProductIDs[0],
+        );
         if (!single) {
           throw new NotFoundException('Producto de tienda no encontrado');
         }
         storeID = single.store.storeID;
       }
 
-      const storeProducts = await manager.find(StoreProduct, {
-        where: {
-          store: { storeID },
-          storeProductID: In(storeProductIDs),
-        },
-        relations: [
-          'store',
-          'variation',
-          'variation.product',
-          'variation.product.category',
-        ],
-      });
+      const storeProducts = await findStoreProductsByStoreAndIDs(
+        manager,
+        storeID,
+        storeProductIDs,
+      );
       if (storeProducts.length !== storeProductIDs.length) {
         throw new NotFoundException(
           'Uno o más productos no pertenecen a la tienda',
@@ -410,15 +350,12 @@ export class PricingService {
         new Set(
           needsFallback.map((row) => row.storeProduct.variation?.variationID),
         ).values(),
-      ).filter(Boolean);
+      ).filter((id): id is string => Boolean(id));
       if (variationIDs.length) {
-        const centralRows = await manager.find(StoreProduct, {
-          where: {
-            store: { isCentralStore: true },
-            variation: { variationID: In(variationIDs) },
-          },
-          relations: ['store'],
-        });
+        const centralRows = await findCentralStoreProductsForVariations(
+          manager,
+          variationIDs,
+        );
         const centralByVariation = new Map(
           centralRows.map((row) => [row.variation?.variationID, row]),
         );

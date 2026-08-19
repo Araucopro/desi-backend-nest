@@ -13,6 +13,7 @@ import { Store } from '../stores/entities/store.entity';
 import { Product } from '../products/entities/product.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import { InventoryService } from '../inventory/inventory.service';
 import {
   PurchaseOrder,
   PurchaseOrderCommercialStatus,
@@ -247,6 +248,7 @@ describe('DteService', () => {
       mockConfigService as any,
       dataSource as any,
       mockFinancialMovementsService as any,
+      new InventoryService(undefined as any),
     );
   }
 

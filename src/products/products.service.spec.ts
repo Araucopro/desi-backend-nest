@@ -9,6 +9,7 @@ import { EntityManager, Repository } from 'typeorm';
 import { NotFoundException } from '@nestjs/common';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { PricingService } from '../pricing/pricing.service';
+import { InventoryService } from '../inventory/inventory.service';
 import {
   InventoryMovement,
   InventoryMovementReason,
@@ -77,6 +78,10 @@ describe('ProductsService', () => {
         {
           provide: PricingService,
           useValue: pricingService,
+        },
+        {
+          provide: InventoryService,
+          useValue: new InventoryService(undefined as any),
         },
       ],
     }).compile();

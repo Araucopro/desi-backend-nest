@@ -23,10 +23,7 @@ import { TenantContextService } from '../multitenant/tenant-context.service';
 import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
-import {
-  reserveStockAndSnapshotCosts,
-  revertReservedStock,
-} from '../inventory/inventory-repository.helpers';
+import { InventoryService } from '../inventory/inventory.service';
 import {
   OpenfacturaCallResult,
   OpenfacturaClientService,
@@ -80,6 +77,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly dataSource: DataSource,
     private readonly financialMovementsService: FinancialMovementsService,
+    private readonly inventoryService: InventoryService,
     @Optional() private readonly tenantContext?: TenantContextService,
     @Optional() private readonly transactionRunner?: TransactionRunnerService,
     @Optional() openfacturaClient?: OpenfacturaClientService,
@@ -258,7 +256,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (reserveStock) {
-      const reservedCogsTotal = await reserveStockAndSnapshotCosts(
+      const reservedCogsTotal = await this.inventoryService.reserveStock(
         manager,
         store.storeID,
         normalizedItems,
@@ -359,7 +357,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
 
     const saved = await manager.save(document);
     if (saved.stockReserved !== false) {
-      await revertReservedStock(
+      await this.inventoryService.revertReservedStock(
         manager,
         saved.storeID,
         readNormalizedItems(saved),

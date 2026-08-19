@@ -1,11 +1,9 @@
-import { Repository } from 'typeorm';
 import {
   DteDocument,
   DteDocumentStatus,
 } from '../dte/entities/dte-document.entity';
 import { ExpenseType } from '../expenses/entities/expense.entity';
 import {
-  FinancialMovement,
   FinancialMovementCategory,
   FinancialMovementDirection,
 } from '../financial-movements/entities/financial-movement.entity';
@@ -14,7 +12,7 @@ import {
   IncomeStatementMonthDto,
   IncomeStatementTotalsDto,
 } from './dto/income-statement.dto';
-import { Sale, SaleStatus, SaleType } from '../sales/entities/sale.entity';
+import { Sale, SaleType } from '../sales/entities/sale.entity';
 
 export type FinancialMovementRow = {
   month: string | number;
@@ -258,86 +256,6 @@ export function mergeSummary(
     count: dte.count + notes.count,
     total: dte.total + notes.total,
   };
-}
-
-export async function aggregateMovements(
-  repo: Repository<FinancialMovement>,
-  start: Date,
-  end: Date,
-  storeId?: string,
-): Promise<FinancialMovementRow[]> {
-  const qb = repo
-    .createQueryBuilder('movement')
-    .select('EXTRACT(MONTH FROM movement.date)', 'month')
-    .addSelect('movement.category', 'category')
-    .addSelect('movement.direction', 'direction')
-    .addSelect('movement.taxCredit', 'taxCredit')
-    .addSelect('movement.acceptedForTax', 'acceptedForTax')
-    .addSelect('COALESCE(SUM(movement.amount), 0)', 'total')
-    .addSelect('COALESCE(SUM(movement.taxAmount), 0)', 'taxTotal')
-    .where('movement.date >= :start AND movement.date < :end', {
-      start: start.toISOString(),
-      end: end.toISOString(),
-    });
-
-  if (storeId) {
-    qb.andWhere('movement.storeID = :storeId', { storeId });
-  }
-
-  return qb
-    .groupBy('month')
-    .addGroupBy('movement.category')
-    .addGroupBy('movement.direction')
-    .addGroupBy('movement.taxCredit')
-    .addGroupBy('movement.acceptedForTax')
-    .getRawMany();
-}
-
-export async function aggregateDteCountAndTotal(
-  repo: Repository<DteDocument>,
-  startIso: string,
-  endIso: string,
-  storeId?: string,
-): Promise<CountTotalAggregate> {
-  const qb = repo
-    .createQueryBuilder('document')
-    .select('COUNT(document.dteDocumentID)', 'count')
-    .addSelect('COALESCE(SUM(document.total),0)', 'total')
-    .where('document.createdAt >= :start AND document.createdAt < :end', {
-      start: startIso,
-      end: endIso,
-    })
-    .andWhere("document.status = 'EMITIDO'");
-
-  if (storeId) qb.andWhere('document.storeID = :storeId', { storeId });
-
-  const raw = await qb.getRawOne();
-  return { count: Number(raw.count || 0), total: Number(raw.total || 0) };
-}
-
-export async function aggregateSaleNoteCountAndTotal(
-  repo: Repository<Sale>,
-  startIso: string,
-  endIso: string,
-  storeId?: string,
-): Promise<CountTotalAggregate> {
-  const qb = repo
-    .createQueryBuilder('sale')
-    .select('COUNT(sale.saleID)', 'count')
-    .addSelect('COALESCE(SUM(sale.total),0)', 'total')
-    .where('sale.createdAt >= :start AND sale.createdAt < :end', {
-      start: startIso,
-      end: endIso,
-    })
-    .andWhere('sale.status = :status', { status: SaleStatus.EMITIDA })
-    .andWhere('sale.saleType = :saleType', {
-      saleType: SaleType.NOTA_VENTA,
-    });
-
-  if (storeId) qb.andWhere('sale.storeID = :storeId', { storeId });
-
-  const raw = await qb.getRawOne();
-  return { count: Number(raw.count || 0), total: Number(raw.total || 0) };
 }
 
 export function serializeDocument(document: DteDocument): DteDocumentListItem {

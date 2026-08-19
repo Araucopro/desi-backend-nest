@@ -9,10 +9,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductListQueryDto } from './dto/product-list.query.dto';
 import { ProductListResponseDto } from './dto/product-list-response.dto';
 import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
-import {
-  applyInventoryMovement,
-  findStoreProductForUpdate,
-} from '../inventory/inventory-repository.helpers';
+import { InventoryService } from '../inventory/inventory.service';
 import { PriceType } from '../pricing/entities/price-history.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
@@ -20,8 +17,13 @@ import { buildVariationPlan, VariationPlanAction } from './products-engine';
 import {
   createProductEntity,
   createVariationEntity,
+  deleteProductById,
   findCentralStore,
   findProductForUpdate,
+  findProductWithRelations,
+  findProductsPaginated,
+  saveProduct,
+  saveVariation,
 } from './products-repository.helpers';
 
 @Injectable()
@@ -33,6 +35,7 @@ export class ProductsService {
     private readonly variationRepository: Repository<ProductVariation>,
     private readonly entityManager: EntityManager,
     private readonly pricingService: PricingService,
+    private readonly inventoryService: InventoryService,
     @Optional() private readonly tenantContext?: TenantContextService,
     @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
@@ -54,7 +57,8 @@ export class ProductsService {
       const tenantID = this.tenantContext?.getTenantId();
       const { variations, ...productData } = createProductDto;
 
-      const savedProduct = await transactionalEntityManager.save(
+      const savedProduct = await saveProduct(
+        transactionalEntityManager,
         createProductEntity(transactionalEntityManager, {
           ...productData,
           tenantID,
@@ -66,7 +70,8 @@ export class ProductsService {
       );
 
       for (const variationDto of variations) {
-        const savedVariation = await transactionalEntityManager.save(
+        const savedVariation = await saveVariation(
+          transactionalEntityManager,
           createVariationEntity(transactionalEntityManager, {
             dto: variationDto,
             product: savedProduct,
@@ -75,18 +80,21 @@ export class ProductsService {
         );
 
         if (centralStore) {
-          await applyInventoryMovement(transactionalEntityManager, {
-            storeID: centralStore.storeID,
-            variationID: savedVariation.variationID,
-            reason: InventoryMovementReason.ADJUSTMENT,
-            newStock: variationDto.stock,
-            referenceID: savedProduct.productID,
-            tenantID,
-            allowNegativeStock: true,
-            priceCost: variationDto.priceCost,
-            priceList: variationDto.priceList,
-            skipZeroDelta: true,
-          });
+          await this.inventoryService.applyMovement(
+            transactionalEntityManager,
+            {
+              storeID: centralStore.storeID,
+              variationID: savedVariation.variationID,
+              reason: InventoryMovementReason.ADJUSTMENT,
+              newStock: variationDto.stock,
+              referenceID: savedProduct.productID,
+              tenantID,
+              allowNegativeStock: true,
+              priceCost: variationDto.priceCost,
+              priceList: variationDto.priceList,
+              skipZeroDelta: true,
+            },
+          );
         }
       }
 
@@ -96,63 +104,7 @@ export class ProductsService {
 
   async findAll(query: ProductListQueryDto): Promise<ProductListResponseDto> {
     return this.runInTransaction(async (manager) => {
-      const {
-        limit = 10,
-        offset = 0,
-        search,
-        barcode,
-        categoryID,
-        genre,
-      } = query;
-
-      const qb = manager
-        .getRepository(Product)
-        .createQueryBuilder('product')
-        .leftJoinAndSelect('product.category', 'category')
-        .leftJoinAndSelect('product.variations', 'variations')
-        .leftJoinAndSelect('variations.storeProducts', 'storeProducts')
-        .leftJoinAndSelect('storeProducts.store', 'store')
-        .leftJoinAndSelect(
-          'storeProducts.specialOffers',
-          'offer',
-          '(offer.isActive = :isActive AND (offer.endDate IS NULL OR offer.endDate >= :now) AND offer.startDate <= :now)',
-          { isActive: true, now: new Date() },
-        );
-
-      if (search?.trim()) {
-        const term = `%${search.trim()}%`;
-        qb.andWhere(
-          `(product.name ILIKE :term OR product.brand ILIKE :term OR category.name ILIKE :term OR EXISTS (
-            SELECT 1 FROM "ProductVariations" "pv"
-            WHERE "pv"."productID" = "product"."productID"
-              AND ("pv"."sku" ILIKE :term OR "pv"."supplierSku" ILIKE :term OR "pv"."barcode" ILIKE :term)
-          ))`,
-          { term },
-        );
-      }
-
-      if (barcode?.trim()) {
-        qb.andWhere(
-          `EXISTS (
-            SELECT 1 FROM "ProductVariations" "pv"
-            WHERE "pv"."productID" = "product"."productID" AND "pv"."barcode" = :barcode
-          )`,
-          { barcode: barcode.trim() },
-        );
-      }
-
-      if (categoryID) {
-        qb.andWhere('product.categoryID = :categoryID', { categoryID });
-      }
-
-      if (genre) {
-        qb.andWhere('product.genre = :genre', { genre });
-      }
-
-      const [products, total] = await qb
-        .take(limit)
-        .skip(offset)
-        .getManyAndCount();
+      const [products, total] = await findProductsPaginated(manager, query);
 
       for (const product of products) {
         if (!product.variations) continue;
@@ -179,8 +131,8 @@ export class ProductsService {
       return {
         products,
         meta: {
-          page: Math.floor(offset / limit) + 1,
-          limit,
+          page: Math.floor((query.offset ?? 0) / (query.limit ?? 10)) + 1,
+          limit: query.limit ?? 10,
           total,
         },
       };
@@ -189,15 +141,7 @@ export class ProductsService {
 
   async findOne(id: string): Promise<Product> {
     return this.runInTransaction(async (manager) => {
-      const product = await manager.getRepository(Product).findOne({
-        where: { productID: id },
-        relations: [
-          'variations',
-          'variations.storeProducts',
-          'variations.storeProducts.store',
-          'category',
-        ],
-      });
+      const product = await findProductWithRelations(manager, id);
 
       if (!product) {
         throw new NotFoundException(`Producto con ID ${id} no encontrado`);
@@ -220,7 +164,10 @@ export class ProductsService {
       );
 
       transactionalEntityManager.merge(Product, product, productData);
-      const savedProduct = await transactionalEntityManager.save(product);
+      const savedProduct = await saveProduct(
+        transactionalEntityManager,
+        product,
+      );
 
       const tenantID = this.tenantContext?.getTenantId();
 
@@ -256,15 +203,10 @@ export class ProductsService {
         }
       }
 
-      const result = await transactionalEntityManager.findOne(Product, {
-        where: { productID: id },
-        relations: [
-          'variations',
-          'variations.storeProducts',
-          'variations.storeProducts.store',
-          'category',
-        ],
-      });
+      const result = await findProductWithRelations(
+        transactionalEntityManager,
+        id,
+      );
 
       if (!result) {
         throw new NotFoundException(`Producto con ID ${id} no encontrado`);
@@ -280,7 +222,8 @@ export class ProductsService {
     centralStoreID: string | undefined,
     tenantID: string | undefined,
   ): Promise<void> {
-    const savedVariation = await manager.save(
+    const savedVariation = await saveVariation(
+      manager,
       createVariationEntity(manager, {
         dto: action.dto,
         product,
@@ -290,7 +233,7 @@ export class ProductsService {
 
     if (!centralStoreID) return;
 
-    await applyInventoryMovement(manager, {
+    await this.inventoryService.applyMovement(manager, {
       storeID: centralStoreID,
       variationID: savedVariation.variationID,
       reason: InventoryMovementReason.ADJUSTMENT,
@@ -312,11 +255,11 @@ export class ProductsService {
   ): Promise<void> {
     const { dto, variation } = action;
     manager.merge(ProductVariation, variation, dto);
-    await manager.save(variation);
+    await saveVariation(manager, variation);
 
     if (!centralStoreID) return;
 
-    const storeProduct = await findStoreProductForUpdate(
+    const storeProduct = await this.inventoryService.findStoreProductForUpdate(
       manager,
       centralStoreID,
       variation.variationID,
@@ -347,7 +290,7 @@ export class ProductsService {
       }
     }
 
-    await applyInventoryMovement(manager, {
+    await this.inventoryService.applyMovement(manager, {
       storeID: centralStoreID,
       variationID: variation.variationID,
       reason: InventoryMovementReason.ADJUSTMENT,
@@ -363,12 +306,7 @@ export class ProductsService {
 
   async remove(id: string): Promise<void> {
     return this.runInTransaction(async (manager) => {
-      const product = await manager
-        .getRepository(Product)
-        .findOne({ where: { productID: id } });
-      if (!product)
-        throw new NotFoundException(`Producto con ID ${id} no encontrado`);
-      await manager.getRepository(Product).remove(product);
+      await deleteProductById(manager, id);
     });
   }
 }

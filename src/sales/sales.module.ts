@@ -10,6 +10,7 @@ import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
 import { InventoryMovement } from '../inventory/entities/inventory-movement.entity';
+import { InventoryModule } from '../inventory/inventory.module';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { FinancialMovementsModule } from '../financial-movements/financial-movements.module';
@@ -31,6 +32,7 @@ import { TransactionRunnerService } from '../common/services/transaction-runner.
     PricingModule,
     FinancialMovementsModule,
     DteModule,
+    InventoryModule,
   ],
   controllers: [SalesController],
   providers: [SalesService, DteMapperService, TransactionRunnerService],

@@ -7,38 +7,31 @@ import {
   Repository,
 } from 'typeorm';
 import { DteDocument } from '../dte/entities/dte-document.entity';
-import {
-  FinancialMovement,
-  FinancialMovementCategory,
-} from '../financial-movements/entities/financial-movement.entity';
+import { FinancialMovement } from '../financial-movements/entities/financial-movement.entity';
 import { IncomeStatementQueryDto } from './dto/income-statement-query.dto';
-import {
-  IncomeStatementDto,
-  IncomeStatementExpenseDetailDto,
-} from './dto/income-statement.dto';
+import { IncomeStatementDto } from './dto/income-statement.dto';
 import { ReportsSaleFilterDto } from './dto/report-salesFilter.dto';
 import { SalesReportResponseDto } from './dto/sales-report.dto';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { Sale, SaleStatus, SaleType } from '../sales/entities/sale.entity';
+import { Sale } from '../sales/entities/sale.entity';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import { getYearBounds, normalizeDates } from './report-helpers';
 import {
   aggregateDteCountAndTotal,
   aggregateMovements,
   aggregateSaleNoteCountAndTotal,
-  buildTotals,
-  createExpenseDetailSeries,
-  createMonthlySeries,
-  expenseTypeForCategory,
-  getYearBounds,
-  isExpenseCategory,
-  mergeGrouped,
-  mergeSummary,
-  normalizeDates,
-  serializeDocument,
-  serializeSaleNote,
-  toMoney,
-  toNumber,
-} from './report-helpers';
+  fetchDocumentList,
+  fetchDtePaymentBreakdown,
+  fetchDteStatusBreakdown,
+  fetchSaleNoteList,
+  fetchSalePaymentBreakdown,
+  fetchSaleStatusBreakdown,
+} from './reports-repository.helpers';
+import {
+  buildIncomeStatementReport,
+  buildPeriodBoundaries,
+  buildSalesReportResult,
+} from './reports-engine';
 
 @Injectable()
 export class ReportsService {
@@ -102,104 +95,13 @@ export class ReportsService {
         filter.storeId,
       );
 
-      const salesIncomeByMonth = new Map<number, number>();
-      const salesTaxByMonth = new Map<number, number>();
-      const cogsByMonth = new Map<number, number>();
-      const expensesByMonth = new Map<number, number>();
-      const rejectedExpensesByMonth = new Map<number, number>();
-      const purchasesByMonth = new Map<number, number>();
-      const creditTaxByMonth = new Map<number, number>();
-      const expenseDetailByMonth = new Map<
-        number,
-        IncomeStatementExpenseDetailDto[]
-      >(
-        createMonthlySeries(year).map((month) => [
-          month.month,
-          createExpenseDetailSeries(),
-        ]),
-      );
-
-      for (const row of rows) {
-        const monthNumber = Number(row.month);
-        const amount = toNumber(row.total);
-        const taxAmount = toNumber(row.taxTotal);
-        const category = row.category;
-        const add = (map: Map<number, number>, value: number) =>
-          map.set(monthNumber, (map.get(monthNumber) ?? 0) + value);
-
-        if (category === FinancialMovementCategory.VENTA) {
-          add(salesIncomeByMonth, amount);
-          add(salesTaxByMonth, taxAmount);
-          continue;
-        }
-
-        if (category === FinancialMovementCategory.COSTO_VENTA) {
-          add(cogsByMonth, amount);
-          continue;
-        }
-
-        if (category === FinancialMovementCategory.COMPRA) {
-          add(purchasesByMonth, amount);
-          if (row.taxCredit) {
-            add(creditTaxByMonth, taxAmount);
-          }
-          continue;
-        }
-
-        if (isExpenseCategory(category)) {
-          const type = expenseTypeForCategory(category);
-          const monthDetails =
-            expenseDetailByMonth.get(monthNumber) ??
-            createExpenseDetailSeries();
-          const typeDetail = monthDetails.find((item) => item.type === type);
-
-          if (row.acceptedForTax) {
-            add(expensesByMonth, amount);
-            if (typeDetail) typeDetail.accepted += amount;
-          } else {
-            add(rejectedExpensesByMonth, amount);
-            if (typeDetail) typeDetail.rejected += amount;
-          }
-
-          if (row.taxCredit) {
-            add(creditTaxByMonth, taxAmount);
-          }
-        }
-      }
-
-      const months = createMonthlySeries(year).map((month) => {
-        const salesIncome = salesIncomeByMonth.get(month.month) ?? 0;
-        const salesTax = salesTaxByMonth.get(month.month) ?? 0;
-        const cogs = cogsByMonth.get(month.month) ?? 0;
-        const expenses = expensesByMonth.get(month.month) ?? 0;
-        const rejectedExpenses = rejectedExpensesByMonth.get(month.month) ?? 0;
-        const purchases = purchasesByMonth.get(month.month) ?? 0;
-        const creditTax = creditTaxByMonth.get(month.month) ?? 0;
-        const grossProfit = salesIncome - cogs;
-        const net = salesIncome - cogs - expenses;
-
-        return {
-          ...month,
-          salesIncome: toMoney(salesIncome),
-          salesTax: toMoney(salesTax),
-          cogs: toMoney(cogs),
-          grossProfit: toMoney(grossProfit),
-          expenses: toMoney(expenses),
-          rejectedExpenses: toMoney(rejectedExpenses),
-          purchases: toMoney(purchases),
-          creditTax: toMoney(creditTax),
-          expenseDetail:
-            expenseDetailByMonth.get(month.month) ??
-            createExpenseDetailSeries(),
-          net: toMoney(net),
-        };
-      });
+      const { months, totals } = buildIncomeStatementReport(rows, year);
 
       return {
         year,
         storeId: filter.storeId,
         months,
-        totals: buildTotals(months),
+        totals,
       };
     });
   }
@@ -213,110 +115,16 @@ export class ReportsService {
       const { storeId, page = 1, limit = 50 } = filter;
       const { from, to } = normalizeDates(filter.from, filter.to);
 
-      const paymentQuery = dteRepo
-        .createQueryBuilder('document')
-        .select('document.paymentType', 'key')
-        .addSelect('COUNT(document.dteDocumentID)', 'count')
-        .addSelect('SUM(document.total)', 'total')
-        .where('document.createdAt >= :from AND document.createdAt < :to', {
-          from,
-          to,
-        })
-        .andWhere("document.status = 'EMITIDO'");
-
-      const statusQuery = dteRepo
-        .createQueryBuilder('document')
-        .select('document.status', 'key')
-        .addSelect('COUNT(document.dteDocumentID)', 'count')
-        .addSelect('SUM(document.total)', 'total')
-        .where('document.createdAt >= :from AND document.createdAt < :to', {
-          from,
-          to,
-        });
-
-      const salePaymentQuery = saleRepo
-        .createQueryBuilder('sale')
-        .select('sale.paymentType', 'key')
-        .addSelect('COUNT(sale.saleID)', 'count')
-        .addSelect('SUM(sale.total)', 'total')
-        .where('sale.createdAt >= :from AND sale.createdAt < :to', {
-          from,
-          to,
-        })
-        .andWhere('sale.status = :status', { status: SaleStatus.EMITIDA })
-        .andWhere('sale.saleType = :saleType', {
-          saleType: SaleType.NOTA_VENTA,
-        });
-
-      const saleStatusQuery = saleRepo
-        .createQueryBuilder('sale')
-        .select('sale.status', 'key')
-        .addSelect('COUNT(sale.saleID)', 'count')
-        .addSelect('SUM(sale.total)', 'total')
-        .where('sale.createdAt >= :from AND sale.createdAt < :to', {
-          from,
-          to,
-        })
-        .andWhere('sale.status = :status', { status: SaleStatus.EMITIDA })
-        .andWhere('sale.saleType = :saleType', {
-          saleType: SaleType.NOTA_VENTA,
-        });
-
-      if (storeId) {
-        paymentQuery.andWhere('document.storeID = :storeId', { storeId });
-        statusQuery.andWhere('document.storeID = :storeId', { storeId });
-        salePaymentQuery.andWhere('sale.storeID = :storeId', { storeId });
-        saleStatusQuery.andWhere('sale.storeID = :storeId', { storeId });
-      }
-
       const [paymentRaw, statusRaw, salePaymentRaw, saleStatusRaw] =
         await Promise.all([
-          paymentQuery.groupBy('document.paymentType').getRawMany(),
-          statusQuery.groupBy('document.status').getRawMany(),
-          salePaymentQuery.groupBy('sale.paymentType').getRawMany(),
-          saleStatusQuery.groupBy('sale.status').getRawMany(),
+          fetchDtePaymentBreakdown(dteRepo, from, to, storeId),
+          fetchDteStatusBreakdown(dteRepo, from, to, storeId),
+          fetchSalePaymentBreakdown(saleRepo, from, to, storeId),
+          fetchSaleStatusBreakdown(saleRepo, from, to, storeId),
         ]);
 
-      const groupedByPaymentType = mergeGrouped(paymentRaw, salePaymentRaw);
-      const groupedByStatus = mergeGrouped(statusRaw, saleStatusRaw);
-
-      const now = new Date();
-      const todayStart = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate(),
-        0,
-        0,
-        0,
-        0,
-      );
-      const tomorrowStart = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate() + 1,
-        0,
-        0,
-        0,
-        0,
-      );
-      const yesterdayStart = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate() - 1,
-        0,
-        0,
-        0,
-        0,
-      );
-      const monthStart = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        1,
-        0,
-        0,
-        0,
-        0,
-      );
+      const { todayStart, tomorrowStart, yesterdayStart, monthStart } =
+        buildPeriodBoundaries(new Date());
 
       const [todaySummary, yesterdaySummary, monthSummary] = await Promise.all([
         aggregateDteCountAndTotal(
@@ -359,65 +167,39 @@ export class ReportsService {
         ),
       ]);
 
-      const listQuery = dteRepo
-        .createQueryBuilder('document')
-        .leftJoinAndSelect('document.store', 'store')
-        .where('document.createdAt >= :from AND document.createdAt < :to', {
-          from,
-          to,
-        });
+      const [documents, total] = await fetchDocumentList(
+        dteRepo,
+        from,
+        to,
+        storeId,
+        page * limit,
+      );
+      const [notes, notesTotal] = await fetchSaleNoteList(
+        saleRepo,
+        from,
+        to,
+        storeId,
+        page * limit,
+      );
 
-      if (storeId)
-        listQuery.andWhere('document.storeID = :storeId', { storeId });
-
-      const [documents, total] = await listQuery
-        .orderBy('document.createdAt', 'DESC')
-        .skip(0)
-        .take(page * limit)
-        .getManyAndCount();
-
-      const noteListQuery = saleRepo
-        .createQueryBuilder('sale')
-        .leftJoinAndSelect('sale.store', 'store')
-        .leftJoinAndSelect('sale.items', 'items')
-        .where('sale.createdAt >= :from AND sale.createdAt < :to', {
-          from,
-          to,
-        })
-        .andWhere('sale.status = :status', { status: SaleStatus.EMITIDA })
-        .andWhere('sale.saleType = :saleType', {
-          saleType: SaleType.NOTA_VENTA,
-        });
-
-      if (storeId)
-        noteListQuery.andWhere('sale.storeID = :storeId', { storeId });
-
-      const [notes, notesTotal] = await noteListQuery
-        .orderBy('sale.createdAt', 'DESC')
-        .skip(0)
-        .take(page * limit)
-        .getManyAndCount();
-
-      const combined = [
-        ...documents.map((document) => serializeDocument(document)),
-        ...notes.map((note) => serializeSaleNote(note)),
-      ]
-        .sort(
-          (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
-        )
-        .slice((page - 1) * limit, page * limit);
-
-      return {
-        groupedByPaymentType,
-        groupedByStatus,
-        periodSummary: {
-          today: mergeSummary(todaySummary, todayNotes),
-          yesterday: mergeSummary(yesterdaySummary, yesterdayNotes),
-          month: mergeSummary(monthSummary, monthNotes),
-        },
-        sales: combined,
-        meta: { page, limit, total: total + notesTotal },
-      };
+      return buildSalesReportResult({
+        paymentRaw,
+        statusRaw,
+        salePaymentRaw,
+        saleStatusRaw,
+        todaySummary,
+        yesterdaySummary,
+        monthSummary,
+        todayNotes,
+        yesterdayNotes,
+        monthNotes,
+        documents,
+        notes,
+        page,
+        limit,
+        total,
+        notesTotal,
+      });
     });
   }
 }

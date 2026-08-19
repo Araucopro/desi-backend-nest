@@ -17,7 +17,7 @@ import { FinancialMovementsService } from '../financial-movements/financial-move
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
-import { reserveStockAndSnapshotCosts } from '../inventory/inventory-repository.helpers';
+import { InventoryService } from '../inventory/inventory.service';
 import { Sale, SaleStatus, SaleType } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
@@ -59,6 +59,7 @@ export class SalesService {
     private readonly dteService: DteService,
     private readonly dteMapperService: DteMapperService,
     private readonly financialMovementsService: FinancialMovementsService,
+    private readonly inventoryService: InventoryService,
     @Optional() private readonly tenantContext?: TenantContextService,
     @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
@@ -161,7 +162,7 @@ export class SalesService {
 
       await manager.save(sale);
 
-      await reserveStockAndSnapshotCosts(
+      await this.inventoryService.reserveStock(
         manager,
         storeID,
         prepared.items.map((item) => ({
