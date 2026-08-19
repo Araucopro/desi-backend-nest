@@ -21,6 +21,11 @@ Sistema ERP moderno desarrollado con NestJS para la gestión integral de tiendas
 - **Métodos de Pago**: Efectivo, Débito, Crédito
 - **Trazabilidad**: Historial completo de todas las transacciones
 
+### 🏷️ Precios y Ofertas
+- **Motor de Precios**: Precio final con desglose, validación de margen y descuentos manuales
+- **Ofertas Especiales**: Porcentaje, monto fijo, precio fijo, 2x1/3x2/6x5 y BUNDLE (1 unidad gratis por set completo)
+- **Historial de Precios**: Trazabilidad de cambios de costo y precio de lista por tienda
+
 ### 👥 Gestión de Usuarios
 - **Asignación a Tiendas**: Usuarios pueden tener acceso a múltiples tiendas
 - **Control de Acceso**: Gestión de permisos por tienda
@@ -98,17 +103,35 @@ http://localhost:3001/docs
 
 ```
 src/
-├── categories/          # Gestión de categorías de productos
-├── common/             # DTOs y utilidades compartidas
-├── datasource/         # Configuración de base de datos
+├── auth/               # Autenticación JWT (tenant y master)
+├── categories/         # Gestión de categorías de productos
+├── common/             # DTOs, interceptores y utilidades compartidas
+├── datasource/         # Configuración de base de datos y migraciones
+├── dte/                # Documentos DTE e integración Openfactura
+├── inventory/          # Movimientos de inventario
+├── multitenant/        # Multitenant, RLS y entidades master
+├── pricing/            # Precios, historial y ofertas
 ├── products/           # Gestión de productos y variaciones
-├── relations/          
-│   ├── store-stock/    # Inventario por tienda (StoreProduct)
+├── purchase-orders/    # Órdenes de compra
+├── relations/
+│   ├── storeproduct/   # Stock/precio por tienda (StoreProduct)
 │   └── userstores/     # Relación usuarios-tiendas
+├── reports/            # Reportes de ventas y estado de resultados
 ├── sales/              # Sistema de ventas
 ├── stores/             # Gestión de tiendas
+├── transfers/          # Transferencias entre tiendas
 └── users/              # Gestión de usuarios
 ```
+
+## 🧩 Patrón por Dominio: engine / repository-helpers / types
+
+Los dominios con reglas de negocio sensibles separan la lógica en tres capas:
+
+- **`<dominio>-engine.ts`**: Lógica pura en funciones: cálculos, validaciones y construcción de datos preparados. No toca la base de datos. Ejemplos: `sales-engine.ts`, `offer-engine.ts`, `discount-engine.ts`, `inventory-engine.ts`.
+- **`<dominio>-repository.helpers.ts`**: Acceso a datos con `EntityManager`: queries, locks pesimistas, upserts y validaciones de existencia. Ejemplos: `sales-repository.helpers.ts`, `products-repository.helpers.ts`, `purchase-orders-repository.helpers.ts`, `transfers-repository.helpers.ts`.
+- **`<dominio>.types.ts`**: Tipos compartidos entre engine, helpers, servicio y DTOs. Ejemplos: `sales.types.ts`, `offer.types.ts`.
+
+El service orquesta el flujo: valida con DTOs, abre la transacción, lee/escribe vía helpers y aplica las reglas vía engine. Esto mantiene los controllers delgados, evita query builders en capas de presentación y hace que la lógica sensible sea testeable sin NestJS/TypeORM.
 
 ## 🔄 Flujo de Operaciones
 

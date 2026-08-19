@@ -91,9 +91,24 @@ Seguir este patron:
 - `src/<dominio>/<dominio>.module.ts`
 - `src/<dominio>/<dominio>.controller.ts`
 - `src/<dominio>/<dominio>.service.ts`
+- `src/<dominio>/<dominio>-engine.ts` (reglas puras de negocio)
+- `src/<dominio>/<dominio>-repository.helpers.ts` (acceso a datos)
+- `src/<dominio>/<dominio>.types.ts` (tipos compartidos del dominio)
 - `src/<dominio>/dto/*.dto.ts`
 - `src/<dominio>/entities/*.entity.ts`
 - tests `*.spec.ts` si la logica tiene riesgo.
+
+### Patron engine / repository-helpers / types
+
+Para dominios con logica sensible (ventas, precios/ofertas, inventario, ordenes de compra, transferencias, DTE) separar la implementacion en tres capas:
+
+- **`<dominio>-engine.ts`**: logica pura en funciones sin repositorios: calculos, validaciones, construccion de estados o entidades preparadas. Recibe datos ya cargados y no toca TypeORM. Ejemplos: `sales-engine.ts`, `offer-engine.ts`, `discount-engine.ts`, `inventory-engine.ts`, `purchase-orders-engine.ts`, `transfers-engine.ts`.
+- **`<dominio>-repository.helpers.ts`**: funciones que reciben `EntityManager` y encapsulan queries: `findOne` con `relations`/`lock`, query builders, upserts, conteos y validaciones de existencia. Lanzan `NotFoundException`/`BadRequestException` cuando el recurso no existe o la operacion no es valida. Ejemplos: `sales-repository.helpers.ts`, `products-repository.helpers.ts`, `inventory-repository.helpers.ts`, `purchase-orders-repository.helpers.ts`, `transfers-repository.helpers.ts`.
+- **`<dominio>.types.ts`**: tipos compartidos entre engine, helpers, service y DTOs (por ejemplo `PreparedSale`, `OfferCartItem`, `OfferCartContext`, `StockReservationItem`). Evita duplicar shapes y rompe imports circulares.
+
+Los services quedan como orquestadores: validan con DTOs, abren la transaccion, llaman helpers para leer/escribir y engines para calcular/aplicar reglas. Los controllers no contienen query builders ni reglas de negocio.
+
+Ejemplo en pricing/ofertas: `offer-engine.ts` valida la configuracion y la aplicabilidad de ofertas; `discount-engine.ts` aplica descuentos del carrito (incluye `applyBundle` por `storeProductID`, 2x1/3x2/6x5 y descuentos estandar); `offer.types.ts` define los contratos entre carrito, validacion y motor; `OfferService`/`PricingService` orquestan con TypeORM.
 
 Controllers:
 
@@ -313,5 +328,6 @@ No loggear secretos completos. Mantener idempotencia en flujos reintentables.
 - Lance excepciones Nest.
 - Respete wrapper global de respuesta.
 - Mantengo contratos compatibles con frontend.
+- Separe reglas puras en `<dominio>-engine.ts`, acceso a datos en `<dominio>-repository.helpers.ts` y tipos compartidos en `<dominio>.types.ts` cuando el dominio tenga logica sensible.
 - Verifique la compilacion sin errores con `pnpm exec tsc --noEmit`.
 - Agregue tests para logica sensible.
