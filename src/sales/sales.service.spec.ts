@@ -79,6 +79,17 @@ function createManagerMock(
       }
       return null;
     }),
+    createQueryBuilder: jest.fn((entity: unknown) => {
+      if (entity === StoreProduct) {
+        return {
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getOne: jest.fn(async () => storeProduct),
+        };
+      }
+      return {};
+    }),
     create: jest.fn((_entity: unknown, values: object) => ({ ...values })),
     save: jest.fn(async (entityOrArray: unknown) => {
       if (Array.isArray(entityOrArray)) {

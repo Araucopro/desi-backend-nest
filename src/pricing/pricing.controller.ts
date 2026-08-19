@@ -22,6 +22,7 @@ import {
 import { CalculatePriceDto } from './dto/calculate-price.dto';
 import { CalculateCartDto } from './dto/calculate-cart.dto';
 import { CalculateCartResponseDto } from './dto/calculate-cart-response.dto';
+import { PricingResultDto } from './dto/pricing-result.dto';
 import { PricingListQueryDto } from './dto/pricing-list.query.dto';
 import { SpecialOfferListQueryDto } from './dto/special-offer-list.query.dto';
 
@@ -126,6 +127,12 @@ export class PricingController {
     summary: 'Calcular precio final con motor de precios y contexto opcional',
   })
   @ApiBody({ type: CalculatePriceDto })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Precio unitario calculado con desglose, ofertas y contexto de pricing',
+    type: PricingResultDto,
+  })
   calculate(@Body() input: CalculatePriceDto) {
     return this.pricingService.calculatePrice(input);
   }
@@ -149,6 +156,12 @@ export class PricingController {
   @Get('price-check/:storeProductID')
   @ApiOperation({
     summary: 'Calcular precio final rápido con cantidad 1 e historial activo',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Precio final rápido con desglose, ofertas y contexto de pricing',
+    type: PricingResultDto,
   })
   checkPrice(@Param('storeProductID', ParseUUIDPipe) storeProductID: string) {
     return this.pricingService.calculatePrice({ storeProductID, quantity: 1 });

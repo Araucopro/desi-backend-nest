@@ -1,4 +1,3 @@
-import { CreateSpecialOfferBundleItemDto } from './dto/create-special-offer.dto';
 import {
   DiscountType,
   OfferTargetScope,
@@ -22,6 +21,12 @@ export type OfferCartContext = {
   items: OfferCartItem[];
 };
 
+export type OfferBundleItemInput = {
+  storeProductID?: string | null;
+  productID?: string | null;
+  requiredQuantity?: number;
+};
+
 export type OfferValidationInput = {
   discountType: DiscountType;
   targetScope?: OfferTargetScope;
@@ -33,5 +38,5 @@ export type OfferValidationInput = {
   model?: string | null;
   buyQuantity?: number | null;
   payQuantity?: number | null;
-  bundleItems?: CreateSpecialOfferBundleItemDto[];
+  bundleItems?: OfferBundleItemInput[];
 };

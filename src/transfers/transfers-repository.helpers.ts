@@ -16,7 +16,6 @@ export async function findTransferForUpdate(
 ): Promise<StoreTransfer> {
   const transfer = await manager.findOne(StoreTransfer, {
     where: { transferID },
-    relations: ['originStore', 'destinationStore'],
     lock: { mode: 'pessimistic_write' },
   });
 
@@ -24,7 +23,18 @@ export async function findTransferForUpdate(
     throw new NotFoundException('Transfer not found');
   }
 
-  return transfer;
+  // Las tiendas se cargan después del lock para evitar FOR UPDATE sobre el
+  // lado nullable del outer join.
+  const transferWithStores = await manager.findOne(StoreTransfer, {
+    where: { transferID },
+    relations: ['originStore', 'destinationStore'],
+  });
+
+  if (!transferWithStores) {
+    throw new NotFoundException('Transfer not found');
+  }
+
+  return transferWithStores;
 }
 
 export async function findTransferItems(

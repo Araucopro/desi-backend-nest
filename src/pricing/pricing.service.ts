@@ -285,6 +285,7 @@ export class PricingService {
       }
 
       for (const line of lines) {
+        if (line.marginExempt) continue;
         this.marginValidator.validate(
           line.unitCost,
           line.currentTotal / line.quantity,
@@ -470,6 +471,7 @@ export class PricingService {
         currentTotal: basePrice,
         discountsApplied: [],
         breakdown,
+        marginExempt: false,
         storeProduct,
       };
     });

@@ -6,8 +6,15 @@ import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.en
 
 describe('InventoryService', () => {
   function createManagerMock(storeProduct?: Partial<StoreProduct> | null) {
+    const queryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      setLock: jest.fn().mockReturnThis(),
+      getOne: jest.fn(async () => storeProduct ?? null),
+    };
     const manager = {
       findOne: jest.fn(async () => storeProduct ?? null),
+      createQueryBuilder: jest.fn(() => queryBuilder),
       create: jest.fn((_entity: unknown, values: Record<string, unknown>) => ({
         ...values,
       })),
@@ -36,12 +43,13 @@ describe('InventoryService', () => {
       newStock: 5,
     });
 
-    expect(manager.findOne).toHaveBeenCalledWith(
+    expect(manager.createQueryBuilder).toHaveBeenCalledWith(
       StoreProduct,
-      expect.objectContaining({
-        lock: { mode: 'pessimistic_write' },
-      }),
+      'storeProduct',
     );
+    const builder = manager.createQueryBuilder.mock.results[0].value;
+    expect(builder.setLock).toHaveBeenCalledWith('pessimistic_write');
+    expect(builder.getOne).toHaveBeenCalled();
     expect(manager.create).toHaveBeenCalledWith(
       StoreProduct,
       expect.objectContaining({

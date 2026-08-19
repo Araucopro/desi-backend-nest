@@ -263,6 +263,16 @@ describe('PurchaseOrdersService', () => {
             stock: 5,
           };
         }),
+        createQueryBuilder: jest.fn(() => ({
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getOne: jest.fn(async () => ({
+            storeProductID: 'sp-1',
+            priceCost: 100,
+            stock: 5,
+          })),
+        })),
         find: jest.fn().mockResolvedValue(items),
         create: jest.fn((_entity: unknown, values: unknown) => values),
         save: jest.fn(async (entity: unknown) => entity),

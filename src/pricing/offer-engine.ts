@@ -7,7 +7,10 @@ import {
 } from './entities/special-offer.entity';
 import { OfferCartItem, OfferValidationInput } from './offer.types';
 
-export function validateOfferConfiguration(config: OfferValidationInput): void {
+export function validateOfferConfiguration(
+  config: OfferValidationInput,
+  options: { requireBundleStoreProductIDs?: boolean } = {},
+): void {
   const targetScope = config.targetScope ?? OfferTargetScope.VARIATION;
 
   if (config.discountType === DiscountType.BUY_X_GET_Y) {
@@ -21,16 +24,36 @@ export function validateOfferConfiguration(config: OfferValidationInput): void {
   }
 
   if (config.discountType === DiscountType.BUNDLE) {
-    if (!config.bundleItems || config.bundleItems.length < 2) {
+    const requireStoreProductIDs = options.requireBundleStoreProductIDs ?? true;
+    const bundleItems = config.bundleItems ?? [];
+    if (bundleItems.length < 2) {
       throw new BadRequestException('BUNDLE requiere al menos 2 bundleItems');
     }
-    for (const item of config.bundleItems) {
-      if (!item.productID || (item.requiredQuantity ?? 1) < 1) {
+    if (!config.storeID) {
+      throw new BadRequestException('BUNDLE requiere storeID');
+    }
+    const seenStoreProducts = new Set<string>();
+    for (const item of bundleItems) {
+      if ((item.requiredQuantity ?? 1) < 1) {
         throw new BadRequestException(
-          'Cada bundleItem requiere productID y requiredQuantity >= 1',
+          'Cada bundleItem requiere requiredQuantity >= 1',
         );
       }
+      if (requireStoreProductIDs && !item.storeProductID) {
+        throw new BadRequestException(
+          'Cada bundleItem requiere storeProductID',
+        );
+      }
+      if (item.storeProductID && seenStoreProducts.has(item.storeProductID)) {
+        throw new BadRequestException(
+          'Los bundleItems deben tener storeProductID distintos',
+        );
+      }
+      if (item.storeProductID) {
+        seenStoreProducts.add(item.storeProductID);
+      }
     }
+    return;
   }
 
   if (targetScope === OfferTargetScope.VARIATION) {

@@ -12,7 +12,6 @@ export async function findProductForUpdate(
 ): Promise<Product> {
   const product = await manager.findOne(Product, {
     where: { productID },
-    relations,
     lock: { mode: 'pessimistic_write' },
   });
 
@@ -20,7 +19,18 @@ export async function findProductForUpdate(
     throw new NotFoundException(`Producto con ID ${productID} no encontrado`);
   }
 
-  return product;
+  // PostgreSQL prohíbe FOR UPDATE sobre el lado nullable de un outer join,
+  // por lo que las relaciones se cargan después del lock, sin joins bloqueados.
+  const productWithRelations = await manager.findOne(Product, {
+    where: { productID },
+    relations,
+  });
+
+  if (!productWithRelations) {
+    throw new NotFoundException(`Producto con ID ${productID} no encontrado`);
+  }
+
+  return productWithRelations;
 }
 
 export async function findCentralStore(

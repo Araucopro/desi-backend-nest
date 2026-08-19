@@ -39,23 +39,38 @@ export async function findStoreProductForUpdate(
   storeID: string,
   variationID: string,
 ): Promise<StoreProduct | null> {
-  return manager.findOne(StoreProduct, {
-    where: {
-      store: { storeID },
-      variation: { variationID },
-    },
-    lock: { mode: 'pessimistic_write' },
-  });
+  // Se usa query builder sin joins para que FOR UPDATE aplique solo a
+  // StoreProduct. Filtrar por relaciones (store/variation) genera outer joins
+  // y PostgreSQL rechaza el lock sobre su lado nullable.
+  return manager
+    .createQueryBuilder(StoreProduct, 'storeProduct')
+    .where('storeProduct.storeID = :storeID', { storeID })
+    .andWhere('storeProduct.variationID = :variationID', { variationID })
+    .setLock('pessimistic_write')
+    .getOne();
 }
 
 export async function findStoreProductByIdForUpdate(
   manager: EntityManager,
   storeProductID: string,
 ): Promise<StoreProduct | null> {
+  const storeProduct = await manager
+    .createQueryBuilder(StoreProduct, 'storeProduct')
+    .where('storeProduct.storeProductID = :storeProductID', {
+      storeProductID,
+    })
+    .setLock('pessimistic_write')
+    .getOne();
+
+  if (!storeProduct) {
+    return null;
+  }
+
+  // Las relaciones se cargan después del lock para no generar outer joins
+  // bloqueados.
   return manager.findOne(StoreProduct, {
     where: { storeProductID },
     relations: ['store', 'variation'],
-    lock: { mode: 'pessimistic_write' },
   });
 }
 

@@ -20,9 +20,20 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateSpecialOfferBundleItemDto {
-  @ApiProperty({ description: 'ID del producto requerido en el bundle' })
+  @ApiProperty({
+    description:
+      'ID del StoreProduct (variación/tienda) requerido en el bundle',
+  })
   @IsUUID()
-  productID!: string;
+  storeProductID!: string;
+
+  @ApiPropertyOptional({
+    description:
+      'ID del producto derivado del StoreProduct (legacy/lectura; no se envía al crear bundles nuevos)',
+  })
+  @IsOptional()
+  @IsUUID()
+  productID?: string;
 
   @ApiPropertyOptional({
     description: 'Cantidad requerida de este producto en cada set',
@@ -57,7 +68,7 @@ export class CreateSpecialOfferDto {
 
   @ApiPropertyOptional({
     description:
-      'Tienda en la que aplica la oferta. Requerido para alcances nuevos (STORE, PRODUCT, CATEGORY, BRAND, MODEL).',
+      'Tienda en la que aplica la oferta. Requerido para alcances nuevos (STORE, PRODUCT, CATEGORY, BRAND, MODEL) y para discountType BUNDLE.',
   })
   @IsOptional()
   @IsUUID()
@@ -134,7 +145,7 @@ export class CreateSpecialOfferDto {
 
   @ApiPropertyOptional({
     description:
-      'Items del bundle para discountType BUNDLE (mínimo 2 productos).',
+      'Items del bundle para discountType BUNDLE (mínimo 2 StoreProducts distintos; storeProductID obligatorio por ítem).',
     type: [CreateSpecialOfferBundleItemDto],
   })
   @IsOptional()
@@ -180,6 +191,15 @@ export class CreateSpecialOfferDto {
   @IsOptional()
   @IsBoolean()
   exclusive?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Permite que esta oferta deje líneas bajo el margen mínimo (por ejemplo, unidades gratis en BUNDLE). Default false.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  allowBelowMargin?: boolean;
 
   @ApiProperty({
     description: 'Fecha de inicio de la oferta',

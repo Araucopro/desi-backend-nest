@@ -34,6 +34,7 @@ describe('StoreProductService', () => {
 
   const mockManager = {
     findOne: jest.fn(),
+    createQueryBuilder: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
   };
@@ -97,6 +98,12 @@ describe('StoreProductService', () => {
         variation: { variationID: 'var-1' },
       };
       mockManager.findOne.mockResolvedValue(existingSP);
+      mockManager.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        setLock: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(existingSP),
+      });
 
       const result = await service.update('sp-1', {
         stock: 20,
@@ -104,13 +111,12 @@ describe('StoreProductService', () => {
         priceList: 160,
       });
 
-      expect(mockManager.findOne).toHaveBeenCalledWith(
+      expect(mockManager.createQueryBuilder).toHaveBeenCalledWith(
         StoreProduct,
-        expect.objectContaining({
-          where: { storeProductID: 'sp-1' },
-          lock: { mode: 'pessimistic_write' },
-        }),
+        'storeProduct',
       );
+      const builder = mockManager.createQueryBuilder.mock.results[0].value;
+      expect(builder.setLock).toHaveBeenCalledWith('pessimistic_write');
       expect(mockManager.create).toHaveBeenCalledWith(
         InventoryMovement,
         expect.objectContaining({
@@ -136,6 +142,12 @@ describe('StoreProductService', () => {
 
     it('should throw NotFoundException if store product not found', async () => {
       mockManager.findOne.mockResolvedValue(null);
+      mockManager.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        setLock: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      });
 
       await expect(service.update('not-found', {})).rejects.toThrow(
         NotFoundException,

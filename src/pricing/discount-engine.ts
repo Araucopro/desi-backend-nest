@@ -25,6 +25,7 @@ export type MutableCartLine = {
   currentTotal: number;
   discountsApplied: AppliedDiscount[];
   breakdown: BreakdownEntry[];
+  marginExempt: boolean;
   storeProduct: StoreProduct;
 };
 
@@ -87,19 +88,21 @@ export function applyBuyXGetY(lines: MutableCartLine[], offer: SpecialOffer) {
 }
 
 export function applyBundle(lines: MutableCartLine[], offer: SpecialOffer) {
-  const bundleItems = offer.bundleItems ?? [];
+  const bundleItems = (offer.bundleItems ?? []).filter(
+    (item) => !!item.storeProductID,
+  );
   if (bundleItems.length < 2) return;
-  const quantitiesByProduct = new Map<string, number>();
+  const quantitiesByStoreProduct = new Map<string, number>();
   for (const line of lines) {
-    quantitiesByProduct.set(
-      line.productID,
-      (quantitiesByProduct.get(line.productID) ?? 0) + line.quantity,
+    quantitiesByStoreProduct.set(
+      line.storeProductID,
+      (quantitiesByStoreProduct.get(line.storeProductID) ?? 0) + line.quantity,
     );
   }
   let sets = Number.POSITIVE_INFINITY;
   for (const item of bundleItems) {
-    const quantity = quantitiesByProduct.get(item.productID) ?? 0;
-    const required = Math.max(1, item.requiredQuantity);
+    const quantity = quantitiesByStoreProduct.get(item.storeProductID!) ?? 0;
+    const required = Math.max(1, item.requiredQuantity ?? 1);
     sets = Math.min(sets, Math.floor(quantity / required));
   }
   if (!Number.isFinite(sets) || sets <= 0) return;
@@ -107,6 +110,7 @@ export function applyBundle(lines: MutableCartLine[], offer: SpecialOffer) {
   grantFreeUnits(lines, freeUnits, offer, 'bundle', {
     sets,
     freeUnits,
+    storeProductIDs: bundleItems.map((item) => item.storeProductID),
   });
 }
 
@@ -159,6 +163,10 @@ export function recordAutomaticDiscount(
   scope: DiscountScope,
   details?: Record<string, unknown>,
 ) {
+  const marginExempt = !!offer.allowBelowMargin;
+  if (marginExempt) {
+    line.marginExempt = true;
+  }
   line.discountsApplied.push({
     source: 'AUTO',
     applied: true,
@@ -170,6 +178,7 @@ export function recordAutomaticDiscount(
     discountType: offer.discountType,
     value: offer.value,
     exclusive: !!offer.exclusive,
+    marginExempt,
     priority: offer.priority,
     details,
   });

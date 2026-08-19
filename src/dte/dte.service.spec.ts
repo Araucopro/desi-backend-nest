@@ -154,19 +154,29 @@ function createMockManager(
       }
       return null;
     }),
-    createQueryBuilder: jest.fn(() => ({
-      innerJoinAndSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      getMany: jest
-        .fn()
-        .mockResolvedValue(
-          options.ambiguousByName
-            ? [ambiguousProduct]
-            : options.resolveByName
-              ? [product]
-              : [],
-        ),
-    })),
+    createQueryBuilder: jest.fn((entity: unknown) => {
+      if (entity === StoreProduct) {
+        return {
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue(storeProduct),
+        };
+      }
+      return {
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getMany: jest
+          .fn()
+          .mockResolvedValue(
+            options.ambiguousByName
+              ? [ambiguousProduct]
+              : options.resolveByName
+                ? [product]
+                : [],
+          ),
+      };
+    }),
     find: jest.fn().mockResolvedValue([]),
     create: jest.fn((_entity: unknown, values: object) => ({
       ...values,

@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -72,6 +73,7 @@ describe('PricingService', () => {
       value: 10,
       scope: DiscountScope.UNIT,
       exclusive: false,
+      allowBelowMargin: false,
       startDate: new Date('2026-01-01T00:00:00.000Z'),
       isActive: true,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -104,6 +106,16 @@ describe('PricingService', () => {
     priceHistoryRepository = {
       createQueryBuilder: jest.fn(),
     };
+    marginValidator.validate.mockImplementation(
+      (priceCost: number, finalPrice: number) => {
+        const minAllowed = (priceCost || 0) * 1.1;
+        if (finalPrice < minAllowed) {
+          throw new BadRequestException(
+            'Violación de margen: precio final por debajo del mínimo permitido',
+          );
+        }
+      },
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -466,18 +478,18 @@ describe('PricingService', () => {
         discountType: DiscountType.BUNDLE,
         bundleItems: [
           {
-            productID: 'product-a',
+            storeProductID: 'sp-a',
             requiredQuantity: 1,
           } as SpecialOffer['bundleItems'][number],
           {
-            productID: 'product-b',
+            storeProductID: 'sp-b',
             requiredQuantity: 1,
           } as SpecialOffer['bundleItems'][number],
         ],
       }),
     ]);
     offerService.getApplicableStoreProductIDs.mockResolvedValue(
-      new Set(['sp-a', 'sp-b', 'sp-c']),
+      new Set(['sp-a', 'sp-b']),
     );
 
     const result = await service.calculateCart({
@@ -490,9 +502,175 @@ describe('PricingService', () => {
     });
 
     expect(result.totals.subtotal).toBe(3500);
-    expect(result.totals.discount).toBe(500);
+    expect(result.totals.discount).toBe(1000);
+    expect(result.totals.total).toBe(2500);
+    expect(result.items[0].lineTotal).toBe(0);
+    expect(result.items[2].lineTotal).toBe(500);
+  });
+
+  it('rejects a BUNDLE that leaves a line below margin when allowBelowMargin is false', async () => {
+    const spA = storeProduct({
+      storeProductID: 'sp-a',
+      priceCost: 100,
+      priceList: 1000,
+    });
+    const spB = storeProduct({
+      storeProductID: 'sp-b',
+      priceCost: 100,
+      priceList: 2000,
+      variation: {
+        variationID: 'variation-b',
+        sku: 'SKU-B',
+        product: {
+          productID: 'product-b',
+          name: 'Producto B',
+        },
+      } as StoreProduct['variation'],
+    });
+    manager.findOne.mockResolvedValue(spA);
+    manager.find.mockResolvedValue([spA, spB]);
+    offerService.getApplicableOffers.mockResolvedValue([
+      offer({
+        offerID: 'bundle-offer',
+        discountType: DiscountType.BUNDLE,
+        allowBelowMargin: false,
+        bundleItems: [
+          {
+            storeProductID: 'sp-a',
+            requiredQuantity: 1,
+          } as SpecialOffer['bundleItems'][number],
+          {
+            storeProductID: 'sp-b',
+            requiredQuantity: 1,
+          } as SpecialOffer['bundleItems'][number],
+        ],
+      }),
+    ]);
+    offerService.getApplicableStoreProductIDs.mockResolvedValue(
+      new Set(['sp-a', 'sp-b']),
+    );
+
+    await expect(
+      service.calculateCart({
+        storeID: 'store-1',
+        items: [
+          { storeProductID: 'sp-a', quantity: 1 },
+          { storeProductID: 'sp-b', quantity: 1 },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(marginValidator.validate).toHaveBeenCalledWith(100, 0);
+  });
+
+  it('exempts the free BUNDLE line from margin validation when allowBelowMargin is true', async () => {
+    const spA = storeProduct({
+      storeProductID: 'sp-a',
+      priceCost: 100,
+      priceList: 1000,
+    });
+    const spB = storeProduct({
+      storeProductID: 'sp-b',
+      priceCost: 100,
+      priceList: 2000,
+      variation: {
+        variationID: 'variation-b',
+        sku: 'SKU-B',
+        product: {
+          productID: 'product-b',
+          name: 'Producto B',
+        },
+      } as StoreProduct['variation'],
+    });
+    manager.findOne.mockResolvedValue(spA);
+    manager.find.mockResolvedValue([spA, spB]);
+    offerService.getApplicableOffers.mockResolvedValue([
+      offer({
+        offerID: 'bundle-offer',
+        discountType: DiscountType.BUNDLE,
+        allowBelowMargin: true,
+        bundleItems: [
+          {
+            storeProductID: 'sp-a',
+            requiredQuantity: 1,
+          } as SpecialOffer['bundleItems'][number],
+          {
+            storeProductID: 'sp-b',
+            requiredQuantity: 1,
+          } as SpecialOffer['bundleItems'][number],
+        ],
+      }),
+    ]);
+    offerService.getApplicableStoreProductIDs.mockResolvedValue(
+      new Set(['sp-a', 'sp-b']),
+    );
+
+    const result = await service.calculateCart({
+      storeID: 'store-1',
+      items: [
+        { storeProductID: 'sp-a', quantity: 1 },
+        { storeProductID: 'sp-b', quantity: 1 },
+      ],
+    });
+
+    expect(result.totals.total).toBe(2000);
+    expect(result.items[0].lineTotal).toBe(0);
+    expect(result.items[0].discountsApplied[0]).toMatchObject({
+      offerID: 'bundle-offer',
+      marginExempt: true,
+    });
+    expect(marginValidator.validate).toHaveBeenCalledWith(100, 2000);
+    expect(marginValidator.validate).not.toHaveBeenCalledWith(100, 0);
+  });
+
+  it('does not apply legacy BUNDLE offers with only productID until re-edited', async () => {
+    const spA = storeProduct({
+      storeProductID: 'sp-a',
+      priceCost: 100,
+      priceList: 1000,
+    });
+    const spB = storeProduct({
+      storeProductID: 'sp-b',
+      priceCost: 100,
+      priceList: 2000,
+      variation: {
+        variationID: 'variation-b',
+        sku: 'SKU-B',
+        product: {
+          productID: 'product-b',
+          name: 'Producto B',
+        },
+      } as StoreProduct['variation'],
+    });
+    manager.findOne.mockResolvedValue(spA);
+    manager.find.mockResolvedValue([spA, spB]);
+    offerService.getApplicableOffers.mockResolvedValue([
+      offer({
+        offerID: 'legacy-bundle',
+        discountType: DiscountType.BUNDLE,
+        bundleItems: [
+          {
+            productID: 'product-a',
+            requiredQuantity: 1,
+          } as SpecialOffer['bundleItems'][number],
+          {
+            productID: 'product-b',
+            requiredQuantity: 1,
+          } as SpecialOffer['bundleItems'][number],
+        ],
+      }),
+    ]);
+    offerService.getApplicableStoreProductIDs.mockResolvedValue(new Set());
+
+    const result = await service.calculateCart({
+      storeID: 'store-1',
+      items: [
+        { storeProductID: 'sp-a', quantity: 1 },
+        { storeProductID: 'sp-b', quantity: 1 },
+      ],
+    });
+
     expect(result.totals.total).toBe(3000);
-    expect(result.items[2].lineTotal).toBe(0);
+    expect(result.items[0].discountsApplied).toHaveLength(0);
   });
 
   it('lists price history with product and store context', async () => {

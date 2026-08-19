@@ -84,9 +84,19 @@ export async function findSaleForConversion(
   saleID: string,
   storeID: string,
 ): Promise<Sale | null> {
-  return manager.getRepository(Sale).findOne({
+  const sale = await manager.getRepository(Sale).findOne({
     where: { saleID, store: { storeID } },
     lock: { mode: 'pessimistic_write' },
+  });
+
+  if (!sale) {
+    return null;
+  }
+
+  // La relación dteDocument se carga después del lock para evitar FOR UPDATE
+  // sobre el lado nullable del outer join.
+  return manager.getRepository(Sale).findOne({
+    where: { saleID, store: { storeID } },
     relations: ['dteDocument'],
   });
 }

@@ -123,6 +123,9 @@ export class SpecialOffer {
   @Column({ type: 'boolean', default: false })
   exclusive!: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  allowBelowMargin!: boolean;
+
   @Column({ type: 'timestamp with time zone' })
   startDate!: Date;
 
@@ -201,8 +204,15 @@ export class SpecialOfferBundleItem {
   @JoinColumn({ name: 'productID' })
   product?: Product | null;
 
-  @Column({ type: 'uuid' })
-  productID!: string;
+  @Column({ type: 'uuid', nullable: true })
+  productID?: string | null;
+
+  @ManyToOne(() => StoreProduct, { onDelete: 'CASCADE', nullable: true })
+  @JoinColumn({ name: 'storeProductID' })
+  storeProduct?: StoreProduct | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  storeProductID?: string | null;
 
   @Column({ type: 'int', default: 1 })
   requiredQuantity!: number;

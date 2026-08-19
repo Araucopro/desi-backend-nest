@@ -43,6 +43,7 @@ describe('ProductsService', () => {
     create: jest.fn(),
     save: jest.fn(),
     findOne: jest.fn(),
+    createQueryBuilder: jest.fn(),
     merge: jest.fn(),
     delete: jest.fn(),
     find: jest.fn(),
@@ -236,6 +237,12 @@ describe('ProductsService', () => {
         }
         return entity;
       });
+      mockEntityManager.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        setLock: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      });
 
       const result = await service.create(dto);
 
@@ -309,6 +316,12 @@ describe('ProductsService', () => {
         async (entity: unknown) => entity,
       );
       mockEntityManager.merge.mockImplementation(() => undefined);
+      mockEntityManager.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        setLock: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(existingSP),
+      });
 
       const result = await service.update('1', updateDto);
 

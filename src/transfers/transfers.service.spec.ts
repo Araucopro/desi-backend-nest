@@ -24,6 +24,7 @@ describe('TransfersService', () => {
     find: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
+    createQueryBuilder: jest.fn(),
     getRepository: jest.fn(),
   };
 
@@ -135,6 +136,12 @@ describe('TransfersService', () => {
           return products[index++] ?? null;
         }
         return undefined;
+      });
+      mockManager.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        setLock: jest.fn().mockReturnThis(),
+        getOne: jest.fn(async () => products[index++] ?? null),
       });
     }
 

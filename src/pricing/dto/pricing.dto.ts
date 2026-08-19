@@ -22,6 +22,7 @@ export type AppliedDiscount = {
   value?: number;
   manualDiscount?: number;
   exclusive?: boolean;
+  marginExempt?: boolean;
   reasonIgnored?: string;
   priority?: number;
   details?: Record<string, unknown>;

@@ -113,6 +113,13 @@ export class AppliedDiscountDto {
   exclusive?: boolean;
 
   @ApiPropertyOptional({
+    description:
+      'Indica si la línea quedó exenta de la validación de margen por esta oferta',
+    example: true,
+  })
+  marginExempt?: boolean;
+
+  @ApiPropertyOptional({
     description: 'Razón por la que el descuento no se aplicó',
     example: 'Oferta exclusiva activa',
   })

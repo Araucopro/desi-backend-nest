@@ -51,7 +51,6 @@ export async function findPurchaseOrderForUpdate(
   const purchaseOrder = await manager.findOne(PurchaseOrder, {
     where: { purchaseOrderID },
     lock: { mode: 'pessimistic_write' },
-    relations: ['store'],
   });
 
   if (!purchaseOrder) {
@@ -60,7 +59,20 @@ export async function findPurchaseOrderForUpdate(
     );
   }
 
-  return purchaseOrder;
+  // La relación store se carga después del lock para evitar FOR UPDATE sobre
+  // el lado nullable del outer join.
+  const purchaseOrderWithStore = await manager.findOne(PurchaseOrder, {
+    where: { purchaseOrderID },
+    relations: ['store'],
+  });
+
+  if (!purchaseOrderWithStore) {
+    throw new NotFoundException(
+      `Orden de compra con ID ${purchaseOrderID} no encontrada`,
+    );
+  }
+
+  return purchaseOrderWithStore;
 }
 
 export async function findPurchaseOrderItems(

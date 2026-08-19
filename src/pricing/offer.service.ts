@@ -1,8 +1,14 @@
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   Brackets,
   EntityManager,
+  In,
   IsNull,
   LessThanOrEqual,
   MoreThanOrEqual,
@@ -10,6 +16,7 @@ import {
   SelectQueryBuilder,
 } from 'typeorm';
 import {
+  DiscountType,
   DiscountScope,
   OfferTargetScope,
   SpecialOffer,
@@ -17,7 +24,10 @@ import {
   SpecialOfferProduct,
 } from './entities/special-offer.entity';
 import { Category } from '../categories/entities/category.entity';
-import { CreateSpecialOfferDto } from './dto/create-special-offer.dto';
+import {
+  CreateSpecialOfferBundleItemDto,
+  CreateSpecialOfferDto,
+} from './dto/create-special-offer.dto';
 import { UpdateSpecialOfferDto } from './dto/update-special-offer.dto';
 import { SpecialOfferListQueryDto } from './dto/special-offer-list.query.dto';
 import { TenantContextService } from '../multitenant/tenant-context.service';
@@ -31,6 +41,7 @@ import {
   validateOfferConfiguration,
 } from './offer-engine';
 import type { OfferCartContext, OfferValidationInput } from './offer.types';
+import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 
 export type {
   OfferCartContext,
@@ -80,12 +91,28 @@ export class OfferService {
 
     return this.runInTransaction(async (manager) => {
       const repository = manager.getRepository(SpecialOffer);
+      let bundleItemsToSave: Array<{
+        storeProductID: string;
+        productID: string | null;
+        requiredQuantity: number;
+      }> = [];
+      if (
+        createSpecialOfferDto.discountType === DiscountType.BUNDLE &&
+        createSpecialOfferDto.bundleItems?.length
+      ) {
+        bundleItemsToSave = await this.resolveBundleStoreProducts(
+          manager,
+          createSpecialOfferDto.storeID!,
+          createSpecialOfferDto.bundleItems,
+        );
+      }
       const offer = repository.create({
         description: createSpecialOfferDto.description,
         discountType: createSpecialOfferDto.discountType,
         value: createSpecialOfferDto.value,
         scope: createSpecialOfferDto.scope ?? DiscountScope.UNIT,
         exclusive: createSpecialOfferDto.exclusive ?? false,
+        allowBelowMargin: createSpecialOfferDto.allowBelowMargin ?? false,
         startDate: new Date(createSpecialOfferDto.startDate),
         endDate: createSpecialOfferDto.endDate
           ? new Date(createSpecialOfferDto.endDate)
@@ -118,13 +145,14 @@ export class OfferService {
         );
       }
 
-      if (createSpecialOfferDto.bundleItems?.length) {
+      if (bundleItemsToSave.length) {
         const bundleRepository = manager.getRepository(SpecialOfferBundleItem);
         await bundleRepository.save(
-          createSpecialOfferDto.bundleItems.map((item) =>
+          bundleItemsToSave.map((item) =>
             bundleRepository.create({
               offer: savedOffer,
               offerID: savedOffer.offerID,
+              storeProductID: item.storeProductID,
               productID: item.productID,
               requiredQuantity: item.requiredQuantity ?? 1,
             }),
@@ -154,6 +182,8 @@ export class OfferService {
         (targetScope === OfferTargetScope.VARIATION
           ? offer.storeProductID
           : null);
+      const dtoProvidesBundleItems =
+        updateSpecialOfferDto.bundleItems !== undefined;
       const config: OfferValidationInput = {
         discountType: updateSpecialOfferDto.discountType ?? offer.discountType,
         targetScope,
@@ -182,7 +212,9 @@ export class OfferService {
         bundleItems:
           updateSpecialOfferDto.bundleItems ?? offer.bundleItems ?? [],
       };
-      validateOfferConfiguration(config);
+      validateOfferConfiguration(config, {
+        requireBundleStoreProductIDs: dtoProvidesBundleItems,
+      });
       validateDateRange(
         updateSpecialOfferDto.startDate ?? offer.startDate,
         updateSpecialOfferDto.endDate ?? offer.endDate,
@@ -203,6 +235,9 @@ export class OfferService {
           : {}),
         ...(updateSpecialOfferDto.exclusive !== undefined
           ? { exclusive: updateSpecialOfferDto.exclusive }
+          : {}),
+        ...(updateSpecialOfferDto.allowBelowMargin !== undefined
+          ? { allowBelowMargin: updateSpecialOfferDto.allowBelowMargin }
           : {}),
         ...(updateSpecialOfferDto.startDate
           ? { startDate: new Date(updateSpecialOfferDto.startDate) }
@@ -253,15 +288,28 @@ export class OfferService {
 
       if (updateSpecialOfferDto.bundleItems !== undefined) {
         const bundleRepository = manager.getRepository(SpecialOfferBundleItem);
+        const bundleItemsToSave =
+          config.discountType === DiscountType.BUNDLE
+            ? await this.resolveBundleStoreProducts(
+                manager,
+                config.storeID!,
+                updateSpecialOfferDto.bundleItems,
+              )
+            : updateSpecialOfferDto.bundleItems.map((item) => ({
+                storeProductID: item.storeProductID,
+                productID: item.productID ?? null,
+                requiredQuantity: item.requiredQuantity ?? 1,
+              }));
         await bundleRepository.delete({ offerID });
-        if (updateSpecialOfferDto.bundleItems.length) {
+        if (bundleItemsToSave.length) {
           await bundleRepository.save(
-            updateSpecialOfferDto.bundleItems.map((item) =>
+            bundleItemsToSave.map((item) =>
               bundleRepository.create({
                 offer,
                 offerID,
+                storeProductID: item.storeProductID,
                 productID: item.productID,
-                requiredQuantity: item.requiredQuantity ?? 1,
+                requiredQuantity: item.requiredQuantity,
               }),
             ),
           );
@@ -283,7 +331,12 @@ export class OfferService {
       .leftJoinAndSelect('variation.product', 'product')
       .leftJoinAndSelect('offer.store', 'offerStore')
       .leftJoinAndSelect('offer.productTargets', 'productTargets')
+      .leftJoinAndSelect('productTargets.product', 'targetProduct')
       .leftJoinAndSelect('offer.bundleItems', 'bundleItems')
+      .leftJoinAndSelect('bundleItems.storeProduct', 'bundleStoreProduct')
+      .leftJoinAndSelect('bundleStoreProduct.store', 'bundleStore')
+      .leftJoinAndSelect('bundleStoreProduct.variation', 'bundleVariation')
+      .leftJoinAndSelect('bundleVariation.product', 'bundleProduct')
       .orderBy('offer.priority', 'ASC')
       .addOrderBy('offer.startDate', 'DESC')
       .addOrderBy('offer.createdAt', 'DESC');
@@ -402,6 +455,10 @@ export class OfferService {
       .leftJoinAndSelect('storeProduct.store', 'store')
       .leftJoinAndSelect('offer.productTargets', 'productTargets')
       .leftJoinAndSelect('offer.bundleItems', 'bundleItems')
+      .leftJoinAndSelect('bundleItems.storeProduct', 'bundleStoreProduct')
+      .leftJoinAndSelect('bundleStoreProduct.store', 'bundleStore')
+      .leftJoinAndSelect('bundleStoreProduct.variation', 'bundleVariation')
+      .leftJoinAndSelect('bundleVariation.product', 'bundleProduct')
       .where('offer.isActive = :isActive', { isActive: true })
       .andWhere('offer.startDate <= :pricingDate', { pricingDate })
       .andWhere('(offer.endDate IS NULL OR offer.endDate >= :pricingDate)')
@@ -437,6 +494,17 @@ export class OfferService {
 
     return offers
       .filter((offer) => {
+        if (offer.discountType === DiscountType.BUNDLE) {
+          if (offer.storeID !== cartContext.storeID) return false;
+          const bundleStoreProductIDs = new Set(
+            (offer.bundleItems ?? [])
+              .map((item) => item.storeProductID)
+              .filter((id): id is string => !!id),
+          );
+          return cartContext.items.some((item) =>
+            bundleStoreProductIDs.has(item.storeProductID),
+          );
+        }
         const matchesStore =
           offer.storeID === cartContext.storeID ||
           storeProductIDs.includes(offer.storeProductID ?? '');
@@ -452,6 +520,18 @@ export class OfferService {
     offer: SpecialOffer,
     cartContext: OfferCartContext,
   ): Promise<Set<string>> {
+    if (offer.discountType === DiscountType.BUNDLE) {
+      const bundleStoreProductIDs = new Set(
+        (offer.bundleItems ?? [])
+          .map((item) => item.storeProductID)
+          .filter((id): id is string => !!id),
+      );
+      return new Set(
+        cartContext.items
+          .filter((item) => bundleStoreProductIDs.has(item.storeProductID))
+          .map((item) => item.storeProductID),
+      );
+    }
     let categoryScopes = new Map<string, Set<string>>();
     if (offer.targetScope === OfferTargetScope.CATEGORY && offer.categoryID) {
       categoryScopes = new Map([
@@ -469,6 +549,45 @@ export class OfferService {
         .filter((item) => matchesOffer(item, offer, categoryScopes))
         .map((item) => item.storeProductID),
     );
+  }
+
+  private async resolveBundleStoreProducts(
+    manager: EntityManager,
+    storeID: string,
+    items: CreateSpecialOfferBundleItemDto[],
+  ): Promise<
+    Array<{
+      storeProductID: string;
+      productID: string | null;
+      requiredQuantity: number;
+    }>
+  > {
+    const storeProducts = await manager.find(StoreProduct, {
+      where: {
+        store: { storeID },
+        storeProductID: In(items.map((item) => item.storeProductID)),
+      },
+      relations: ['variation', 'variation.product'],
+    });
+    const byID = new Map(
+      storeProducts.map((storeProduct) => [
+        storeProduct.storeProductID,
+        storeProduct,
+      ]),
+    );
+    return items.map((item) => {
+      const storeProduct = byID.get(item.storeProductID);
+      if (!storeProduct) {
+        throw new BadRequestException(
+          `El bundleItem con storeProductID ${item.storeProductID} no pertenece a la tienda ${storeID}`,
+        );
+      }
+      return {
+        storeProductID: item.storeProductID,
+        productID: storeProduct.variation?.product?.productID ?? null,
+        requiredQuantity: item.requiredQuantity ?? 1,
+      };
+    });
   }
 
   private async resolveCategoryScope(
@@ -519,7 +638,12 @@ export class OfferService {
         'product',
         'category',
         'productTargets',
+        'productTargets.product',
         'bundleItems',
+        'bundleItems.storeProduct',
+        'bundleItems.storeProduct.store',
+        'bundleItems.storeProduct.variation',
+        'bundleItems.storeProduct.variation.product',
       ],
     });
     if (!offer) throw new NotFoundException('Oferta especial no encontrada');
