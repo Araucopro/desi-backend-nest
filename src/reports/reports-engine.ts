@@ -23,6 +23,11 @@ import {
   toMoney,
   toNumber,
 } from './report-helpers';
+import {
+  DEFAULT_TIMEZONE,
+  getStartOfDayInTimezone,
+  getStartOfMonthInTimezone,
+} from '../common/utils/date-timezone.util';
 
 export function buildIncomeStatementReport(
   rows: FinancialMovementRow[],
@@ -128,35 +133,14 @@ export function buildIncomeStatementReport(
   };
 }
 
-export function buildPeriodBoundaries(now: Date) {
-  const todayStart = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-    0,
-    0,
-    0,
-    0,
-  );
-  const tomorrowStart = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate() + 1,
-    0,
-    0,
-    0,
-    0,
-  );
-  const yesterdayStart = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate() - 1,
-    0,
-    0,
-    0,
-    0,
-  );
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+export function buildPeriodBoundaries(
+  now: Date,
+  timeZone: string = DEFAULT_TIMEZONE,
+) {
+  const todayStart = getStartOfDayInTimezone(now, timeZone, 0);
+  const tomorrowStart = getStartOfDayInTimezone(now, timeZone, 1);
+  const yesterdayStart = getStartOfDayInTimezone(now, timeZone, -1);
+  const monthStart = getStartOfMonthInTimezone(now, timeZone);
 
   return { todayStart, tomorrowStart, yesterdayStart, monthStart };
 }

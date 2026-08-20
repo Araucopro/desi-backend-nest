@@ -66,6 +66,7 @@ export async function impersonate(
     role: 'SUPPORT',
     sessionVersion: 1,
     impersonatingTenantId: tenantID,
+    impersonatingTimeZone: tenant.timeZone ?? 'America/Santiago',
     impersonatedBy: masterUserID,
   });
 }

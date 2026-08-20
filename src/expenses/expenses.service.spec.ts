@@ -196,8 +196,8 @@ describe('ExpensesService', () => {
       expect(expenseSummaryQueryBuilder.where).toHaveBeenCalledWith(
         'expense.deductibleDate >= :start AND expense.deductibleDate < :end',
         expect.objectContaining({
-          start: '2026-01-01T00:00:00.000Z',
-          end: '2027-01-01T00:00:00.000Z',
+          start: '2026-01-01T03:00:00.000Z',
+          end: '2027-01-01T03:00:00.000Z',
         }),
       );
       expect(expenseSummaryQueryBuilder.groupBy).toHaveBeenCalledWith('month');

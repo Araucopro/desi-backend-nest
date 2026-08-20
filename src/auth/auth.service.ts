@@ -57,6 +57,7 @@ export class AuthService {
         type: 'tenant',
         userId: user.userID,
         tenantId: user.tenantID,
+        timeZone: tenant.timeZone ?? 'America/Santiago',
         sessionVersion: user.sessionVersion,
         id: user.userID,
         email: user.email,

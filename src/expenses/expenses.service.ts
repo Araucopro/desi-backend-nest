@@ -18,6 +18,7 @@ import { ExpenseSummaryQueryDto } from './dto/expense-summary-query.dto';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import { getYearBoundsInTimezone } from '../common/utils/date-timezone.util';
 
 type ExpenseSummaryRow = {
   month: string | number;
@@ -86,10 +87,8 @@ export class ExpensesService {
   }
 
   private getYearBounds(year: number) {
-    return {
-      start: new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0)),
-      end: new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0, 0)),
-    };
+    const timeZone = this.tenantContext?.getTimeZone() ?? 'America/Santiago';
+    return getYearBoundsInTimezone(year, timeZone);
   }
 
   private toNumber(value: string | number | null | undefined) {

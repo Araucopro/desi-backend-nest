@@ -98,14 +98,19 @@ describe('reports-engine', () => {
   });
 
   it('builds today, yesterday and month start boundaries', () => {
-    const now = new Date(2026, 4, 11, 12, 30, 0, 0);
+    // 2026-05-11T12:30:00.000Z en America/Santiago (UTC-4) es 2026-05-11 08:30:00
+    const now = new Date('2026-05-11T12:30:00.000Z');
     const { todayStart, tomorrowStart, yesterdayStart, monthStart } =
-      buildPeriodBoundaries(now);
+      buildPeriodBoundaries(now, 'America/Santiago');
 
-    expect(todayStart).toEqual(new Date(2026, 4, 11, 0, 0, 0, 0));
-    expect(tomorrowStart).toEqual(new Date(2026, 4, 12, 0, 0, 0, 0));
-    expect(yesterdayStart).toEqual(new Date(2026, 4, 10, 0, 0, 0, 0));
-    expect(monthStart).toEqual(new Date(2026, 4, 1, 0, 0, 0, 0));
+    // Medianoche del 11 de Mayo en Santiago (UTC-4) -> 2026-05-11T04:00:00.000Z
+    expect(todayStart.toISOString()).toBe('2026-05-11T04:00:00.000Z');
+    // Medianoche del 12 de Mayo en Santiago (UTC-4) -> 2026-05-12T04:00:00.000Z
+    expect(tomorrowStart.toISOString()).toBe('2026-05-12T04:00:00.000Z');
+    // Medianoche del 10 de Mayo en Santiago (UTC-4) -> 2026-05-10T04:00:00.000Z
+    expect(yesterdayStart.toISOString()).toBe('2026-05-10T04:00:00.000Z');
+    // Medianoche del 1 de Mayo en Santiago (UTC-4) -> 2026-05-01T04:00:00.000Z
+    expect(monthStart.toISOString()).toBe('2026-05-01T04:00:00.000Z');
   });
 
   it('merges DTE and sale aggregates, sorts documents and applies pagination', () => {

@@ -4,6 +4,7 @@ export interface JwtPayload {
   type: 'tenant' | 'master';
   userId: string;
   tenantId: string;
+  timeZone?: string;
   sessionVersion: number;
   id: string;
   email: string;
@@ -16,5 +17,6 @@ export interface MasterJwtPayload {
   role: string;
   sessionVersion: number;
   impersonatingTenantId?: string;
+  impersonatingTimeZone?: string;
   impersonatedBy?: string;
 }

@@ -13,6 +13,12 @@ import {
   IncomeStatementTotalsDto,
 } from './dto/income-statement.dto';
 import { Sale, SaleType } from '../sales/entities/sale.entity';
+import {
+  DEFAULT_TIMEZONE,
+  getStartOfDayInTimezone,
+  getStartOfMonthInTimezone,
+  getYearBoundsInTimezone,
+} from '../common/utils/date-timezone.util';
 
 export type FinancialMovementRow = {
   month: string | number;
@@ -85,11 +91,11 @@ export function toMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-export function getYearBounds(year: number) {
-  return {
-    start: new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0)),
-    end: new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0, 0)),
-  };
+export function getYearBounds(
+  year: number,
+  timeZone: string = DEFAULT_TIMEZONE,
+) {
+  return getYearBoundsInTimezone(year, timeZone);
 }
 
 export function getMonthLabels() {
@@ -118,11 +124,10 @@ export function createExpenseDetailSeries(): IncomeStatementExpenseDetailDto[] {
 }
 
 export function createMonthlySeries(year: number): IncomeStatementMonthDto[] {
-  const monthLabels = getMonthLabels();
-  return monthLabels.map((label, index) => ({
+  return getMonthLabels().map((label, index) => ({
+    year,
     month: index + 1,
     label,
-    year,
     salesIncome: 0,
     salesTax: 0,
     cogs: 0,
@@ -162,9 +167,9 @@ export function expenseTypeForCategory(
 }
 
 export function buildTotals(
-  series: IncomeStatementMonthDto[],
+  months: IncomeStatementMonthDto[],
 ): IncomeStatementTotalsDto {
-  return series.reduce(
+  return months.reduce(
     (acc, month) => ({
       salesIncome: toMoney(acc.salesIncome + month.salesIncome),
       salesTax: toMoney(acc.salesTax + month.salesTax),
@@ -190,26 +195,14 @@ export function buildTotals(
   );
 }
 
-export function normalizeDates(from?: string, to?: string) {
+export function normalizeDates(
+  from?: string,
+  to?: string,
+  timeZone: string = DEFAULT_TIMEZONE,
+) {
   const now = new Date();
-  const defaultFrom = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    1,
-    0,
-    0,
-    0,
-    0,
-  );
-  const defaultTo = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate() + 1,
-    0,
-    0,
-    0,
-    0,
-  );
+  const defaultFrom = getStartOfMonthInTimezone(now, timeZone);
+  const defaultTo = getStartOfDayInTimezone(now, timeZone, 1);
 
   const fromDate = from ? new Date(from) : defaultFrom;
   const toDate = to ? new Date(to) : defaultTo;

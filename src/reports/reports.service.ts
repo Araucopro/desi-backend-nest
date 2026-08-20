@@ -84,8 +84,9 @@ export class ReportsService {
     filter: IncomeStatementQueryDto,
   ): Promise<IncomeStatementDto> {
     return this.runInTransaction(async (manager) => {
+      const timeZone = this.tenantContext?.getTimeZone() ?? 'America/Santiago';
       const year = filter.year ?? new Date().getFullYear();
-      const { start, end } = getYearBounds(year);
+      const { start, end } = getYearBounds(year, timeZone);
 
       const movementRepo = manager.getRepository(FinancialMovement);
       const rows = await aggregateMovements(
@@ -110,10 +111,11 @@ export class ReportsService {
     filter: ReportsSaleFilterDto,
   ): Promise<SalesReportResponseDto> {
     return this.runInTransaction(async (manager) => {
+      const timeZone = this.tenantContext?.getTimeZone() ?? 'America/Santiago';
       const dteRepo = manager.getRepository(DteDocument);
       const saleRepo = manager.getRepository(Sale);
       const { storeId, page = 1, limit = 50 } = filter;
-      const { from, to } = normalizeDates(filter.from, filter.to);
+      const { from, to } = normalizeDates(filter.from, filter.to, timeZone);
 
       const [paymentRaw, statusRaw, salePaymentRaw, saleStatusRaw] =
         await Promise.all([
@@ -124,7 +126,7 @@ export class ReportsService {
         ]);
 
       const { todayStart, tomorrowStart, yesterdayStart, monthStart } =
-        buildPeriodBoundaries(new Date());
+        buildPeriodBoundaries(new Date(), timeZone);
 
       const [todaySummary, yesterdaySummary, monthSummary] = await Promise.all([
         aggregateDteCountAndTotal(

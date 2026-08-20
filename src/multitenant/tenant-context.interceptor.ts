@@ -37,10 +37,16 @@ export class TenantContextInterceptor implements NestInterceptor {
 
     const tenantId = payload?.tenantId ?? payload?.impersonatingTenantId;
     if (!tenantId) throw new ForbiddenException('Tenant context is required');
+    const timeZone =
+      payload?.timeZone ??
+      payload?.impersonatingTimeZone ??
+      (request.headers?.['x-timezone'] as string | undefined) ??
+      'America/Santiago';
     request.tenantId = tenantId;
     return this.context.run(
       {
         tenantId,
+        timeZone,
         userId: payload?.userId ?? payload?.id,
         masterUserId: payload?.masterUserId,
         impersonating: Boolean(payload?.impersonatingTenantId),
