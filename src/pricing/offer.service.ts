@@ -91,6 +91,7 @@ export class OfferService {
 
     return this.runInTransaction(async (manager) => {
       const repository = manager.getRepository(SpecialOffer);
+      const tenantID = this.tenantContext?.getTenantId();
       let bundleItemsToSave: Array<{
         storeProductID: string;
         productID: string | null;
@@ -107,6 +108,7 @@ export class OfferService {
         );
       }
       const offer = repository.create({
+        tenantID,
         description: createSpecialOfferDto.description,
         discountType: createSpecialOfferDto.discountType,
         value: createSpecialOfferDto.value,
@@ -137,6 +139,7 @@ export class OfferService {
         await productRepository.save(
           createSpecialOfferDto.productIDs.map((productID) =>
             productRepository.create({
+              tenantID,
               offer: savedOffer,
               offerID: savedOffer.offerID,
               productID,
@@ -150,6 +153,7 @@ export class OfferService {
         await bundleRepository.save(
           bundleItemsToSave.map((item) =>
             bundleRepository.create({
+              tenantID,
               offer: savedOffer,
               offerID: savedOffer.offerID,
               storeProductID: item.storeProductID,
@@ -174,6 +178,7 @@ export class OfferService {
         relations: ['productTargets', 'bundleItems'],
       });
       if (!offer) throw new NotFoundException('Oferta especial no encontrada');
+      const tenantID = offer.tenantID;
 
       const targetScope =
         updateSpecialOfferDto.targetScope ?? offer.targetScope;
@@ -277,6 +282,7 @@ export class OfferService {
           await productRepository.save(
             updateSpecialOfferDto.productIDs.map((productID) =>
               productRepository.create({
+                tenantID,
                 offer,
                 offerID,
                 productID,
@@ -305,6 +311,7 @@ export class OfferService {
           await bundleRepository.save(
             bundleItemsToSave.map((item) =>
               bundleRepository.create({
+                tenantID,
                 offer,
                 offerID,
                 storeProductID: item.storeProductID,

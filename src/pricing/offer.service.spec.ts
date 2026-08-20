@@ -13,6 +13,7 @@ import {
 } from './entities/special-offer.entity';
 import { Category } from '../categories/entities/category.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import { TenantContextService } from '../multitenant/tenant-context.service';
 
 describe('OfferService', () => {
   let service: OfferService;
@@ -45,6 +46,10 @@ describe('OfferService', () => {
   const mockCategoryRepository = {
     find: jest.fn(),
   };
+  const mockTenantContext = {
+    transaction: jest.fn(),
+    getTenantId: jest.fn(),
+  };
   const manager = {
     getRepository: jest.fn(),
     find: jest.fn(),
@@ -64,9 +69,18 @@ describe('OfferService', () => {
     manager.find.mockResolvedValue([]);
     mockProductRepository.create.mockImplementation((data: unknown) => data);
     mockBundleRepository.create.mockImplementation((data: unknown) => data);
+    mockTenantContext.transaction.mockImplementation(
+      (callback: (entityManager: unknown) => Promise<unknown>) =>
+        callback(manager),
+    );
+    mockTenantContext.getTenantId.mockReturnValue('tenant-1');
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OfferService,
+        {
+          provide: TenantContextService,
+          useValue: mockTenantContext,
+        },
         {
           provide: getRepositoryToken(SpecialOffer),
           useValue: mockRepository,
@@ -357,19 +371,63 @@ describe('OfferService', () => {
       expect.objectContaining({
         allowBelowMargin: true,
         storeID: 'store-1',
+        tenantID: 'tenant-1',
       }),
     );
     expect(mockBundleRepository.save).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
+          tenantID: 'tenant-1',
           storeProductID: 'sp-a',
           productID: 'product-a',
           requiredQuantity: 2,
         }),
         expect.objectContaining({
+          tenantID: 'tenant-1',
           storeProductID: 'sp-b',
           productID: 'product-b',
           requiredQuantity: 1,
+        }),
+      ]),
+    );
+  });
+
+  it('propagates tenantID to offer and product targets on create', async () => {
+    mockRepository.create.mockImplementation(
+      (data: Record<string, unknown>) => ({
+        offerID: 'offer-new',
+        tenantID: data.tenantID,
+        ...data,
+      }),
+    );
+    mockRepository.save.mockResolvedValue({
+      offerID: 'offer-new',
+      tenantID: 'tenant-1',
+    });
+    mockRepository.findOne.mockResolvedValue({
+      offerID: 'offer-new',
+      tenantID: 'tenant-1',
+      productTargets: [],
+      bundleItems: [],
+    } as unknown as SpecialOffer);
+
+    await service.createSpecialOffer({
+      targetScope: OfferTargetScope.PRODUCT,
+      storeID: 'store-1',
+      productIDs: ['product-1'],
+      discountType: DiscountType.PERCENTAGE,
+      value: 10,
+      startDate: '2026-01-01T00:00:00Z',
+    } as never);
+
+    expect(mockRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantID: 'tenant-1' }),
+    );
+    expect(mockProductRepository.save).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tenantID: 'tenant-1',
+          productID: 'product-1',
         }),
       ]),
     );
@@ -471,6 +529,7 @@ describe('OfferService', () => {
     expect(mockBundleRepository.save).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
+          tenantID: 'tenant-1',
           storeProductID: 'sp-a',
           productID: 'product-a',
           requiredQuantity: 2,
