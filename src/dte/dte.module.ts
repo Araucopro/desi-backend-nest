@@ -14,6 +14,7 @@ import { InventoryModule } from '../inventory/inventory.module';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 import { UserstoresModule } from '../relations/userstores/userstores.module';
+import { StoresModule } from '../stores/stores.module';
 import { FinancialMovementsModule } from '../financial-movements/financial-movements.module';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 
@@ -22,6 +23,7 @@ import { TransactionRunnerService } from '../common/services/transaction-runner.
     ConfigModule,
     MultitenantModule,
     UserstoresModule,
+    StoresModule,
     FinancialMovementsModule,
     InventoryModule,
     TypeOrmModule.forFeature([

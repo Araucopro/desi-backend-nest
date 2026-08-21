@@ -103,6 +103,21 @@ export class Store {
   })
   businessName?: string | null;
 
+  @Column({
+    type: 'text',
+    nullable: true,
+    select: false,
+    name: 'openfacturaKeyEncrypted',
+  })
+  openfacturaKeyEncrypted?: string | null;
+
+  @Column({
+    type: 'boolean',
+    default: false,
+    name: 'hasOpenfacturaKey',
+  })
+  hasOpenfacturaKey!: boolean;
+
   @OneToMany('UserStore', 'store')
   userStores!: UserStore[];
 

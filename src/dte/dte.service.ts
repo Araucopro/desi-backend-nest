@@ -49,6 +49,8 @@ import {
   DtePreparationValues,
 } from './dte.types';
 
+import { StoresService } from '../stores/stores.service';
+
 export type { DteCreateOptions } from './dte.types';
 
 type DtePreparation = {
@@ -80,6 +82,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     private readonly inventoryService: InventoryService,
     @Optional() private readonly tenantContext?: TenantContextService,
     @Optional() private readonly transactionRunner?: TransactionRunnerService,
+    @Optional() private readonly storesService?: StoresService,
     @Optional() openfacturaClient?: OpenfacturaClientService,
   ) {
     this.openfacturaClient =
@@ -381,13 +384,20 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private async resolveApikey(storeID: string): Promise<string> {
+    if (this.storesService) {
+      return this.storesService.resolveOpenfacturaKey(storeID);
+    }
+    return this.openfacturaClient.requireApikey();
+  }
+
   async create(
     storeID: string,
     idempotencyKey: string | undefined,
     dto: CreateDteDocumentDto,
     options?: DteCreateOptions,
   ): Promise<DteDocumentResponseDto> {
-    const apikey = this.openfacturaClient.requireApikey();
+    const apikey = await this.resolveApikey(storeID);
     this.logger.log(
       `create() iniciado | storeID=${storeID} | idempotencyKey=${
         idempotencyKey ?? 'none'
@@ -429,7 +439,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     dteDocumentID: string,
     storeID: string,
   ): Promise<DteDocumentResponseDto> {
-    const apikey = this.openfacturaClient.requireApikey();
+    const apikey = await this.resolveApikey(storeID);
 
     const document = await this.runInTransaction((manager) =>
       manager.findOne(DteDocument, {

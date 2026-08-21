@@ -1,10 +1,12 @@
 import {
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { Store } from './entities/store.entity';
 import { CreateStoreDto } from './dto/create-store.dto';
@@ -12,6 +14,7 @@ import { UpdateStoreDto } from './dto/update-store.dto';
 import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { Tenant } from '../multitenant/entities/tenant.entity';
+import { EncryptionService } from '../common/services/encryption.service';
 
 @Injectable()
 export class StoresService {
@@ -19,6 +22,8 @@ export class StoresService {
     @InjectRepository(Store)
     private readonly storeRepo: Repository<Store>,
     @Optional() private readonly tenantContext?: TenantContextService,
+    @Optional() private readonly encryptionService?: EncryptionService,
+    @Optional() private readonly configService?: ConfigService,
   ) {}
 
   async create(dto: CreateStoreDto): Promise<Store> {
@@ -111,5 +116,74 @@ export class StoresService {
         manager.getRepository(Store).remove(store),
       );
     else await this.storeRepo.remove(store);
+  }
+
+  async setOpenfacturaKey(
+    id: string,
+    apiKey: string,
+  ): Promise<{ hasOpenfacturaKey: boolean }> {
+    const store = await this.findOne(id);
+    const encryption =
+      this.encryptionService ??
+      new EncryptionService(this.configService ?? new ConfigService());
+
+    const encrypted = encryption.encrypt(apiKey.trim());
+    store.openfacturaKeyEncrypted = encrypted;
+    store.hasOpenfacturaKey = true;
+
+    if (this.tenantContext) {
+      await this.tenantContext.transaction((manager) =>
+        manager.getRepository(Store).save(store),
+      );
+    } else {
+      await this.storeRepo.save(store);
+    }
+
+    return { hasOpenfacturaKey: true };
+  }
+
+  async resolveOpenfacturaKey(id: string): Promise<string> {
+    const tenantId = this.tenantContext?.get(false)?.tenantId;
+    const store = await (this.tenantContext
+      ? this.tenantContext.transaction((manager) => {
+          const qb = manager
+            .getRepository(Store)
+            .createQueryBuilder('store')
+            .addSelect('store.openfacturaKeyEncrypted')
+            .where('store.storeID = :id', { id });
+          if (tenantId) {
+            qb.andWhere('store.tenantID = :tenantId', { tenantId });
+          }
+          return qb.getOne();
+        })
+      : this.storeRepo
+          .createQueryBuilder('store')
+          .addSelect('store.openfacturaKeyEncrypted')
+          .where('store.storeID = :id', { id })
+          .getOne());
+
+    if (!store) {
+      throw new NotFoundException(`Tienda con ID ${id} no encontrada`);
+    }
+
+    if (store.openfacturaKeyEncrypted) {
+      const encryption =
+        this.encryptionService ??
+        new EncryptionService(this.configService ?? new ConfigService());
+      return encryption.decrypt(store.openfacturaKeyEncrypted);
+    }
+
+    // Fallback a variable de entorno global durante migración
+    const fallback =
+      this.configService?.get<string>('OPENFACTURA_APIKEY') ||
+      process.env.OPENFACTURA_APIKEY;
+
+    if (fallback?.trim()) {
+      return fallback.trim();
+    }
+
+    throw new InternalServerErrorException(
+      `La tienda "${store.name || id}" no tiene configurada la API key de Openfactura y no existe variable global de fallback`,
+    );
   }
 }

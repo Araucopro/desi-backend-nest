@@ -10,6 +10,7 @@ import {
 import { StoresService } from './stores.service';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
+import { SetOpenfacturaKeyDto } from './dto/set-openfactura-key.dto';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { Store } from './entities/store.entity';
@@ -114,6 +115,36 @@ export class StoresController {
   @ApiResponse({ status: 404, description: 'Tienda no encontrada.' })
   update(@Param('id') id: string, @Body() updateStoreDto: UpdateStoreDto) {
     return this.storesService.update(id, updateStoreDto);
+  }
+
+  @Patch(':id/openfactura-key')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Configurar o actualizar la API key de Openfactura de una tienda',
+    description:
+      'Almacena de forma segura y cifrada la API key de Openfactura correspondiente a la tienda especificada.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID de la tienda',
+    type: String,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'API key configurada exitosamente.',
+    schema: {
+      properties: {
+        hasOpenfacturaKey: { type: 'boolean', example: true },
+      },
+    },
+  })
+  @ApiResponse({ status: 404, description: 'Tienda no encontrada.' })
+  @CustomMessage('API key de Openfactura configurada exitosamente')
+  setOpenfacturaKey(
+    @Param('id') id: string,
+    @Body() dto: SetOpenfacturaKeyDto,
+  ) {
+    return this.storesService.setOpenfacturaKey(id, dto.apiKey);
   }
 
   @Delete(':id')
