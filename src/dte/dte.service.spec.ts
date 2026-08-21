@@ -209,9 +209,10 @@ function createMockManager(
 describe('DteService', () => {
   const mockDteDocumentRepository = { findOne: jest.fn() };
   const mockConfigService = {
-    get: jest.fn((key: string, defaultValue?: unknown) =>
-      key === 'OPENFACTURA_APIKEY' ? 'apikey-test' : defaultValue,
-    ),
+    get: jest.fn((_key: string, defaultValue?: unknown) => defaultValue),
+  };
+  const mockStoresService = {
+    resolveOpenfacturaKey: jest.fn().mockResolvedValue('apikey-test'),
   };
   const mockFinancialMovementsService = {
     recordDte: jest.fn().mockResolvedValue(undefined),
@@ -249,6 +250,7 @@ describe('DteService', () => {
       dataSource as any,
       mockFinancialMovementsService as any,
       new InventoryService(undefined as any),
+      mockStoresService as any,
     );
   }
 

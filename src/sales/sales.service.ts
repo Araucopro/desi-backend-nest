@@ -31,6 +31,7 @@ import {
   toDateOnly,
   toDtePaymentType,
   validateFacturaReceiver,
+  validateStoreDteCapability,
 } from './sales-engine';
 import {
   createSaleEntity,
@@ -82,7 +83,8 @@ export class SalesService {
     dto: CreateSaleDto,
     userId?: string,
   ) {
-    await findStoreById(manager, storeID);
+    const store = await findStoreById(manager, storeID);
+    validateStoreDteCapability(store, dto.saleType);
     validateFacturaReceiver(dto.saleType, dto.receiver);
 
     const pricing = await this.pricingService.calculateCart({
@@ -373,6 +375,15 @@ export class SalesService {
     }
     if (sale.dteDocument?.status === DteDocumentStatus.EMITIDO) {
       return this.finishConversion(saleID, storeID);
+    }
+
+    const store = await this.runInTransaction((manager) =>
+      findStoreById(manager, storeID),
+    );
+    if (!store.hasOpenfacturaKey) {
+      throw new BadRequestException(
+        'La tienda no tiene configurada la API key de Openfactura. No es posible convertir notas de venta a DTE.',
+      );
     }
 
     const documentType = resolveConversionDocumentType(sale, dto);

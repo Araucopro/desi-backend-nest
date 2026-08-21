@@ -80,9 +80,9 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     private readonly dataSource: DataSource,
     private readonly financialMovementsService: FinancialMovementsService,
     private readonly inventoryService: InventoryService,
+    private readonly storesService: StoresService,
     @Optional() private readonly tenantContext?: TenantContextService,
     @Optional() private readonly transactionRunner?: TransactionRunnerService,
-    @Optional() private readonly storesService?: StoresService,
     @Optional() openfacturaClient?: OpenfacturaClientService,
   ) {
     this.openfacturaClient =
@@ -385,10 +385,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async resolveApikey(storeID: string): Promise<string> {
-    if (this.storesService) {
-      return this.storesService.resolveOpenfacturaKey(storeID);
-    }
-    return this.openfacturaClient.requireApikey();
+    return this.storesService.resolveOpenfacturaKey(storeID);
   }
 
   async create(

@@ -173,17 +173,8 @@ export class StoresService {
       return encryption.decrypt(store.openfacturaKeyEncrypted);
     }
 
-    // Fallback a variable de entorno global durante migración
-    const fallback =
-      this.configService?.get<string>('OPENFACTURA_APIKEY') ||
-      process.env.OPENFACTURA_APIKEY;
-
-    if (fallback?.trim()) {
-      return fallback.trim();
-    }
-
     throw new InternalServerErrorException(
-      `La tienda "${store.name || id}" no tiene configurada la API key de Openfactura y no existe variable global de fallback`,
+      `La tienda "${store.name || id}" no tiene configurada la API key de Openfactura. Configúrala vía PATCH /stores/${id}/openfactura-key`,
     );
   }
 }

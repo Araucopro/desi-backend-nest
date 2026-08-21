@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  InternalServerErrorException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CreateDteDocumentDto } from './dto/create-dte-document.dto';
 
@@ -42,20 +38,6 @@ export class OpenfacturaClientService {
   maskApikey(apikey: string): string {
     if (apikey.length <= 8) return '****';
     return `${apikey.slice(0, 4)}...${apikey.slice(-4)}`;
-  }
-
-  requireApikey(): string {
-    const apikey = this.configService.get<string>('OPENFACTURA_APIKEY');
-    if (!apikey?.trim()) {
-      this.logger.error('OPENFACTURA_APIKEY no está configurada');
-      throw new InternalServerErrorException(
-        'OPENFACTURA_APIKEY no está configurada',
-      );
-    }
-    this.logger.log(
-      `OPENFACTURA_APIKEY detectada | length=${apikey.length} | preview=${this.maskApikey(apikey)}`,
-    );
-    return apikey;
   }
 
   createOpenfacturaDocument(

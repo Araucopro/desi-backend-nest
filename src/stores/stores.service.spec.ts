@@ -3,7 +3,10 @@ import { StoresService } from './stores.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Store, StoreType } from './entities/store.entity';
 import { Repository } from 'typeorm';
-import { NotFoundException } from '@nestjs/common';
+import {
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 
 import { ConfigService } from '@nestjs/config';
 import { EncryptionService } from '../common/services/encryption.service';
@@ -230,7 +233,7 @@ describe('StoresService', () => {
       expect(resolved).toBe('secret-api-key-123');
     });
 
-    it('should fallback to env OPENFACTURA_APIKEY if store has no encrypted key', async () => {
+    it('should throw InternalServerErrorException if store has no encrypted key', async () => {
       const qb = {
         addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
@@ -244,10 +247,9 @@ describe('StoresService', () => {
         .fn()
         .mockReturnValue(qb);
 
-      process.env.OPENFACTURA_APIKEY = 'global-env-fallback-key';
-
-      const resolved = await service.resolveOpenfacturaKey('store-uuid-1');
-      expect(resolved).toBe('global-env-fallback-key');
+      await expect(
+        service.resolveOpenfacturaKey('store-uuid-1'),
+      ).rejects.toThrow(InternalServerErrorException);
     });
   });
 });

@@ -53,6 +53,17 @@ export function validateFacturaReceiver(
   }
 }
 
+export function validateStoreDteCapability(
+  store: { hasOpenfacturaKey?: boolean; name?: string },
+  saleType: SaleType,
+): void {
+  if (saleType !== SaleType.NOTA_VENTA && !store.hasOpenfacturaKey) {
+    throw new BadRequestException(
+      'La tienda no tiene configurada la API key de Openfactura. Solo se pueden emitir notas de venta.',
+    );
+  }
+}
+
 export function buildPreparedSale(
   dto: CreateSaleDto,
   pricing: CalculateCartResult,

@@ -22,6 +22,7 @@ function createManagerMock(
     sale?: any;
     folioCounter?: Partial<SaleFolioCounter> | null;
     stock?: number;
+    storeHasOpenfacturaKey?: boolean;
   } = {},
 ) {
   const store = {
@@ -36,6 +37,7 @@ function createManagerMock(
     giro: 'VENTA AL POR MENOR',
     acteco: '479100',
     location: 'Santiago',
+    hasOpenfacturaKey: initial.storeHasOpenfacturaKey ?? true,
   };
   const storeProduct = {
     storeProductID: 'sp-1',
@@ -523,6 +525,87 @@ describe('SalesService', () => {
     expect(result.dte).toMatchObject({
       dteDocumentID: 'dte-1',
       STATUS: DteDocumentStatus.EMITIDO,
+    });
+  });
+
+  describe('hasOpenfacturaKey validation', () => {
+    it('rejects BOLETA creation if store does not have openfactura key configured', async () => {
+      ctx = createManagerMock({ storeHasOpenfacturaKey: false });
+      dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+      const service = createService();
+
+      const dto = {
+        saleType: SaleType.BOLETA,
+        paymentType: SalePaymentType.CASH,
+        items: [{ storeProductID: 'sp-1', quantity: 1 }],
+      };
+
+      await expect(
+        service.create('store-1', undefined, dto as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects FACTURA creation if store does not have openfactura key configured', async () => {
+      ctx = createManagerMock({ storeHasOpenfacturaKey: false });
+      dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+      const service = createService();
+
+      const dto = {
+        saleType: SaleType.FACTURA,
+        paymentType: SalePaymentType.CASH,
+        receiver: { rut: '76123456-7', name: 'Empresa SpA' },
+        items: [{ storeProductID: 'sp-1', quantity: 1 }],
+      };
+
+      await expect(
+        service.create('store-1', undefined, dto as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows NOTA_VENTA creation even if store has hasOpenfacturaKey false', async () => {
+      ctx = createManagerMock({ storeHasOpenfacturaKey: false });
+      dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+      const service = createService();
+
+      const dto = {
+        saleType: SaleType.NOTA_VENTA,
+        paymentType: SalePaymentType.CASH,
+        items: [{ storeProductID: 'sp-1', quantity: 1 }],
+      };
+
+      const result = await service.create('store-1', undefined, dto as any);
+      expect(result.sale.saleType).toBe(SaleType.NOTA_VENTA);
+      expect(result.sale.status).toBe(SaleStatus.EMITIDA);
+    });
+
+    it('rejects conversion of NOTA_VENTA to DTE if store does not have openfactura key configured', async () => {
+      const sale = {
+        saleID: 'sale-1',
+        storeID: 'store-1',
+        tenantID: 'tenant-1',
+        saleType: SaleType.NOTA_VENTA,
+        status: SaleStatus.EMITIDA,
+        total: 1190,
+        paymentType: SalePaymentType.CASH,
+        items: [
+          {
+            storeProductID: 'sp-1',
+            quantity: 1,
+            variationID: 'var-1',
+            sku: 'SKU-1',
+            productName: 'Producto A',
+            unitPrice: 1190,
+            lineTotal: 1190,
+          },
+        ],
+      };
+      ctx = createManagerMock({ sale, storeHasOpenfacturaKey: false });
+      dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+      const service = createService();
+
+      await expect(service.convert('sale-1', 'store-1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 });

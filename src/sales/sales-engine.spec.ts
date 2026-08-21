@@ -12,6 +12,7 @@ import {
   toDtePaymentType,
   toMoney,
   validateFacturaReceiver,
+  validateStoreDteCapability,
 } from './sales-engine';
 
 describe('sales-engine', () => {
@@ -181,5 +182,33 @@ describe('sales-engine', () => {
       33,
     );
     expect(resolveConversionDocumentType({})).toBe(39);
+  });
+
+  it('validates store openfactura capability', () => {
+    expect(() =>
+      validateStoreDteCapability({ hasOpenfacturaKey: false }, SaleType.BOLETA),
+    ).toThrow(BadRequestException);
+
+    expect(() =>
+      validateStoreDteCapability(
+        { hasOpenfacturaKey: false },
+        SaleType.FACTURA,
+      ),
+    ).toThrow(BadRequestException);
+
+    expect(() =>
+      validateStoreDteCapability(
+        { hasOpenfacturaKey: false },
+        SaleType.NOTA_VENTA,
+      ),
+    ).not.toThrow();
+
+    expect(() =>
+      validateStoreDteCapability({ hasOpenfacturaKey: true }, SaleType.BOLETA),
+    ).not.toThrow();
+
+    expect(() =>
+      validateStoreDteCapability({ hasOpenfacturaKey: true }, SaleType.FACTURA),
+    ).not.toThrow();
   });
 });
