@@ -1,9 +1,18 @@
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { Product } from './entities/product.entity';
 import { ProductVariation } from './entities/product-variation.entity';
 import { CreateProductDto } from './dto/create-product.dto';
+import {
+  BulkProductItemDto,
+  CreateProductsBulkDto,
+} from './dto/create-products-bulk.dto';
 import { PricingService } from '../pricing/pricing.service';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductListQueryDto } from './dto/product-list.query.dto';
@@ -13,6 +22,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { PriceType } from '../pricing/entities/price-history.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import { Category } from '../categories/entities/category.entity';
 import { buildVariationPlan, VariationPlanAction } from './products-engine';
 import {
   createProductEntity,
@@ -25,6 +35,11 @@ import {
   saveProduct,
   saveVariation,
 } from './products-repository.helpers';
+
+interface NormalizedBulkProductItem extends BulkProductItemDto {
+  normalizedName: string;
+  normalizedCategoryName?: string;
+}
 
 @Injectable()
 export class ProductsService {
@@ -100,6 +115,301 @@ export class ProductsService {
 
       return savedProduct;
     });
+  }
+
+  /**
+   * Crea o actualiza productos de forma masiva en una sola transacción.
+   *
+   * - Los productos se resuelven por nombre normalizado (trim + case-insensitive):
+   *   si existe, se actualiza; si no, se crea.
+   * - Las variantes se sincronizan por SKU (misma semántica que el update singular).
+   * - La categoría se resuelve por nombre y, si no existe, se crea como categoría
+   *   raíz dentro de la misma transacción.
+   * - Si existe tienda central, cada variante genera su StoreProduct y su
+   *   movimiento ADJUSTMENT con el stock informado.
+   */
+  async bulkUpsert(dto: CreateProductsBulkDto): Promise<Product[]> {
+    const items = this.normalizeBulkItems(dto.items);
+
+    return this.runInTransaction(async (manager) => {
+      const tenantID = this.tenantContext?.getTenantId();
+      const categories = await this.resolveCategories(manager, items, tenantID);
+      const existingByName = await this.findExistingProductsByName(
+        manager,
+        items,
+        tenantID,
+      );
+      const skuOwners = await this.findExistingSkuOwners(
+        manager,
+        items,
+        tenantID,
+      );
+      const centralStore = await findCentralStore(manager, tenantID);
+      const results: Product[] = [];
+
+      for (const item of items) {
+        const existingProduct = existingByName.get(item.normalizedName);
+
+        for (const variation of item.variations) {
+          const ownerProductID = skuOwners.get(variation.sku);
+          if (ownerProductID && ownerProductID !== existingProduct?.productID) {
+            throw new BadRequestException(
+              `El SKU ${variation.sku} ya pertenece al producto ${ownerProductID} y no puede asignarse a "${item.name}".`,
+            );
+          }
+        }
+
+        const categoryID = item.normalizedCategoryName
+          ? categories.get(item.normalizedCategoryName)?.categoryID
+          : undefined;
+
+        if (existingProduct) {
+          const product = await findProductForUpdate(
+            manager,
+            existingProduct.productID,
+          );
+
+          manager.merge(Product, product, {
+            name: item.name,
+            ...(item.image !== undefined ? { image: item.image } : {}),
+            ...(item.brand !== undefined ? { brand: item.brand } : {}),
+            ...(item.genre !== undefined ? { genre: item.genre } : {}),
+            ...(item.description !== undefined
+              ? { description: item.description }
+              : {}),
+            ...(categoryID ? { categoryID } : {}),
+          });
+
+          const savedProduct = await saveProduct(manager, product);
+          const plan = buildVariationPlan({
+            variations: item.variations,
+            existing: product.variations,
+          });
+
+          for (const action of plan) {
+            if (action.kind === 'create') {
+              await this.applyVariationCreate(
+                manager,
+                action,
+                savedProduct,
+                centralStore?.storeID,
+                tenantID,
+              );
+            } else if (action.kind === 'update') {
+              await this.applyVariationUpdate(
+                manager,
+                action,
+                centralStore?.storeID,
+                tenantID,
+              );
+            } else {
+              await manager.remove(action.variation);
+            }
+          }
+
+          results.push(
+            await this.findProductWithRelationsOrFail(
+              manager,
+              savedProduct.productID,
+            ),
+          );
+          continue;
+        }
+
+        const savedProduct = await saveProduct(
+          manager,
+          createProductEntity(manager, {
+            name: item.name,
+            tenantID,
+            ...(categoryID ? { categoryID } : {}),
+            ...(item.image !== undefined ? { image: item.image } : {}),
+            ...(item.brand !== undefined ? { brand: item.brand } : {}),
+            ...(item.genre !== undefined ? { genre: item.genre } : {}),
+            ...(item.description !== undefined
+              ? { description: item.description }
+              : {}),
+          }),
+        );
+
+        for (const variationDto of item.variations) {
+          await this.applyVariationCreate(
+            manager,
+            { kind: 'create', dto: variationDto },
+            savedProduct,
+            centralStore?.storeID,
+            tenantID,
+          );
+        }
+
+        results.push(
+          await this.findProductWithRelationsOrFail(
+            manager,
+            savedProduct.productID,
+          ),
+        );
+      }
+
+      return results;
+    });
+  }
+
+  private normalizeBulkItems(
+    items: BulkProductItemDto[],
+  ): NormalizedBulkProductItem[] {
+    const seenProductNames = new Set<string>();
+    const seenSkus = new Set<string>();
+
+    return items.map((item, index) => {
+      const name = item.name.trim();
+      if (!name) {
+        throw new BadRequestException(
+          `El nombre del producto en la posición ${index + 1} no puede estar vacío.`,
+        );
+      }
+
+      const normalizedName = name.toLowerCase();
+      if (seenProductNames.has(normalizedName)) {
+        throw new BadRequestException(
+          `El producto "${item.name}" está duplicado en la carga masiva.`,
+        );
+      }
+      seenProductNames.add(normalizedName);
+
+      const normalizedCategoryName =
+        item.categoryName?.trim().toLowerCase() || undefined;
+      if (item.categoryName && !normalizedCategoryName) {
+        throw new BadRequestException(
+          `La categoría del producto "${item.name}" no puede estar vacía.`,
+        );
+      }
+
+      for (const variation of item.variations) {
+        if (!variation.sku.trim()) {
+          throw new BadRequestException(
+            `Una variante del producto "${item.name}" tiene un SKU vacío.`,
+          );
+        }
+        if (seenSkus.has(variation.sku)) {
+          throw new BadRequestException(
+            `El SKU ${variation.sku} está duplicado en la carga masiva.`,
+          );
+        }
+        seenSkus.add(variation.sku);
+      }
+
+      return { ...item, name, normalizedName, normalizedCategoryName };
+    });
+  }
+
+  private async resolveCategories(
+    manager: EntityManager,
+    items: NormalizedBulkProductItem[],
+    tenantID?: string,
+  ): Promise<Map<string, Category>> {
+    const namesByKey = new Map<string, string>();
+    for (const item of items) {
+      if (item.normalizedCategoryName && item.categoryName) {
+        namesByKey.set(item.normalizedCategoryName, item.categoryName.trim());
+      }
+    }
+    if (namesByKey.size === 0) return new Map();
+
+    const categoryRepository = manager.getRepository(Category);
+    const existing = await categoryRepository.find({
+      where: tenantID ? { tenantID } : {},
+      select: ['categoryID', 'name'],
+    });
+
+    const byName = new Map<string, Category>();
+    for (const category of existing) {
+      const key = category.name.trim().toLowerCase();
+      if (namesByKey.has(key)) byName.set(key, category);
+    }
+
+    const missing = [...namesByKey.keys()].filter((key) => !byName.has(key));
+    if (missing.length > 0) {
+      const created = await manager.save(
+        missing.map((key) =>
+          manager.create(Category, {
+            name: namesByKey.get(key)!,
+            ...(tenantID ? { tenantID } : {}),
+          }),
+        ),
+      );
+      for (const category of created) {
+        byName.set(category.name.trim().toLowerCase(), category);
+      }
+    }
+
+    return byName;
+  }
+
+  private async findExistingProductsByName(
+    manager: EntityManager,
+    items: NormalizedBulkProductItem[],
+    tenantID?: string,
+  ): Promise<Map<string, Product>> {
+    const names = [...new Set(items.map((item) => item.normalizedName))];
+    if (names.length === 0) return new Map();
+
+    const query = manager
+      .getRepository(Product)
+      .createQueryBuilder('product')
+      .select(['product.productID', 'product.name'])
+      .where('LOWER(TRIM(product.name)) IN (:...names)', { names });
+    if (tenantID) query.andWhere('product.tenantID = :tenantID', { tenantID });
+
+    const existing = await query.getMany();
+    const byName = new Map<string, Product>();
+
+    for (const product of existing) {
+      const key = product.name.trim().toLowerCase();
+      if (byName.has(key)) {
+        throw new BadRequestException(
+          `Existen varios productos con el nombre normalizado "${product.name}". No se puede resolver el upsert.`,
+        );
+      }
+      byName.set(key, product);
+    }
+
+    return byName;
+  }
+
+  private async findExistingSkuOwners(
+    manager: EntityManager,
+    items: NormalizedBulkProductItem[],
+    tenantID?: string,
+  ): Promise<Map<string, string>> {
+    const skus = [
+      ...new Set(items.flatMap((item) => item.variations.map((v) => v.sku))),
+    ];
+    if (skus.length === 0) return new Map();
+
+    const variations = await manager.find(ProductVariation, {
+      where: {
+        ...(tenantID ? { tenantID } : {}),
+        sku: In(skus),
+      },
+      relations: ['product'],
+    });
+
+    return new Map(
+      variations.map((variation) => [
+        variation.sku,
+        variation.product.productID,
+      ]),
+    );
+  }
+
+  private async findProductWithRelationsOrFail(
+    manager: EntityManager,
+    productID: string,
+  ): Promise<Product> {
+    const product = await findProductWithRelations(manager, productID);
+    if (!product) {
+      throw new NotFoundException(`Producto con ID ${productID} no encontrado`);
+    }
+    return product;
   }
 
   async findAll(query: ProductListQueryDto): Promise<ProductListResponseDto> {

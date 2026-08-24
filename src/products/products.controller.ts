@@ -11,12 +11,18 @@ import {
 } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
+import { CreateProductsBulkDto } from './dto/create-products-bulk.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductListQueryDto } from './dto/product-list.query.dto';
 import { ProductListResponseDto } from './dto/product-list-response.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiBody,
+} from '@nestjs/swagger';
 import { Product } from './entities/product.entity';
-import { Public } from '../auth/decorators/public.decorator';
 
 @ApiTags('Productos')
 @Controller('products')
@@ -32,6 +38,73 @@ export class ProductsController {
   })
   create(@Body() createProductDto: CreateProductDto) {
     return this.productsService.create(createProductDto);
+  }
+
+  @Post('bulk')
+  @ApiOperation({
+    summary: 'Crear o actualizar productos masivamente con sus variantes',
+    description:
+      'Recibe un arreglo de productos con sus variantes. Cada producto se resuelve por nombre (ignorando mayúsculas/minúsculas y espacios): ' +
+      'si ya existe se actualiza y se sincronizan sus variantes por SKU; si no existe, se crea. ' +
+      'La categoría se resuelve por nombre y, si no existe, se crea automáticamente como categoría raíz. ' +
+      'Todo se procesa en una sola transacción: ante cualquier conflicto (nombres o SKUs duplicados, SKU perteneciente a otro producto) el lote se revierte por completo. ' +
+      'Máximo 100 productos por llamada.',
+  })
+  @ApiBody({
+    type: CreateProductsBulkDto,
+    examples: {
+      'Crear y actualizar': {
+        summary: 'Productos con variantes y categoría por nombre',
+        value: {
+          items: [
+            {
+              name: 'Camiseta Básica',
+              categoryName: 'Vestuario',
+              brand: 'Marca Famosa',
+              genre: 'Unisex',
+              variations: [
+                {
+                  sku: 'CAM-BAS-L',
+                  priceCost: 8000,
+                  priceList: 15000,
+                  stock: 50,
+                  color: 'Blanco',
+                  size: 'L',
+                },
+              ],
+            },
+            {
+              name: 'Polera Deportiva',
+              categoryName: 'Vestuario',
+              variations: [
+                {
+                  sku: 'POL-DEP-M',
+                  priceCost: 12000,
+                  priceList: 22000,
+                  stock: 30,
+                  color: 'Azul',
+                  size: 'M',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Productos creados y/o actualizados, en el mismo orden del arreglo recibido, con sus variantes y categoría.',
+    type: [Product],
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Validación fallida, duplicados en el lote o SKU que ya pertenece a otro producto.',
+  })
+  bulkUpsert(@Body() createProductsBulkDto: CreateProductsBulkDto) {
+    return this.productsService.bulkUpsert(createProductsBulkDto);
   }
 
   @Get()
