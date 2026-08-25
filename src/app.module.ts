@@ -28,6 +28,7 @@ import { SiiCodesModule } from './sii-codes/sii-codes.module';
 import { FinancialMovementsModule } from './financial-movements/financial-movements.module';
 import { SalesModule } from './sales/sales.module';
 import { ReturnsModule } from './returns/returns.module';
+import { DispatchGuidesModule } from './dispatch-guides/dispatch-guides.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { ReturnsModule } from './returns/returns.module';
     SiiCodesModule,
     SalesModule,
     ReturnsModule,
+    DispatchGuidesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },

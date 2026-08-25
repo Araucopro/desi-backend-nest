@@ -3,6 +3,7 @@ import {
   DteDocumentStatus,
 } from './entities/dte-document.entity';
 import { OpenfacturaDocumentResponse } from './openfactura-client.service';
+import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
 
 export type DteCreateOptions = {
   /** Cuando es false, el stock ya salió (conversión de nota de venta). */
@@ -13,6 +14,8 @@ export type DteCreateOptions = {
   paymentType?: DteDocumentPaymentType;
   /** Costo de venta congelado del documento original (usado en NCE 61). */
   cogsTotalOverride?: number;
+  /** Razón de inventario para la reserva de stock (default SALE). */
+  reserveReason?: InventoryMovementReason;
 };
 
 export type DtePreparationValues = {

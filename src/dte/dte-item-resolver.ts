@@ -12,6 +12,7 @@ import {
   BoletaEncabezadoDto,
   CreateDteDocumentDto,
   DteEncabezadoDto,
+  GuiaEncabezadoDto,
 } from './dto/create-dte-document.dto';
 import { NormalizedDteItem } from './dte-response.mapper';
 
@@ -39,6 +40,12 @@ function isNotaCreditoEncabezado(
   encabezado: DteEncabezadoDto,
 ): encabezado is import('./dto/create-dte-document.dto').NotaCreditoEncabezadoDto {
   return encabezado.IdDoc.TipoDTE === 61;
+}
+
+function isGuiaEncabezado(
+  encabezado: DteEncabezadoDto,
+): encabezado is GuiaEncabezadoDto {
+  return encabezado.IdDoc.TipoDTE === 52;
 }
 
 export async function resolveVariation(
@@ -243,6 +250,42 @@ export async function mapToDocumentPayload(
           ...(VlrPagar !== undefined ? { VlrPagar } : {}),
         };
       }
+    }
+  } else if (isGuiaEncabezado(encabezado)) {
+    const existing = encabezado.Emisor;
+    encabezado.Emisor = {
+      RUTEmisor: store.rut,
+      RznSoc: store.businessName || store.name,
+      GiroEmis: store.giro || existing?.GiroEmis || 'VENTA AL POR MENOR',
+      Acteco: store.acteco
+        ? store.acteco.split(',').map((code) => code.trim())
+        : existing?.Acteco || ['479100'],
+      DirOrigen: store.address || existing?.DirOrigen || 'DIRECCION',
+      CmnaOrigen: store.city || existing?.CmnaOrigen || 'SANTIAGO',
+      Telefono: store.phone || existing?.Telefono || '0 0',
+      CdgSIISucur: store.cdgSIISucur || existing?.CdgSIISucur || undefined,
+    };
+
+    encabezado.IdDoc = {
+      TipoDTE: 52 as const,
+      ...(encabezado.IdDoc.Folio !== undefined
+        ? { Folio: encabezado.IdDoc.Folio }
+        : {}),
+      FchEmis: encabezado.IdDoc.FchEmis,
+      IndTraslado: encabezado.IdDoc.IndTraslado ?? '1',
+      DirDest: encabezado.IdDoc.DirDest,
+      CmnaDest: encabezado.IdDoc.CmnaDest,
+    };
+
+    if (encabezado.Totales) {
+      const { MntNeto, TasaIVA, IVA, MntTotal, VlrPagar } = encabezado.Totales;
+      encabezado.Totales = {
+        ...(MntNeto !== undefined ? { MntNeto } : {}),
+        ...(TasaIVA !== undefined ? { TasaIVA } : {}),
+        ...(IVA !== undefined ? { IVA } : {}),
+        ...(MntTotal !== undefined ? { MntTotal } : {}),
+        ...(VlrPagar !== undefined ? { VlrPagar } : {}),
+      };
     }
   } else if (isBoletaEncabezado(encabezado)) {
     const existing = encabezado.Emisor;

@@ -196,6 +196,7 @@ export async function reserveStockAndSnapshotCosts(
   items: StockReservationItem[],
   referenceID: string,
   tenantID: string | undefined,
+  reason: InventoryMovementReason = InventoryMovementReason.SALE,
 ): Promise<number> {
   let cogsTotal = 0;
 
@@ -231,7 +232,7 @@ export async function reserveStockAndSnapshotCosts(
     await applyInventoryMovement(manager, {
       storeID,
       variationID: item.variationID,
-      reason: InventoryMovementReason.SALE,
+      reason,
       quantity: item.QtyItem,
       referenceID,
       tenantID: tenantID ?? storeProduct.tenantID,

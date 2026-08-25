@@ -85,6 +85,30 @@ export class OpenfacturaClientService {
     });
   }
 
+  anularDte52(
+    apikey: string,
+    folio: number,
+    fecha: string,
+  ): Promise<OpenfacturaCallResult> {
+    const baseUrl = this.configService.get<string>(
+      'OPENFACTURA_BASE_URL',
+      'https://dev-api.haulmer.com',
+    );
+    const url = `${baseUrl.replace(/\/$/, '')}/v2/dte/anularDTE52`;
+    this.logger.log(
+      `Anulando guía de despacho en Openfactura | url=${url} | Folio=${folio} | Fecha=${fecha}`,
+    );
+
+    return this.callOpenfactura(url, {
+      method: 'POST',
+      headers: {
+        apikey,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ Dte: 52, Folio: folio, Fecha: fecha }),
+    });
+  }
+
   async callOpenfactura(
     url: string,
     init: {

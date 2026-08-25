@@ -57,7 +57,8 @@ export async function aggregateDteCountAndTotal(
       start: startIso,
       end: endIso,
     })
-    .andWhere("document.status = 'EMITIDO'");
+    .andWhere("document.status = 'EMITIDO'")
+    .andWhere('document.documentType IS DISTINCT FROM 52');
 
   if (storeId) qb.andWhere('document.storeID = :storeId', { storeId });
 
@@ -119,7 +120,8 @@ export async function fetchDtePaymentBreakdown(
       from,
       to,
     })
-    .andWhere("document.status = 'EMITIDO'");
+    .andWhere("document.status = 'EMITIDO'")
+    .andWhere('document.documentType IS DISTINCT FROM 52');
 
   if (storeId) {
     qb.andWhere('document.storeID = :storeId', { storeId });
@@ -148,7 +150,8 @@ export async function fetchDteStatusBreakdown(
     .where('document.createdAt >= :from AND document.createdAt < :to', {
       from,
       to,
-    });
+    })
+    .andWhere('document.documentType IS DISTINCT FROM 52');
 
   if (storeId) {
     qb.andWhere('document.storeID = :storeId', { storeId });
@@ -224,7 +227,8 @@ export async function fetchDocumentList(
     .where('document.createdAt >= :from AND document.createdAt < :to', {
       from,
       to,
-    });
+    })
+    .andWhere('document.documentType IS DISTINCT FROM 52');
 
   if (storeId) qb.andWhere('document.storeID = :storeId', { storeId });
 

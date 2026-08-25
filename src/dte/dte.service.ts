@@ -280,6 +280,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
         ),
         document.dteDocumentID,
         this.tenantContext?.getTenantId(),
+        options?.reserveReason,
       );
       const costsChanged = costSnapshotChanged(
         document,

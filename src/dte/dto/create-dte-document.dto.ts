@@ -13,6 +13,7 @@ import {
   IsUUID,
   ValidateNested,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import {
   ApiExtraModels,
   ApiProperty,
@@ -119,6 +120,46 @@ export class DteIdDocNotaCreditoDto {
   @IsString()
   @IsIn(['1', '2', '3'])
   IndServicio?: string;
+}
+
+export class DteIdDocGuiaDto {
+  @ApiProperty({ description: 'Tipo de DTE', example: 52 })
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([52])
+  TipoDTE!: 52;
+
+  @ApiPropertyOptional({ description: 'Folio del documento', example: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  Folio?: number;
+
+  @ApiProperty({ description: 'Fecha de emisión', example: '2026-08-25' })
+  @IsDateString()
+  FchEmis!: string;
+
+  @ApiProperty({
+    description:
+      'Indicador de traslado: 1 venta, 2 venta por encargo, 3 consignación, 4 entrega gratuita, 5 traslados internos',
+    example: '1',
+  })
+  @IsString()
+  @IsIn(['1', '2', '3', '4', '5'])
+  IndTraslado!: string;
+
+  @ApiProperty({
+    description: 'Dirección de destino de la mercadería',
+    example: 'ARTURO PRAT 527 CURICO',
+  })
+  @IsString()
+  @IsNotEmpty()
+  DirDest!: string;
+
+  @ApiProperty({ description: 'Comuna de destino', example: 'Curicó' })
+  @IsString()
+  @IsNotEmpty()
+  CmnaDest!: string;
 }
 
 export class DteEmisorBoletaDto {
@@ -252,6 +293,60 @@ export class DteEmisorNotaCreditoDto {
   @ApiPropertyOptional({
     description: 'Giro comercial (estilo factura)',
     example: 'VENTA AL POR MENOR',
+  })
+  @IsOptional()
+  @IsString()
+  GiroEmis?: string;
+
+  @ApiPropertyOptional({
+    description: 'Códigos de actividad',
+    example: ['479100'],
+  })
+  @IsOptional()
+  @IsArray()
+  Acteco?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Dirección origen',
+    example: 'ARTURO PRAT 527 CURICO',
+  })
+  @IsOptional()
+  @IsString()
+  DirOrigen?: string;
+
+  @ApiPropertyOptional({ description: 'Comuna de origen', example: 'Curicó' })
+  @IsOptional()
+  @IsString()
+  CmnaOrigen?: string;
+
+  @ApiPropertyOptional({ description: 'Teléfono', example: '0 0' })
+  @IsOptional()
+  @IsString()
+  Telefono?: string;
+
+  @ApiPropertyOptional({
+    description: 'Código sucursal SII',
+    example: '81303347',
+  })
+  @IsOptional()
+  @IsString()
+  CdgSIISucur?: string;
+}
+
+export class DteEmisorGuiaDto {
+  @ApiProperty({ description: 'RUT del emisor', example: '76795561-8' })
+  @IsString()
+  @IsNotEmpty()
+  RUTEmisor!: string;
+
+  @ApiProperty({ description: 'Razón social', example: 'HAULMER SPA' })
+  @IsString()
+  @IsNotEmpty()
+  RznSoc!: string;
+
+  @ApiPropertyOptional({
+    description: 'Giro comercial del emisor',
+    example: 'VENTA AL POR MENOR POR CORREO, POR INTERNET Y VIA TELEFONICA',
   })
   @IsOptional()
   @IsString()
@@ -443,6 +538,37 @@ class DteTotalesNotaCreditoDto {
   VlrPagar?: number;
 }
 
+class DteTotalesGuiaDto {
+  @ApiPropertyOptional({ description: 'Monto neto', example: 21008 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  MntNeto?: number;
+
+  @ApiPropertyOptional({ description: 'Tasa IVA', example: '19' })
+  @IsOptional()
+  @IsString()
+  TasaIVA?: string;
+
+  @ApiPropertyOptional({ description: 'IVA', example: 3992 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  IVA?: number;
+
+  @ApiPropertyOptional({ description: 'Monto total', example: 25000 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  MntTotal?: number;
+
+  @ApiPropertyOptional({ description: 'Valor a pagar', example: 25000 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  VlrPagar?: number;
+}
+
 class DteCodigoItemDto {
   @ApiPropertyOptional({ description: 'Tipo de código', example: 'INT1' })
   @IsOptional()
@@ -574,10 +700,37 @@ export class NotaCreditoEncabezadoDto {
   Totales?: DteTotalesNotaCreditoDto;
 }
 
+export class GuiaEncabezadoDto {
+  @ApiProperty({ type: DteIdDocGuiaDto })
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => DteIdDocGuiaDto)
+  IdDoc!: DteIdDocGuiaDto;
+
+  @ApiPropertyOptional({ type: DteEmisorGuiaDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DteEmisorGuiaDto)
+  Emisor?: DteEmisorGuiaDto;
+
+  @ApiProperty({ type: DteReceptorDto })
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => DteReceptorDto)
+  Receptor!: DteReceptorDto;
+
+  @ApiPropertyOptional({ type: DteTotalesGuiaDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DteTotalesGuiaDto)
+  Totales?: DteTotalesGuiaDto;
+}
+
 export type DteEncabezadoDto =
   | BoletaEncabezadoDto
   | FacturaEncabezadoDto
-  | NotaCreditoEncabezadoDto;
+  | NotaCreditoEncabezadoDto
+  | GuiaEncabezadoDto;
 
 export class DteReferenciaDto {
   @ApiProperty({ description: 'Número de línea de referencia', example: 1 })
@@ -586,13 +739,14 @@ export class DteReferenciaDto {
   NroLinRef!: number;
 
   @ApiProperty({
-    description: 'Tipo de documento referenciado (33 factura, 39 boleta)',
+    description:
+      'Tipo de documento referenciado (33 factura, 39 boleta, 52 guía de despacho)',
     example: 39,
   })
   @Type(() => Number)
   @IsInt()
-  @IsIn([33, 39])
-  TpoDocRef!: 33 | 39;
+  @IsIn([33, 39, 52])
+  TpoDocRef!: 33 | 39 | 52;
 
   @ApiProperty({
     description: 'Folio del documento referenciado',
@@ -627,10 +781,59 @@ export class DteReferenciaDto {
   RazonRef?: string;
 }
 
+export class DteTransporteDto {
+  @ApiPropertyOptional({
+    description: 'Patente del vehículo',
+    example: 'AAAA11',
+  })
+  @IsOptional()
+  @IsString()
+  Patente?: string;
+
+  @ApiPropertyOptional({
+    description: 'RUT del transportista o conductor',
+    example: '76123456-7',
+  })
+  @IsOptional()
+  @IsString()
+  RUTTrans?: string;
+
+  @ApiPropertyOptional({
+    description: 'Nombre del transportista o conductor',
+    example: 'TRANSPORTES CHILE',
+  })
+  @IsOptional()
+  @IsString()
+  NombreTrans?: string;
+
+  @ApiPropertyOptional({
+    description: 'Dirección de destino',
+    example: 'ARTURO PRAT 527 CURICO',
+  })
+  @IsOptional()
+  @IsString()
+  DirDest?: string;
+
+  @ApiPropertyOptional({ description: 'Comuna de destino', example: 'Curicó' })
+  @IsOptional()
+  @IsString()
+  CmnaDest?: string;
+
+  @ApiPropertyOptional({
+    description: 'Fecha de traslado',
+    example: '2026-08-25',
+  })
+  @IsOptional()
+  @IsDateString()
+  FechaTraslado?: string;
+}
+
 @ApiExtraModels(
   BoletaEncabezadoDto,
   FacturaEncabezadoDto,
   NotaCreditoEncabezadoDto,
+  GuiaEncabezadoDto,
+  DteReferenciaDto,
 )
 export class DteDto {
   @ApiProperty({
@@ -638,6 +841,7 @@ export class DteDto {
       { $ref: getSchemaPath(BoletaEncabezadoDto) },
       { $ref: getSchemaPath(FacturaEncabezadoDto) },
       { $ref: getSchemaPath(NotaCreditoEncabezadoDto) },
+      { $ref: getSchemaPath(GuiaEncabezadoDto) },
     ],
   })
   @IsDefined()
@@ -651,6 +855,7 @@ export class DteDto {
     const tipoDTE = Number(encabezado?.IdDoc?.TipoDTE);
     if (tipoDTE === 39) return BoletaEncabezadoDto;
     if (tipoDTE === 61) return NotaCreditoEncabezadoDto;
+    if (tipoDTE === 52) return GuiaEncabezadoDto;
     return FacturaEncabezadoDto;
   })
   Encabezado!: DteEncabezadoDto;
@@ -661,11 +866,35 @@ export class DteDto {
   @Type(() => DteDetalleItemDto)
   Detalle!: DteDetalleItemDto[];
 
-  @ApiPropertyOptional({ type: DteReferenciaDto })
+  @ApiPropertyOptional({
+    oneOf: [
+      { $ref: getSchemaPath(DteReferenciaDto) },
+      {
+        type: 'array',
+        items: { $ref: getSchemaPath(DteReferenciaDto) },
+      },
+    ],
+    description:
+      'Referencia a uno o más documentos (factura, boleta o guía de despacho). Se normaliza a array.',
+  })
+  @IsOptional()
+  @IsArray()
+  @Transform(({ value }: { value: unknown }): unknown[] | undefined => {
+    if (value === undefined || value === null) return undefined;
+    return Array.isArray(value) ? value : [value];
+  })
+  @ValidateNested({ each: true })
+  @Type(() => DteReferenciaDto)
+  Referencia?: DteReferenciaDto[];
+
+  @ApiPropertyOptional({
+    description: 'Transporte para guías de despacho (DTE 52)',
+    type: DteTransporteDto,
+  })
   @IsOptional()
   @ValidateNested()
-  @Type(() => DteReferenciaDto)
-  Referencia?: DteReferenciaDto;
+  @Type(() => DteTransporteDto)
+  Transporte?: DteTransporteDto;
 }
 
 class DteCustomerDto {

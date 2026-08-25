@@ -52,6 +52,10 @@ export class FinancialMovementsService {
     );
 
     if (dte.status !== DteDocumentStatus.EMITIDO) return;
+    // La Guía de Despacho (52) no registra movimientos financieros: solo
+    // respalda el traslado de mercadería. La factura/boleta que la referencia
+    // es quien registra ingreso y COGS.
+    if (dte.documentType === 52) return;
 
     // Solo 61 (nota de crédito) invierte el signo; 33/39/56 o nulo son ingresos.
     const sign = dte.documentType === 61 ? -1 : 1;

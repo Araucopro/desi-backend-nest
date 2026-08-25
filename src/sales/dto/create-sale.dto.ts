@@ -13,6 +13,7 @@ import {
   Max,
   Min,
   ValidateNested,
+  ArrayUnique,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { SalePaymentType, SaleType } from '../entities/sale.entity';
@@ -145,4 +146,16 @@ export class CreateSaleDto {
   @Min(0)
   @Max(100)
   manualDiscount?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'IDs de guías de despacho (DTE 52) EMITIDA que respaldan el traslado. La factura/boleta las referencia sin volver a reservar stock',
+    type: [String],
+    example: ['550e8400-e29b-41d4-a716-446655440000'],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  dispatchGuideIDs?: string[];
 }

@@ -18,6 +18,10 @@ import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { InventoryService } from '../inventory/inventory.service';
+import { DispatchGuide } from '../dispatch-guides/entities/dispatch-guide.entity';
+import { DispatchGuideReference } from '../dispatch-guides/entities/dispatch-guide-reference.entity';
+import { findEmittedDispatchGuides } from '../dispatch-guides/dispatch-guides-repository.helpers';
+import { validateDispatchGuideCoverage } from '../dispatch-guides/dispatch-guides-engine';
 import { Sale, SaleStatus, SaleType } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
@@ -109,6 +113,11 @@ export class SalesService {
     dto: CreateSaleDto,
     userId?: string,
   ) {
+    if (dto.saleType === SaleType.NOTA_VENTA && dto.dispatchGuideIDs?.length) {
+      throw new BadRequestException(
+        'Las guías de despacho solo pueden referenciarse en boletas o facturas electrónicas',
+      );
+    }
     if (dto.saleType === SaleType.NOTA_VENTA) {
       return this.createNotaVenta(storeID, idempotencyKey, dto, userId);
     }
@@ -224,6 +233,27 @@ export class SalesService {
       findStoreById(manager, storeID),
     );
 
+    let dispatchGuides: DispatchGuide[] = [];
+    if (dto.dispatchGuideIDs?.length) {
+      dispatchGuides = await this.runInTransaction((manager) =>
+        findEmittedDispatchGuides(manager, storeID, dto.dispatchGuideIDs!),
+      );
+      if (dispatchGuides.length !== dto.dispatchGuideIDs.length) {
+        throw new BadRequestException(
+          'Una o más guías de despacho no existen, no pertenecen a la tienda o no están EMITIDA',
+        );
+      }
+      validateDispatchGuideCoverage(dispatchGuides, prepared.items);
+    }
+
+    const references = dispatchGuides.map((guide, index) => ({
+      NroLinRef: index + 1,
+      TpoDocRef: 52 as const,
+      FolioRef: guide.folio ?? 0,
+      FchRef: new Date(guide.issueDate).toISOString().slice(0, 10),
+      RazonRef: 'Guía de despacho',
+    }));
+
     const dteDto = this.dteMapperService.mapSaleToDte(
       {
         saleType: prepared.saleType,
@@ -236,7 +266,10 @@ export class SalesService {
         taxTotal: prepared.taxTotal,
         store,
       },
-      { documentType },
+      {
+        documentType,
+        ...(references.length ? { references } : {}),
+      },
     );
 
     const dteResponse = await this.dteService.create(
@@ -244,7 +277,10 @@ export class SalesService {
       idempotencyKey,
       dteDto,
       {
-        reserveStock: true,
+        reserveStock: dto.dispatchGuideIDs?.length ? false : true,
+        ...(dto.dispatchGuideIDs?.length
+          ? { cogsTotalOverride: prepared.cogsTotal }
+          : {}),
         paymentType: toDtePaymentType(prepared.paymentType),
       },
     );
@@ -329,6 +365,19 @@ export class SalesService {
       await manager.save(
         createSaleItems(manager, tenantID, saleID, prepared.items),
       );
+
+      if (dto.dispatchGuideIDs?.length) {
+        await manager.save(
+          dto.dispatchGuideIDs.map((dispatchGuideID) =>
+            manager.create(DispatchGuideReference, {
+              tenantID,
+              dispatchGuideID,
+              dteDocumentID: dteResponse.dteDocumentID,
+              saleID,
+            }),
+          ),
+        );
+      }
 
       return loadSale(manager, saleID);
     });

@@ -91,6 +91,7 @@ export class InventoryService {
     items: StockReservationItem[],
     referenceID: string,
     tenantID: string | undefined,
+    reason: InventoryMovementReason = InventoryMovementReason.SALE,
   ): Promise<number> {
     return reserveStockAndSnapshotCostsHelper(
       manager,
@@ -98,6 +99,7 @@ export class InventoryService {
       items,
       referenceID,
       tenantID,
+      reason,
     );
   }
 

@@ -11,6 +11,7 @@ import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
 import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { InventoryService } from '../inventory/inventory.service';
+import { DispatchGuide } from '../dispatch-guides/entities/dispatch-guide.entity';
 import {
   DteDocument,
   DteDocumentPaymentType,
@@ -23,6 +24,7 @@ function createManagerMock(
     folioCounter?: Partial<SaleFolioCounter> | null;
     stock?: number;
     storeHasOpenfacturaKey?: boolean;
+    dispatchGuides?: any[];
   } = {},
 ) {
   const store = {
@@ -56,6 +58,7 @@ function createManagerMock(
     initial.folioCounter ?? null;
   const savedSales: Array<Partial<Sale>> = [];
   const savedItems: Array<Partial<SaleItem>> = [];
+  const dispatchGuides: any[] = initial.dispatchGuides ?? [];
 
   function findSale(options?: { where?: Record<string, unknown> }) {
     const where = options?.where ?? {};
@@ -145,11 +148,23 @@ function createManagerMock(
           }),
         };
       }
+      if (entity === DispatchGuide) {
+        return {
+          find: jest.fn(async () => dispatchGuides),
+        };
+      }
       return {};
     }),
   };
 
-  return { manager, storeProduct, sale: () => sale, savedSales, savedItems };
+  return {
+    manager,
+    storeProduct,
+    sale: () => sale,
+    savedSales,
+    savedItems,
+    dispatchGuides,
+  };
 }
 
 describe('SalesService', () => {
@@ -175,26 +190,35 @@ describe('SalesService', () => {
     jest.clearAllMocks();
     ctx = createManagerMock();
     dataSource = { transaction: jest.fn((cb) => cb(ctx.manager)) };
-    pricingService.calculateCart.mockResolvedValue({
-      items: [
-        {
-          storeProductID: 'sp-1',
-          variationID: 'var-1',
-          productID: 'product-1',
-          productName: 'Producto A',
-          sku: 'SKU-1',
-          quantity: 1,
-          finalUnitPrice: 1190,
-          unitCost: 400,
-          lineTotal: 1190,
-          basePrice: 1190,
-          discountsApplied: [],
-          breakdown: [],
-        },
-      ],
-      totals: { subtotal: 1190, discount: 0, total: 1190 },
-      pricingContext: { storeID: 'store-1' },
-    });
+    pricingService.calculateCart.mockImplementation(
+      async (input: { items?: Array<{ quantity?: number }> }) => {
+        const quantity = input.items?.[0]?.quantity ?? 1;
+        return {
+          items: [
+            {
+              storeProductID: 'sp-1',
+              variationID: 'var-1',
+              productID: 'product-1',
+              productName: 'Producto A',
+              sku: 'SKU-1',
+              quantity,
+              finalUnitPrice: 1190,
+              unitCost: 400,
+              lineTotal: 1190 * quantity,
+              basePrice: 1190 * quantity,
+              discountsApplied: [],
+              breakdown: [],
+            },
+          ],
+          totals: {
+            subtotal: 1190 * quantity,
+            discount: 0,
+            total: 1190 * quantity,
+          },
+          pricingContext: { storeID: 'store-1' },
+        };
+      },
+    );
     dteService.create.mockResolvedValue({
       dteDocumentID: 'dte-1',
       TOKEN: 'token-1',
@@ -404,6 +428,112 @@ describe('SalesService', () => {
       FOLIO: 123,
       STATUS: DteDocumentStatus.EMITIDO,
     });
+  });
+
+  it('emits a factura referencing dispatch guides without reserving stock and persists the references', async () => {
+    ctx = createManagerMock({
+      dispatchGuides: [
+        {
+          dispatchGuideID: 'dg-1',
+          storeID: 'store-1',
+          status: 'EMITIDA',
+          folio: 100,
+          issueDate: new Date('2026-08-25T00:00:00.000Z'),
+          items: [
+            {
+              variationID: 'var-1',
+              quantity: 1,
+            },
+          ],
+        },
+      ],
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+    const service = createService();
+    const dto = {
+      saleType: SaleType.FACTURA,
+      paymentType: SalePaymentType.CASH,
+      receiver: { rut: '66666666-6', name: 'Cliente SpA' },
+      items: [{ storeProductID: 'sp-1', quantity: 1 }],
+      dispatchGuideIDs: ['dg-1'],
+    };
+
+    const result = await service.create('store-1', undefined, dto as any);
+
+    expect(dteMapperService.mapSaleToDte).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        documentType: 33,
+        references: [
+          {
+            NroLinRef: 1,
+            TpoDocRef: 52,
+            FolioRef: 100,
+            FchRef: '2026-08-25',
+            RazonRef: 'Guía de despacho',
+          },
+        ],
+      },
+    );
+    expect(dteService.create).toHaveBeenCalledWith(
+      'store-1',
+      undefined,
+      {},
+      {
+        reserveStock: false,
+        cogsTotalOverride: 400,
+        paymentType: DteDocumentPaymentType.CASH,
+      },
+    );
+    expect(ctx.storeProduct.stock).toBe(10);
+    expect(ctx.sale()).toMatchObject({
+      saleType: SaleType.FACTURA,
+      dteDocumentID: 'dte-1',
+    });
+    expect(
+      ctx.savedSales.some(
+        (record) =>
+          (record as { dteDocumentID?: string }).dteDocumentID === 'dte-1',
+      ),
+    ).toBe(true);
+    expect(result.dte).toMatchObject({
+      dteDocumentID: 'dte-1',
+      STATUS: DteDocumentStatus.EMITIDO,
+    });
+  });
+
+  it('rejects a sale when dispatch guide coverage is insufficient', async () => {
+    ctx = createManagerMock({
+      dispatchGuides: [
+        {
+          dispatchGuideID: 'dg-1',
+          storeID: 'store-1',
+          status: 'EMITIDA',
+          folio: 100,
+          issueDate: new Date('2026-08-25T00:00:00.000Z'),
+          items: [
+            {
+              variationID: 'var-1',
+              quantity: 1,
+            },
+          ],
+        },
+      ],
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+    const service = createService();
+    const dto = {
+      saleType: SaleType.FACTURA,
+      paymentType: SalePaymentType.CASH,
+      receiver: { rut: '66666666-6', name: 'Cliente SpA' },
+      items: [{ storeProductID: 'sp-1', quantity: 2 }],
+      dispatchGuideIDs: ['dg-1'],
+    };
+
+    await expect(
+      service.create('store-1', undefined, dto as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(dteService.create).not.toHaveBeenCalled();
   });
 
   it('rejects a factura without receiver before calling DTE', async () => {

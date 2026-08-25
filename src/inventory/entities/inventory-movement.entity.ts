@@ -17,6 +17,7 @@ export enum InventoryMovementReason {
   TRANSFER_IN = 'TRANSFER_IN',
   TRANSFER_OUT = 'TRANSFER_OUT',
   RETURN = 'RETURN',
+  DISPATCH_GUIDE = 'DISPATCH_GUIDE',
 }
 
 @Entity({ name: 'InventoryMovements' })

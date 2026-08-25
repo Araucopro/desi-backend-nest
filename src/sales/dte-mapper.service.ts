@@ -7,6 +7,7 @@ import {
 } from './entities/sale.entity';
 import {
   CreateDteDocumentDto,
+  DteReferenciaDto,
   DteResponseValue,
 } from '../dte/dto/create-dte-document.dto';
 
@@ -58,7 +59,10 @@ export class DteMapperService {
 
   mapSaleToDte(
     sale: SaleDteInput,
-    options: { documentType: 39 | 33 },
+    options: {
+      documentType: 39 | 33;
+      references?: DteReferenciaDto[];
+    },
   ): CreateDteDocumentDto {
     const documentType = options.documentType;
     const isBoleta = documentType === 39;
@@ -176,6 +180,9 @@ export class DteMapperService {
       dte: {
         Encabezado: encabezado,
         Detalle: detalle,
+        ...(options.references?.length
+          ? { Referencia: options.references }
+          : {}),
       },
       customer: {
         fullName: sale.receiver?.name,

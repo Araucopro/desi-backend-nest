@@ -10,6 +10,8 @@ import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
 import { InventoryMovement } from '../inventory/entities/inventory-movement.entity';
+import { DispatchGuide } from '../dispatch-guides/entities/dispatch-guide.entity';
+import { DispatchGuideReference } from '../dispatch-guides/entities/dispatch-guide-reference.entity';
 import { InventoryModule } from '../inventory/inventory.module';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 import { PricingModule } from '../pricing/pricing.module';
@@ -27,6 +29,8 @@ import { TransactionRunnerService } from '../common/services/transaction-runner.
       StoreProduct,
       ProductVariation,
       InventoryMovement,
+      DispatchGuide,
+      DispatchGuideReference,
     ]),
     MultitenantModule,
     PricingModule,

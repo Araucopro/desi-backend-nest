@@ -172,14 +172,16 @@ export class ReturnDteMapperService {
       dte: {
         Encabezado: encabezado,
         Detalle: detalle,
-        Referencia: {
-          NroLinRef: 1,
-          TpoDocRef: originalDocumentType,
-          FolioRef: originalFolio,
-          FchRef: this.toDateOnly(sale.issueDate),
-          CodRef: this.codRef(ret.returnType),
-          RazonRef: ret.reason ?? 'Devolución',
-        },
+        Referencia: [
+          {
+            NroLinRef: 1,
+            TpoDocRef: originalDocumentType,
+            FolioRef: originalFolio,
+            FchRef: this.toDateOnly(sale.issueDate),
+            CodRef: this.codRef(ret.returnType),
+            RazonRef: ret.reason ?? 'Devolución',
+          },
+        ],
       },
       customer: {
         fullName: sale.receiver?.name,

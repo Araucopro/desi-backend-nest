@@ -98,6 +98,29 @@ describe('FinancialMovementsService', () => {
     ]);
   });
 
+  it('does not register income or COGS for guía de despacho 52', async () => {
+    const dte = {
+      dteDocumentID: 'dte-52',
+      tenantID: 'tenant-1',
+      storeID: 'store-1',
+      issueDate: new Date('2026-01-15'),
+      status: DteDocumentStatus.EMITIDO,
+      documentType: 52,
+      netTotal: 2000,
+      taxTotal: 380,
+      cogsTotal: 800,
+    };
+
+    await service.recordDte(manager as any, dte as any);
+
+    expect(manager.delete).toHaveBeenCalledWith(FinancialMovement, {
+      sourceType: FinancialMovementSourceType.DTE_DOCUMENT,
+      sourceID: 'dte-52',
+    });
+    expect(manager.create).not.toHaveBeenCalled();
+    expect(manager.save).not.toHaveBeenCalled();
+  });
+
   it('does not record movements when the DTE is not EMITIDO', async () => {
     const dte = {
       dteDocumentID: 'dte-3',

@@ -128,13 +128,15 @@ describe('ReturnDteMapperService', () => {
       MntTotal: 1190,
       VlrPagar: 1190,
     });
-    expect(dto.dte.Referencia).toMatchObject({
-      NroLinRef: 1,
-      TpoDocRef: 39,
-      FolioRef: 1024,
-      FchRef: '2026-08-18',
-      CodRef: '6',
-    });
+    expect(dto.dte.Referencia).toMatchObject([
+      {
+        NroLinRef: 1,
+        TpoDocRef: 39,
+        FolioRef: 1024,
+        FchRef: '2026-08-18',
+        CodRef: '6',
+      },
+    ]);
   });
 
   it('mapea una NCE 61 de factura con precios netos y receptor original', () => {
@@ -177,10 +179,12 @@ describe('ReturnDteMapperService', () => {
       MntTotal: 1190,
       MontoPeriodo: 1190,
     });
-    expect(dto.dte.Referencia).toMatchObject({
-      TpoDocRef: 33,
-      FolioRef: 2048,
-    });
+    expect(dto.dte.Referencia).toMatchObject([
+      {
+        TpoDocRef: 33,
+        FolioRef: 2048,
+      },
+    ]);
   });
 
   it('mapea DESCUENTO como línea de motivo sin SKU', () => {
@@ -202,6 +206,6 @@ describe('ReturnDteMapperService', () => {
       MontoItem: 595,
     });
     expect(dto.dte.Detalle[0]).not.toHaveProperty('CdgItem');
-    expect(dto.dte.Referencia).toMatchObject({ CodRef: '4' });
+    expect(dto.dte.Referencia).toMatchObject([{ CodRef: '4' }]);
   });
 });
