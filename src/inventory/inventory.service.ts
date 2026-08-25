@@ -40,8 +40,15 @@ export class InventoryService {
   async createMovement(
     createInventoryMovementDto: CreateInventoryMovementDto,
   ): Promise<InventoryMovement> {
-    const { storeID, variationID, quantity, newStock, reason, referenceID } =
-      createInventoryMovementDto;
+    const {
+      storeID,
+      variationID,
+      quantity,
+      newStock,
+      reason,
+      referenceID,
+      condition,
+    } = createInventoryMovementDto;
 
     return this.runInTransaction(async (manager) => {
       const { movement } = await this.applyMovement(manager, {
@@ -58,6 +65,7 @@ export class InventoryService {
         createIfMissing:
           reason !== InventoryMovementReason.SALE &&
           reason !== InventoryMovementReason.TRANSFER_OUT,
+        condition,
       });
 
       if (!movement) {

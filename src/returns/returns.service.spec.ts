@@ -8,6 +8,7 @@ import {
 import { DteDocumentStatus } from '../dte/entities/dte-document.entity';
 import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
 import { Return, ReturnStatus, ReturnType } from './entities/return.entity';
+import { ReturnItemCondition } from './entities/return-item.entity';
 import { ReturnFolioCounter } from './entities/return-folio-counter.entity';
 import { ReturnsService } from './returns.service';
 
@@ -171,6 +172,7 @@ function createContext() {
     create: jest.fn(),
     reconcile: jest.fn(),
     registerFinalizedListener: jest.fn(),
+    registerFailedListener: jest.fn(),
   };
   const mapper = {
     mapReturnToNce: jest.fn().mockReturnValue({}),
@@ -286,7 +288,7 @@ describe('ReturnsService', () => {
     const result = await ctx.service.approve('ret-1', 'store-1', 'admin-1');
 
     expect(ctx.mapper.mapReturnToNce).toHaveBeenCalledWith(
-      expect.objectContaining({ originalDocumentType: 39 }),
+      expect.objectContaining({ originalDocumentType: 39, codRef: '6' }),
     );
     expect(ctx.dteService.create).toHaveBeenCalledWith(
       'store-1',
@@ -353,6 +355,108 @@ describe('ReturnsService', () => {
     expect(
       ctx.financialMovementsService.recordReturnForSaleNote,
     ).not.toHaveBeenCalled();
+  });
+
+  it('vuelve APROBADA a PENDIENTE y limpia la aprobación cuando el DTE falla', async () => {
+    const ctx = createContext();
+    let failedListener:
+      | ((manager: unknown, document: unknown) => Promise<void>)
+      | undefined;
+    ctx.dteService.registerFailedListener.mockImplementation(
+      (fn: typeof failedListener) => {
+        failedListener = fn;
+      },
+    );
+    ctx.service.onModuleInit();
+
+    ctx.setReturn({
+      status: ReturnStatus.APROBADA,
+      dteDocumentID: 'dte-10',
+      approvedBy: 'admin-1',
+      approvedAt: new Date('2026-08-25T10:00:00Z'),
+    } as Partial<Return>);
+
+    await failedListener!(ctx.manager, {
+      status: DteDocumentStatus.ERROR,
+      dteDocumentID: 'dte-10',
+      idempotencyKey: 'ret-1',
+    });
+
+    expect(ctx.ret().status).toBe(ReturnStatus.PENDIENTE);
+    expect(ctx.ret().approvedBy).toBeNull();
+    expect(ctx.ret().approvedAt).toBeNull();
+    expect(ctx.ret().dteDocumentID).toBe('dte-10');
+    expect(ctx.inventoryService.applyMovement).not.toHaveBeenCalled();
+  });
+
+  it('reconcilia ERROR sin propagar 502 y permite re-aprobar sobre la misma fila', async () => {
+    const ctx = createContext();
+    ctx.setSale({
+      saleType: SaleType.BOLETA,
+      dteDocumentID: 'dte-original',
+      dteDocument: {
+        documentType: 39,
+        folio: 100,
+      } as any,
+    });
+    ctx.setReturn({
+      status: ReturnStatus.APROBADA,
+      dteDocumentID: 'dte-10',
+      approvedBy: 'admin-1',
+      approvedAt: new Date('2026-08-25T10:00:00Z'),
+    } as Partial<Return>);
+    ctx.dteService.reconcile.mockImplementation(async () => {
+      // Simula el listener de fallo ya commiteado dentro de reconcile.
+      ctx.setReturn({
+        status: ReturnStatus.PENDIENTE,
+        approvedBy: null,
+        approvedAt: null,
+      } as Partial<Return>);
+      throw new BadGatewayException('Openfactura reportó estado ERROR');
+    });
+
+    const reconciled = await ctx.service.reconcile('ret-1', 'store-1');
+    expect(reconciled.ret.status).toBe(ReturnStatus.PENDIENTE);
+    expect(ctx.ret().dteDocumentID).toBe('dte-10');
+
+    ctx.dteService.create.mockResolvedValue({
+      dteDocumentID: 'dte-10',
+      TOKEN: 'token-new',
+      FOLIO: 300,
+      STATUS: DteDocumentStatus.EMITIDO,
+    });
+    const result = await ctx.service.approve('ret-1', 'store-1', 'admin-1');
+    expect(ctx.ret().status).toBe(ReturnStatus.COMPLETADA);
+    expect(ctx.ret().dteDocumentID).toBe('dte-10');
+    expect(ctx.dteService.create).toHaveBeenCalledWith(
+      'store-1',
+      'ret-1',
+      {},
+      { reserveStock: false, cogsTotalOverride: 400 },
+    );
+    expect(result.dte).toMatchObject({ dteDocumentID: 'dte-10' });
+  });
+
+  it('reintegra ítem DEFECTIVE al bucket de stock defectuoso', async () => {
+    const ctx = createContext();
+    ctx.setReturn({
+      items: [
+        {
+          ...ctx.ret().items![0],
+          condition: ReturnItemCondition.DEFECTIVE,
+        },
+      ],
+    } as Partial<Return>);
+
+    await ctx.service.approve('ret-1', 'store-1', 'admin-1');
+
+    expect(ctx.inventoryService.applyMovement).toHaveBeenCalledWith(
+      ctx.manager,
+      expect.objectContaining({
+        reason: InventoryMovementReason.RETURN,
+        condition: ReturnItemCondition.DEFECTIVE,
+      }),
+    );
   });
 
   it('reconcilia una NCE pendiente y completa el retorno', async () => {

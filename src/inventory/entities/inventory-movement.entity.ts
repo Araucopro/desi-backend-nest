@@ -9,6 +9,7 @@ import {
 import { ApiProperty } from '@nestjs/swagger';
 import { Store } from '../../stores/entities/store.entity';
 import { ProductVariation } from '../../products/entities/product-variation.entity';
+import { ReturnItemCondition } from '../../returns/entities/return-item.entity';
 
 export enum InventoryMovementReason {
   SALE = 'SALE',
@@ -67,6 +68,21 @@ export class InventoryMovement {
   })
   @Column({ type: 'varchar', nullable: true })
   referenceID?: string;
+
+  @ApiProperty({
+    description:
+      'Condición del stock afectado: SELLABLE o DEFECTIVE. Null en movimientos que no distinguen condición',
+    enum: ReturnItemCondition,
+    example: ReturnItemCondition.SELLABLE,
+    required: false,
+    nullable: true,
+  })
+  @Column({
+    type: 'enum',
+    enum: ReturnItemCondition,
+    nullable: true,
+  })
+  condition!: ReturnItemCondition | null;
 
   @ApiProperty({
     description: 'Fecha y hora del movimiento',

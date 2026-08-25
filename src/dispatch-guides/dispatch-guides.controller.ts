@@ -92,7 +92,7 @@ export class DispatchGuidesController {
   @ApiQuery({
     name: 'status',
     required: false,
-    enum: ['PENDIENTE', 'EMITIDA', 'ANULADA'],
+    enum: ['PENDIENTE', 'EMITIDA', 'ANULACION_PENDIENTE', 'ANULADA'],
   })
   @ApiQuery({ name: 'from', required: false })
   @ApiQuery({ name: 'to', required: false })
@@ -123,7 +123,7 @@ export class DispatchGuidesController {
   @ApiOperation({
     summary: 'Reconciliar guía de despacho pendiente',
     description:
-      'Reintenta la emisión del DTE 52 contra Openfactura. Si el documento quedó en ERROR o sin token, vuelve a llamar a DteService.create con el payload persistido.',
+      'Reintenta la emisión del DTE 52 contra Openfactura para guías PENDIENTE, o completa la anulación para guías ANULACION_PENDIENTE.',
   })
   @ApiParam({ name: 'dispatchGuideID', description: 'UUID de la guía' })
   @ApiResponse({ status: 200, type: DispatchGuideResponseDto })
@@ -139,7 +139,7 @@ export class DispatchGuidesController {
   @ApiOperation({
     summary: 'Anular guía de despacho',
     description:
-      'Llama a anularDTE52 en Openfactura, marca la guía ANULADA y revierte el stock reservado (movimiento ADJUSTMENT positivo) en la misma transacción. Bloqueada si la guía ya está referenciada por una factura/boleta.',
+      'Marca la guía ANULACION_PENDIENTE, llama a anularDTE52 en Openfactura y, al confirmar, la marca ANULADA revirtiendo el stock reservado. Bloqueada si la guía ya está referenciada por una factura/boleta. Si Openfactura falla, la guía queda ANULACION_PENDIENTE para completar vía reconcile.',
   })
   @ApiParam({ name: 'dispatchGuideID', description: 'UUID de la guía' })
   @ApiResponse({ status: 200, type: DispatchGuideResponseDto })

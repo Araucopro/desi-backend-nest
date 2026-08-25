@@ -224,6 +224,7 @@ export function createReturnItems(
       unitPrice: item.unitPrice,
       unitCost: item.unitCost,
       lineTotal: item.lineTotal,
+      condition: item.condition,
     }),
   );
 }

@@ -6,6 +6,7 @@ import {
   SaleType,
 } from '../sales/entities/sale.entity';
 import { Return, ReturnStatus, ReturnType } from './entities/return.entity';
+import { ReturnItemCondition } from './entities/return-item.entity';
 import {
   calculateAvailableQuantities,
   calculateMonetaryCap,
@@ -107,8 +108,12 @@ function ret(overrides: Partial<Return> = {}): Return {
 
 describe('returns-engine', () => {
   it('resolves nota de venta sin DTE como retorno interno', () => {
-    const effective = resolveEffectiveDocument(sale());
-    expect(effective).toEqual({ requiresNce: false, documentType: null });
+    const effective = resolveEffectiveDocument(sale(), ReturnType.PARCIAL);
+    expect(effective).toEqual({
+      requiresNce: false,
+      documentType: null,
+      codRef: null,
+    });
   });
 
   it('resolves una nota de venta convertida como DTE boleta/factura', () => {
@@ -116,10 +121,29 @@ describe('returns-engine', () => {
       dteDocumentID: 'dte-1',
       dteDocument: { documentType: 33 } as any,
     });
-    expect(resolveEffectiveDocument(converted)).toEqual({
+    expect(resolveEffectiveDocument(converted, ReturnType.PARCIAL)).toEqual({
       requiresNce: true,
       documentType: 33,
+      codRef: '6',
     });
+  });
+
+  it('mapea codRef SII por tipo de devolución', () => {
+    const dteSale = sale({
+      saleType: SaleType.BOLETA,
+      dteDocumentID: 'dte-1',
+      dteDocument: { documentType: 39 } as any,
+    });
+
+    expect(resolveEffectiveDocument(dteSale, ReturnType.TOTAL).codRef).toBe(
+      '1',
+    );
+    expect(resolveEffectiveDocument(dteSale, ReturnType.PARCIAL).codRef).toBe(
+      '6',
+    );
+    expect(resolveEffectiveDocument(dteSale, ReturnType.DESCUENTO).codRef).toBe(
+      '4',
+    );
   });
 
   it('calcula saldo devolvible restando devoluciones activas', () => {
@@ -147,6 +171,62 @@ describe('returns-engine', () => {
     expect(prepared.total).toBe(1190);
     expect(prepared.cogsTotal).toBe(400);
     expect(prepared.netTotal).toBe(1000);
+  });
+
+  it('redondea lineTotal a CLP entero aunque el precio unitario tenga centavos', () => {
+    const centsSale = sale();
+    (centsSale.items as any)[0].unitPrice = 1190.6;
+    (centsSale.items as any)[0].lineTotal = 1190.6;
+
+    const prepared = validateReturnRequest({
+      sale: centsSale,
+      storeID: 'store-1',
+      returnType: ReturnType.PARCIAL,
+      items: [{ saleItemID: 'sale-item-1', quantity: 1 }],
+      activeReturns: [],
+    });
+
+    expect(prepared.items[0].lineTotal).toBe(1191);
+    expect(prepared.total).toBe(1191);
+    expect(prepared.items[0].lineTotal).toBe(
+      Math.round(Number(prepared.total)),
+    );
+  });
+
+  it('propaga condition por defecto SELLABLE y acepta DEFECTIVE explícito', () => {
+    const twoItemSale = sale();
+    (twoItemSale.items as any[]).push({
+      saleItemID: 'sale-item-2',
+      tenantID: 'tenant-1',
+      saleID: 'sale-1',
+      storeProductID: 'sp-2',
+      variationID: 'var-2',
+      productName: 'Producto B',
+      sku: 'SKU-2',
+      quantity: 1,
+      unitPrice: 500,
+      unitCost: 100,
+      lineTotal: 500,
+      createdAt: new Date(),
+    });
+
+    const prepared = validateReturnRequest({
+      sale: twoItemSale,
+      storeID: 'store-1',
+      returnType: ReturnType.PARCIAL,
+      items: [
+        { saleItemID: 'sale-item-1', quantity: 1 },
+        {
+          saleItemID: 'sale-item-2',
+          quantity: 1,
+          condition: ReturnItemCondition.DEFECTIVE,
+        },
+      ],
+      activeReturns: [],
+    });
+
+    expect(prepared.items[0].condition).toBe(ReturnItemCondition.SELLABLE);
+    expect(prepared.items[1].condition).toBe(ReturnItemCondition.DEFECTIVE);
   });
 
   it('rechaza una devolución TOTAL sin el saldo completo', () => {

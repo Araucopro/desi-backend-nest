@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Store } from '../stores/entities/store.entity';
+import { roundClp } from '../common/utils/money.util';
 import {
   CreateDteDocumentDto,
   DteResponseValue,
@@ -13,6 +14,8 @@ import { PreparedDispatchGuideItem, TAX_RATE } from './dispatch-guides-engine';
 
 export type DispatchGuideDteInput = {
   issueDate: Date;
+  indTraslado: string;
+  includePrices: boolean;
   receiver: DispatchGuideReceiver;
   destination: DispatchGuideDestination;
   transport: DispatchGuideTransport | null;
@@ -35,10 +38,6 @@ export type DispatchGuideDteInput = {
  */
 @Injectable()
 export class DispatchGuideDteMapperService {
-  private toInteger(value: number): number {
-    return Math.round(value);
-  }
-
   private toDateOnly(value: Date): string {
     const date = new Date(value);
     return Number.isNaN(date.getTime())
@@ -49,21 +48,26 @@ export class DispatchGuideDteMapperService {
   mapDispatchGuideToDte(input: DispatchGuideDteInput): CreateDteDocumentDto {
     const { store, receiver, destination, transport } = input;
 
-    const detalle = input.items.map((item, index) => ({
-      NroLinDet: index + 1,
-      NmbItem: item.productName,
-      QtyItem: item.quantity,
-      PrcItem: this.toInteger(item.unitPrice / (1 + TAX_RATE)),
-      MontoItem: this.toInteger(item.lineTotal / (1 + TAX_RATE)),
-      CdgItem: {
-        TpoCodigo: 'INT1',
-        VlrCodigo: item.sku,
-      },
-    }));
+    const detalle = input.items.map((item, index) => {
+      const includePrices = input.includePrices;
+      return {
+        NroLinDet: index + 1,
+        NmbItem: item.productName,
+        QtyItem: item.quantity,
+        PrcItem: includePrices ? roundClp(item.unitPrice / (1 + TAX_RATE)) : 0,
+        MontoItem: includePrices
+          ? roundClp(item.lineTotal / (1 + TAX_RATE))
+          : 0,
+        CdgItem: {
+          TpoCodigo: 'INT1',
+          VlrCodigo: item.sku,
+        },
+      };
+    });
 
-    const mntTotal = this.toInteger(input.total);
-    const mntNeto = this.toInteger(input.netTotal);
-    const iva = this.toInteger(input.taxTotal);
+    const mntTotal = roundClp(input.total);
+    const mntNeto = roundClp(input.netTotal);
+    const iva = roundClp(input.taxTotal);
 
     const dte: CreateDteDocumentDto['dte'] = {
       Encabezado: {
@@ -71,7 +75,7 @@ export class DispatchGuideDteMapperService {
           TipoDTE: 52 as const,
           Folio: 0,
           FchEmis: this.toDateOnly(input.issueDate),
-          IndTraslado: '1',
+          IndTraslado: input.indTraslado,
           DirDest: destination.address,
           CmnaDest: destination.city,
         },
@@ -99,13 +103,20 @@ export class DispatchGuideDteMapperService {
           ...(receiver.address ? { DirRecep: receiver.address } : {}),
           ...(receiver.city ? { CmnaRecep: receiver.city } : {}),
         },
-        Totales: {
-          MntNeto: mntNeto,
-          TasaIVA: '19',
-          IVA: iva,
-          MntTotal: mntTotal,
-          VlrPagar: mntTotal,
-        },
+        Totales: input.includePrices
+          ? {
+              MntNeto: mntNeto,
+              TasaIVA: '19',
+              IVA: iva,
+              MntTotal: mntTotal,
+              VlrPagar: mntTotal,
+            }
+          : {
+              MntNeto: 0,
+              IVA: 0,
+              MntTotal: 0,
+              VlrPagar: 0,
+            },
       },
       Detalle: detalle,
     };

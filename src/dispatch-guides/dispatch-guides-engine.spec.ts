@@ -1,7 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   assertCanAnular,
+  assertCanConfirmAnulacion,
   buildPreparedDispatchGuide,
+  buildPreparedDispatchGuideWithoutPrices,
+  getRemainingQuantities,
+  planConsumption,
   validateDispatchGuideCoverage,
   validateDispatchGuideRequest,
 } from './dispatch-guides-engine';
@@ -85,6 +89,8 @@ describe('DispatchGuidesEngine', () => {
       );
 
       expect(prepared.status).toBe(DispatchGuideStatus.PENDIENTE);
+      expect(prepared.indTraslado).toBe('1');
+      expect(prepared.includePrices).toBe(true);
       expect(prepared.subtotal).toBe(2380);
       expect(prepared.discount).toBe(0);
       expect(prepared.total).toBe(2380);
@@ -122,6 +128,55 @@ describe('DispatchGuidesEngine', () => {
       );
       expect(withoutTransport.transport).toBeNull();
     });
+
+    it('respeta indTraslado e includePrices del DTO', () => {
+      const dto = validDto() as any;
+      dto.indTraslado = '3';
+      dto.includePrices = false;
+      const prepared = buildPreparedDispatchGuide(dto, pricing() as any);
+      expect(prepared.indTraslado).toBe('3');
+      expect(prepared.includePrices).toBe(false);
+    });
+  });
+
+  describe('buildPreparedDispatchGuideWithoutPrices', () => {
+    it('construye ítems y montos en cero sin PricingService', () => {
+      const dto = validDto() as any;
+      dto.indTraslado = '5';
+      dto.includePrices = false;
+      const prepared = buildPreparedDispatchGuideWithoutPrices(dto, [
+        {
+          storeProductID: 'sp-1',
+          variationID: 'var-1',
+          productName: 'Producto A',
+          sku: 'SKU-1',
+          quantity: 2,
+        },
+      ]);
+
+      expect(prepared.indTraslado).toBe('5');
+      expect(prepared.includePrices).toBe(false);
+      expect(prepared.items[0]).toMatchObject({
+        unitPrice: 0,
+        unitCost: 0,
+        lineTotal: 0,
+        baseTotal: 0,
+      });
+      expect(prepared.subtotal).toBe(0);
+      expect(prepared.total).toBe(0);
+      expect(prepared.netTotal).toBe(0);
+      expect(prepared.taxTotal).toBe(0);
+      expect(prepared.cogsTotal).toBe(0);
+    });
+
+    it('rechaza descuento manual en guías sin precios', () => {
+      const dto = validDto() as any;
+      dto.includePrices = false;
+      dto.manualDiscount = 10;
+      expect(() => buildPreparedDispatchGuideWithoutPrices(dto, [])).toThrow(
+        BadRequestException,
+      );
+    });
   });
 
   describe('validateDispatchGuideCoverage', () => {
@@ -156,6 +211,50 @@ describe('DispatchGuidesEngine', () => {
     });
   });
 
+  describe('consumo acumulado de guías', () => {
+    const guides = [
+      {
+        dispatchGuideID: 'dg-1',
+        items: [{ variationID: 'var-1', quantity: 3 }],
+      },
+      {
+        dispatchGuideID: 'dg-2',
+        items: [{ variationID: 'var-1', quantity: 2 }],
+      },
+    ];
+
+    it('calcula el saldo restante restando el consumo previo', () => {
+      const remaining = getRemainingQuantities(guides, [
+        { dispatchGuideID: 'dg-1', variationID: 'var-1', quantity: 1 },
+        { dispatchGuideID: 'dg-2', variationID: 'var-1', quantity: 2 },
+      ]);
+      expect(remaining.get('dg-1')?.get('var-1')).toBe(2);
+      expect(remaining.get('dg-2')?.get('var-1')).toBe(0);
+    });
+
+    it('reparte el consumo entre N guías en orden determinístico', () => {
+      const plan = planConsumption(
+        guides,
+        [],
+        [{ variationID: 'var-1', quantity: 4 }],
+      );
+      expect(plan).toEqual([
+        { dispatchGuideID: 'dg-1', variationID: 'var-1', quantity: 3 },
+        { dispatchGuideID: 'dg-2', variationID: 'var-1', quantity: 1 },
+      ]);
+    });
+
+    it('rechaza cuando el consumo acumulado excede la cobertura', () => {
+      expect(() =>
+        planConsumption(
+          guides,
+          [{ dispatchGuideID: 'dg-1', variationID: 'var-1', quantity: 2 }],
+          [{ variationID: 'var-1', quantity: 4 }],
+        ),
+      ).toThrow(BadRequestException);
+    });
+  });
+
   describe('assertCanAnular', () => {
     it('permite anular solo desde EMITIDA', () => {
       expect(() => assertCanAnular(DispatchGuideStatus.EMITIDA)).not.toThrow();
@@ -165,6 +264,18 @@ describe('DispatchGuidesEngine', () => {
       expect(() => assertCanAnular(DispatchGuideStatus.ANULADA)).toThrow(
         BadRequestException,
       );
+      expect(() =>
+        assertCanAnular(DispatchGuideStatus.ANULACION_PENDIENTE),
+      ).toThrow(BadRequestException);
+    });
+
+    it('permite confirmar anulación solo desde ANULACION_PENDIENTE', () => {
+      expect(() =>
+        assertCanConfirmAnulacion(DispatchGuideStatus.ANULACION_PENDIENTE),
+      ).not.toThrow();
+      expect(() =>
+        assertCanConfirmAnulacion(DispatchGuideStatus.EMITIDA),
+      ).toThrow(BadRequestException);
     });
   });
 });

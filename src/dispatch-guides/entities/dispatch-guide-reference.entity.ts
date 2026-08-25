@@ -5,10 +5,12 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { DteDocument } from '../../dte/entities/dte-document.entity';
 import { DispatchGuide } from './dispatch-guide.entity';
+import { DispatchGuideReferenceItem } from './dispatch-guide-reference-item.entity';
 
 @Entity({ name: 'DispatchGuideReference' })
 @Index(['dispatchGuideID', 'dteDocumentID'], { unique: true })
@@ -37,6 +39,11 @@ export class DispatchGuideReference {
 
   @Column({ type: 'uuid', nullable: true })
   saleID!: string | null;
+
+  @OneToMany(() => DispatchGuideReferenceItem, (item) => item.reference, {
+    cascade: true,
+  })
+  items!: DispatchGuideReferenceItem[];
 
   @CreateDateColumn()
   createdAt!: Date;

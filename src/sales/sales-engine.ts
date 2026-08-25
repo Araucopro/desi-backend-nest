@@ -9,9 +9,14 @@ import {
 } from './entities/sale.entity';
 import { DteDocumentPaymentType } from '../dte/entities/dte-document.entity';
 import { CalculateCartResult } from '../pricing/dto/pricing.dto';
+import {
+  roundClp,
+  splitIvaIncluded,
+  TAX_RATE,
+} from '../common/utils/money.util';
 import { PreparedSale, PreparedSaleItem } from './sales.types';
 
-export const TAX_RATE = 0.19;
+export { TAX_RATE };
 
 export function toMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -83,15 +88,12 @@ export function buildPreparedSale(
     items.reduce((acc, item) => acc + item.unitCost * item.quantity, 0),
   );
 
-  const total = Math.round(
-    items.reduce((acc, item) => acc + item.lineTotal, 0),
-  );
-  const subtotal = Math.round(
+  const total = roundClp(items.reduce((acc, item) => acc + item.lineTotal, 0));
+  const subtotal = roundClp(
     items.reduce((acc, item) => acc + item.baseTotal, 0),
   );
   const discount = Math.max(subtotal - total, 0);
-  const netTotal = Math.round(total / (1 + TAX_RATE));
-  const taxTotal = total - netTotal;
+  const { netTotal, taxTotal } = splitIvaIncluded(total);
 
   return {
     saleType: dto.saleType,

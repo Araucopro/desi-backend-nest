@@ -12,6 +12,7 @@ import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { InventoryService } from '../inventory/inventory.service';
 import { DispatchGuide } from '../dispatch-guides/entities/dispatch-guide.entity';
+import { DispatchGuideReferenceItem } from '../dispatch-guides/entities/dispatch-guide-reference-item.entity';
 import {
   DteDocument,
   DteDocumentPaymentType,
@@ -25,6 +26,7 @@ function createManagerMock(
     stock?: number;
     storeHasOpenfacturaKey?: boolean;
     dispatchGuides?: any[];
+    consumedReferenceItems?: any[];
   } = {},
 ) {
   const store = {
@@ -59,6 +61,7 @@ function createManagerMock(
   const savedSales: Array<Partial<Sale>> = [];
   const savedItems: Array<Partial<SaleItem>> = [];
   const dispatchGuides: any[] = initial.dispatchGuides ?? [];
+  const consumedReferenceItems: any[] = initial.consumedReferenceItems ?? [];
 
   function findSale(options?: { where?: Record<string, unknown> }) {
     const where = options?.where ?? {};
@@ -122,6 +125,14 @@ function createManagerMock(
         savedItems.push(entity as Partial<SaleItem>);
         return entity;
       }
+      if (
+        entity.dispatchGuideID &&
+        entity.dteDocumentID &&
+        entity.saleID &&
+        !entity.dispatchGuideReferenceID
+      ) {
+        entity.dispatchGuideReferenceID = `ref-${entity.dispatchGuideID}`;
+      }
       return entity;
     }),
     query: jest.fn().mockResolvedValue(undefined),
@@ -153,6 +164,11 @@ function createManagerMock(
           find: jest.fn(async () => dispatchGuides),
         };
       }
+      if (entity === DispatchGuideReferenceItem) {
+        return {
+          find: jest.fn(async () => consumedReferenceItems),
+        };
+      }
       return {};
     }),
   };
@@ -164,6 +180,7 @@ function createManagerMock(
     savedSales,
     savedItems,
     dispatchGuides,
+    consumedReferenceItems,
   };
 }
 
@@ -438,6 +455,7 @@ describe('SalesService', () => {
           storeID: 'store-1',
           status: 'EMITIDA',
           folio: 100,
+          dteDocumentID: 'dte-guide-1',
           issueDate: new Date('2026-08-25T00:00:00.000Z'),
           items: [
             {
@@ -491,6 +509,22 @@ describe('SalesService', () => {
       dteDocumentID: 'dte-1',
     });
     expect(
+      ctx.manager.save.mock.calls.some(
+        ([entity]) =>
+          Array.isArray(entity) &&
+          entity.some(
+            (record: {
+              dispatchGuideReferenceID?: string;
+              variationID?: string;
+              quantity?: number;
+            }) =>
+              Boolean(record.dispatchGuideReferenceID) &&
+              record.variationID === 'var-1' &&
+              record.quantity === 1,
+          ),
+      ),
+    ).toBe(true);
+    expect(
       ctx.savedSales.some(
         (record) =>
           (record as { dteDocumentID?: string }).dteDocumentID === 'dte-1',
@@ -510,6 +544,7 @@ describe('SalesService', () => {
           storeID: 'store-1',
           status: 'EMITIDA',
           folio: 100,
+          dteDocumentID: 'dte-guide-1',
           issueDate: new Date('2026-08-25T00:00:00.000Z'),
           items: [
             {
@@ -534,6 +569,99 @@ describe('SalesService', () => {
       service.create('store-1', undefined, dto as any),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(dteService.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a sale when accumulated dispatch guide consumption is exhausted', async () => {
+    ctx = createManagerMock({
+      dispatchGuides: [
+        {
+          dispatchGuideID: 'dg-1',
+          storeID: 'store-1',
+          status: 'EMITIDA',
+          folio: 100,
+          dteDocumentID: 'dte-guide-1',
+          issueDate: new Date('2026-08-25T00:00:00.000Z'),
+          items: [{ variationID: 'var-1', quantity: 1 }],
+        },
+      ],
+      consumedReferenceItems: [
+        {
+          dispatchGuideID: 'dg-1',
+          variationID: 'var-1',
+          quantity: 1,
+        },
+      ],
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+    const service = createService();
+    const dto = {
+      saleType: SaleType.FACTURA,
+      paymentType: SalePaymentType.CASH,
+      receiver: { rut: '66666666-6', name: 'Cliente SpA' },
+      items: [{ storeProductID: 'sp-1', quantity: 1 }],
+      dispatchGuideIDs: ['dg-1'],
+    };
+
+    await expect(
+      service.create('store-1', undefined, dto as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(dteService.create).not.toHaveBeenCalled();
+  });
+
+  it('does not duplicate consumption when an electronic sale already exists by idempotency key', async () => {
+    ctx = createManagerMock({
+      sale: {
+        saleID: 'sale-1',
+        storeID: 'store-1',
+        tenantID: 'tenant-1',
+        saleType: SaleType.FACTURA,
+        status: SaleStatus.EMITIDA,
+        paymentType: SalePaymentType.CASH,
+        folio: 123,
+        issueDate: new Date('2026-08-25'),
+        receiver: { rut: '66666666-6', name: 'Cliente SpA' },
+        subtotal: 1190,
+        discount: 0,
+        netTotal: 1000,
+        taxTotal: 190,
+        total: 1190,
+        cogsTotal: 400,
+        dteDocumentID: 'dte-1',
+        idempotencyKey: 'idem-e',
+        items: [],
+        dteDocument: {
+          dteDocumentID: 'dte-1',
+          token: 'token-1',
+          folio: 123,
+          status: DteDocumentStatus.EMITIDO,
+        },
+      },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+    const service = createService();
+    const dto = {
+      saleType: SaleType.FACTURA,
+      paymentType: SalePaymentType.CASH,
+      receiver: { rut: '66666666-6', name: 'Cliente SpA' },
+      items: [{ storeProductID: 'sp-1', quantity: 1 }],
+      dispatchGuideIDs: ['dg-1'],
+    };
+
+    const result = await service.create('store-1', 'idem-e', dto as any);
+
+    expect(dteService.create).not.toHaveBeenCalled();
+    expect(result.sale.saleID).toBe('sale-1');
+    expect(ctx.savedSales.length).toBe(0);
+    expect(
+      ctx.manager.save.mock.calls.some(
+        ([entity]) =>
+          Array.isArray(entity) &&
+          entity.some(
+            (record: { dispatchGuideReferenceID?: string }) =>
+              record.dispatchGuideReferenceID,
+          ),
+      ),
+    ).toBe(false);
   });
 
   it('rejects a factura without receiver before calling DTE', async () => {

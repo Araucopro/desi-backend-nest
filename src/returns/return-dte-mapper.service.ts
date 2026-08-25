@@ -6,21 +6,21 @@ import {
   DteResponseValue,
 } from '../dte/dto/create-dte-document.dto';
 import { Return, ReturnType } from './entities/return.entity';
-
-const TAX_RATE = 0.19;
+import {
+  roundClp,
+  splitIvaIncluded,
+  TAX_RATE,
+} from '../common/utils/money.util';
 
 export type ReturnNceInput = {
   sale: Sale & { store: Store };
   ret: Return;
   originalDocumentType: 33 | 39;
+  codRef: '1' | '6' | '4' | null;
 };
 
 @Injectable()
 export class ReturnDteMapperService {
-  private toInteger(value: number): number {
-    return Math.round(value);
-  }
-
   private toDateOnly(value: Date): string {
     const date = new Date(value);
     return Number.isNaN(date.getTime())
@@ -28,14 +28,8 @@ export class ReturnDteMapperService {
       : date.toISOString().slice(0, 10);
   }
 
-  private codRef(returnType: ReturnType): string {
-    if (returnType === ReturnType.TOTAL) return '1';
-    if (returnType === ReturnType.PARCIAL) return '6';
-    return '4';
-  }
-
   mapReturnToNce(input: ReturnNceInput): CreateDteDocumentDto {
-    const { sale, ret, originalDocumentType } = input;
+    const { sale, ret, originalDocumentType, codRef } = input;
     const isBoletaOriginal = originalDocumentType === 39;
 
     if (!isBoletaOriginal && (!sale.receiver?.rut || !sale.receiver?.name)) {
@@ -51,12 +45,12 @@ export class ReturnDteMapperService {
               NroLinDet: 1,
               NmbItem: ret.reason || 'Descuento posterior',
               QtyItem: 1,
-              PrcItem: this.toInteger(
+              PrcItem: roundClp(
                 isBoletaOriginal
                   ? Number(ret.discountAmount)
                   : Number(ret.discountAmount) / (1 + TAX_RATE),
               ),
-              MontoItem: this.toInteger(
+              MontoItem: roundClp(
                 isBoletaOriginal
                   ? Number(ret.discountAmount)
                   : Number(ret.discountAmount) / (1 + TAX_RATE),
@@ -65,11 +59,11 @@ export class ReturnDteMapperService {
           ]
         : (ret.items ?? []).map((item, index) => {
             const unitPrice = isBoletaOriginal
-              ? this.toInteger(Number(item.unitPrice))
-              : this.toInteger(Number(item.unitPrice) / (1 + TAX_RATE));
+              ? roundClp(Number(item.unitPrice))
+              : roundClp(Number(item.unitPrice) / (1 + TAX_RATE));
             const lineTotal = isBoletaOriginal
-              ? this.toInteger(Number(item.lineTotal))
-              : this.toInteger(Number(item.lineTotal) / (1 + TAX_RATE));
+              ? roundClp(Number(item.lineTotal))
+              : roundClp(Number(item.lineTotal) / (1 + TAX_RATE));
 
             return {
               NroLinDet: index + 1,
@@ -84,9 +78,8 @@ export class ReturnDteMapperService {
             };
           });
 
-    const mntTotal = this.toInteger(Number(ret.total));
-    const mntNeto = this.toInteger(Number(ret.total) / (1 + TAX_RATE));
-    const iva = mntTotal - mntNeto;
+    const mntTotal = roundClp(Number(ret.total));
+    const { netTotal: mntNeto, taxTotal: iva } = splitIvaIncluded(mntTotal);
     const store = sale.store;
     const originalFolio = sale.folio ?? sale.dteDocument?.folio ?? 0;
 
@@ -178,7 +171,7 @@ export class ReturnDteMapperService {
             TpoDocRef: originalDocumentType,
             FolioRef: originalFolio,
             FchRef: this.toDateOnly(sale.issueDate),
-            CodRef: this.codRef(ret.returnType),
+            ...(codRef ? { CodRef: codRef } : {}),
             RazonRef: ret.reason ?? 'Devolución',
           },
         ],

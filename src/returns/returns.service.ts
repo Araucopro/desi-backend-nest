@@ -1,4 +1,5 @@
 import {
+  BadGatewayException,
   BadRequestException,
   Injectable,
   OnModuleInit,
@@ -64,6 +65,11 @@ export class ReturnsService implements OnModuleInit {
     if (typeof this.dteService.registerFinalizedListener === 'function') {
       this.dteService.registerFinalizedListener((manager, document) =>
         this.onDteFinalized(manager, document),
+      );
+    }
+    if (typeof this.dteService.registerFailedListener === 'function') {
+      this.dteService.registerFailedListener((manager, document) =>
+        this.onDteFailed(manager, document),
       );
     }
   }
@@ -193,7 +199,10 @@ export class ReturnsService implements OnModuleInit {
       );
     }
 
-    const effective = resolveEffectiveDocument(current.sale);
+    const effective = resolveEffectiveDocument(
+      current.sale,
+      current.returnType,
+    );
 
     if (!effective.requiresNce) {
       return this.runInTransaction(async (manager) => {
@@ -217,6 +226,7 @@ export class ReturnsService implements OnModuleInit {
       sale: current.sale,
       ret: current,
       originalDocumentType: effective.documentType!,
+      codRef: effective.codRef,
     });
     const dteResponse = await this.dteService.create(
       storeID,
@@ -333,10 +343,23 @@ export class ReturnsService implements OnModuleInit {
       );
     }
 
-    const dteResponse = await this.dteService.reconcile(
-      current.dteDocumentID,
-      storeID,
-    );
+    let dteResponse;
+    try {
+      dteResponse = await this.dteService.reconcile(
+        current.dteDocumentID,
+        storeID,
+      );
+    } catch (error) {
+      if (error instanceof BadGatewayException) {
+        const after = await this.runInTransaction((manager) =>
+          loadReturn(manager, returnID, storeID),
+        );
+        if (after.status === ReturnStatus.PENDIENTE) {
+          return toReturnView(after);
+        }
+      }
+      throw error;
+    }
 
     if (dteResponse.STATUS === 'EMITIDO') {
       await this.runInTransaction(async (manager) => {
@@ -381,6 +404,36 @@ export class ReturnsService implements OnModuleInit {
     }
   }
 
+  private async onDteFailed(
+    manager: EntityManager,
+    document: DteDocument,
+  ): Promise<void> {
+    if (document.status !== DteDocumentStatus.ERROR) return;
+
+    const returns = await manager.getRepository(Return).find({
+      where: [
+        {
+          dteDocumentID: document.dteDocumentID,
+          status: ReturnStatus.APROBADA,
+        },
+        {
+          idempotencyKey: document.idempotencyKey ?? '',
+          status: ReturnStatus.APROBADA,
+        },
+      ],
+    });
+
+    for (const ret of returns) {
+      const locked = await loadReturnForUpdate(manager, ret.returnID);
+      if (locked.status !== ReturnStatus.APROBADA) continue;
+      locked.status = ReturnStatus.PENDIENTE;
+      locked.approvedBy = null;
+      locked.approvedAt = null;
+      // Se conserva dteDocumentID para trazabilidad y re-emisión idempotente.
+      await manager.save(locked);
+    }
+  }
+
   private async completeReturnInManager(
     manager: EntityManager,
     ret: Return,
@@ -406,11 +459,15 @@ export class ReturnsService implements OnModuleInit {
           tenantID: ret.tenantID,
           allowNegativeStock: true,
           createIfMissing: true,
+          condition: item.condition,
         });
       }
     }
 
-    const requiresNce = resolveEffectiveDocument(ret.sale).requiresNce;
+    const requiresNce = resolveEffectiveDocument(
+      ret.sale,
+      ret.returnType,
+    ).requiresNce;
     if (!requiresNce) {
       await this.financialMovementsService.recordReturnForSaleNote(manager, {
         returnID: ret.returnID,

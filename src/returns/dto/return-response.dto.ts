@@ -5,6 +5,7 @@ import {
   DteDocumentStatus,
 } from '../../dte/entities/dte-document.entity';
 import { ReturnStatus, ReturnType } from '../entities/return.entity';
+import { ReturnItemCondition } from '../entities/return-item.entity';
 
 export class ReturnItemDto {
   @ApiProperty({ description: 'ID del ítem de devolución' })
@@ -42,6 +43,13 @@ export class ReturnItemDto {
 
   @ApiProperty({ description: 'Total de la línea en CLP', example: 1190 })
   lineTotal!: number;
+
+  @ApiProperty({
+    description: 'Condición del producto devuelto (SELLABLE o DEFECTIVE)',
+    enum: ReturnItemCondition,
+    example: ReturnItemCondition.SELLABLE,
+  })
+  condition!: ReturnItemCondition;
 
   @ApiProperty({ description: 'Fecha de creación ISO 8601', type: Date })
   createdAt!: Date;

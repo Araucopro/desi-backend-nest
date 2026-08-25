@@ -25,6 +25,11 @@ export function toDispatchGuideView(
   const references: DispatchGuideReferenceView[] = (guide.references ?? []).map(
     (reference) => ({
       dispatchGuideReferenceID: reference.dispatchGuideReferenceID,
+      items: (reference.items ?? []).map((item) => ({
+        dispatchGuideReferenceItemID: item.dispatchGuideReferenceItemID,
+        variationID: item.variationID,
+        quantity: item.quantity,
+      })),
       dteDocumentID: reference.dteDocumentID,
       saleID: reference.saleID,
       createdAt: reference.createdAt,

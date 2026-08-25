@@ -101,6 +101,7 @@ describe('ReturnDteMapperService', () => {
       sale: sale(),
       ret: ret(),
       originalDocumentType: 39,
+      codRef: '6',
     });
 
     expect(dto.dte.Encabezado.IdDoc).toMatchObject({
@@ -155,6 +156,7 @@ describe('ReturnDteMapperService', () => {
       sale: facturaSale,
       ret: ret(),
       originalDocumentType: 33,
+      codRef: '6',
     });
 
     expect(dto.dte.Encabezado.IdDoc).toMatchObject({ TipoDTE: 61 });
@@ -198,6 +200,7 @@ describe('ReturnDteMapperService', () => {
         total: 595,
       }),
       originalDocumentType: 39,
+      codRef: '4',
     });
 
     expect(dto.dte.Detalle).toHaveLength(1);

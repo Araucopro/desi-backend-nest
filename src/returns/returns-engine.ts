@@ -1,12 +1,19 @@
 import { BadRequestException } from '@nestjs/common';
 import { Return, ReturnStatus, ReturnType } from './entities/return.entity';
+import { ReturnItemCondition } from './entities/return-item.entity';
 import { Sale, SaleType } from '../sales/entities/sale.entity';
+import {
+  roundClp,
+  splitIvaIncluded,
+  TAX_RATE,
+} from '../common/utils/money.util';
 
-export const TAX_RATE = 0.19;
+export { TAX_RATE };
 
 export type ReturnableItemInput = {
   saleItemID: string;
   quantity: number;
+  condition?: ReturnItemCondition;
 };
 
 export type PreparedReturnItem = {
@@ -19,6 +26,7 @@ export type PreparedReturnItem = {
   unitPrice: number;
   unitCost: number;
   lineTotal: number;
+  condition: ReturnItemCondition;
 };
 
 export type PreparedReturn = {
@@ -37,6 +45,7 @@ export type PreparedReturn = {
 export type EffectiveDocument = {
   requiresNce: boolean;
   documentType: 33 | 39 | null;
+  codRef: '1' | '6' | '4' | null;
 };
 
 export function toMoney(value: number): number {
@@ -60,15 +69,23 @@ export function activeReturnStatuses(): ReturnStatus[] {
   ];
 }
 
-export function resolveEffectiveDocument(sale: Sale): EffectiveDocument {
+export function resolveEffectiveDocument(
+  sale: Sale,
+  returnType: ReturnType,
+): EffectiveDocument {
   if (sale.dteDocumentID) {
     const storedType = sale.dteDocument?.documentType;
     if (storedType === 33 || storedType === 39) {
-      return { requiresNce: true, documentType: storedType };
+      return {
+        requiresNce: true,
+        documentType: storedType,
+        codRef: resolveCodRef(returnType),
+      };
     }
     return {
       requiresNce: true,
       documentType: sale.receiver?.rut ? 33 : 39,
+      codRef: resolveCodRef(returnType),
     };
   }
 
@@ -76,10 +93,17 @@ export function resolveEffectiveDocument(sale: Sale): EffectiveDocument {
     return {
       requiresNce: true,
       documentType: sale.saleType === SaleType.FACTURA ? 33 : 39,
+      codRef: resolveCodRef(returnType),
     };
   }
 
-  return { requiresNce: false, documentType: null };
+  return { requiresNce: false, documentType: null, codRef: null };
+}
+
+function resolveCodRef(returnType: ReturnType): '1' | '6' | '4' {
+  if (returnType === ReturnType.TOTAL) return '1';
+  if (returnType === ReturnType.PARCIAL) return '6';
+  return '4';
 }
 
 export function calculateAvailableQuantities(
@@ -156,7 +180,8 @@ function buildPreparedItems(
       quantity: item.quantity,
       unitPrice: Number(saleItem.unitPrice),
       unitCost: Number(saleItem.unitCost),
-      lineTotal: toMoney(Number(saleItem.unitPrice) * item.quantity),
+      lineTotal: roundClp(Number(saleItem.unitPrice) * item.quantity),
+      condition: item.condition ?? ReturnItemCondition.SELLABLE,
     };
   });
 }
@@ -210,8 +235,8 @@ export function validateReturnRequest(input: {
       );
     }
 
-    const total = toMoney(amount);
-    const netTotal = Math.round(total / (1 + TAX_RATE));
+    const total = roundClp(amount);
+    const { netTotal, taxTotal } = splitIvaIncluded(total);
     return {
       returnType,
       reason: input.reason.trim(),
@@ -220,7 +245,7 @@ export function validateReturnRequest(input: {
       subtotal: 0,
       discountAmount: total,
       netTotal,
-      taxTotal: total - netTotal,
+      taxTotal,
       total,
       cogsTotal: 0,
     };
@@ -261,13 +286,13 @@ export function validateReturnRequest(input: {
   }
 
   preparedItems = buildPreparedItems(sale, requested);
-  const total = toMoney(
+  const total = roundClp(
     preparedItems.reduce((acc, item) => acc + item.lineTotal, 0),
   );
   const cogsTotal = toMoney(
     preparedItems.reduce((acc, item) => acc + item.unitCost * item.quantity, 0),
   );
-  const netTotal = Math.round(total / (1 + TAX_RATE));
+  const { netTotal, taxTotal } = splitIvaIncluded(total);
 
   return {
     returnType,
@@ -277,7 +302,7 @@ export function validateReturnRequest(input: {
     subtotal: 0,
     discountAmount: 0,
     netTotal,
-    taxTotal: total - netTotal,
+    taxTotal,
     total,
     cogsTotal,
   };

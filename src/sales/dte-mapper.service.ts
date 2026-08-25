@@ -10,8 +10,11 @@ import {
   DteReferenciaDto,
   DteResponseValue,
 } from '../dte/dto/create-dte-document.dto';
-
-const TAX_RATE = 0.19;
+import {
+  roundClp,
+  splitIvaIncluded,
+  TAX_RATE,
+} from '../common/utils/money.util';
 
 export type SaleDteInput = {
   saleType: SaleType;
@@ -41,10 +44,6 @@ export type SaleDteInput = {
  */
 @Injectable()
 export class DteMapperService {
-  private toInteger(value: number): number {
-    return Math.round(value);
-  }
-
   private toDateOnly(value: Date): string {
     const date = new Date(value);
     return Number.isNaN(date.getTime())
@@ -91,11 +90,11 @@ export class DteMapperService {
 
     const detalle = sale.items.map((item, index) => {
       const unitPrice = isBoleta
-        ? this.toInteger(item.unitPrice)
-        : this.toInteger(item.unitPrice / (1 + TAX_RATE));
+        ? roundClp(item.unitPrice)
+        : roundClp(item.unitPrice / (1 + TAX_RATE));
       const lineTotal = isBoleta
-        ? this.toInteger(item.lineTotal)
-        : this.toInteger(item.lineTotal / (1 + TAX_RATE));
+        ? roundClp(item.lineTotal)
+        : roundClp(item.lineTotal / (1 + TAX_RATE));
 
       return {
         NroLinDet: index + 1,
@@ -107,9 +106,8 @@ export class DteMapperService {
       };
     });
 
-    const mntTotal = this.toInteger(sale.total);
-    const mntNeto = this.toInteger(sale.total / (1 + TAX_RATE));
-    const iva = mntTotal - mntNeto;
+    const mntTotal = roundClp(sale.total);
+    const { netTotal: mntNeto, taxTotal: iva } = splitIvaIncluded(mntTotal);
 
     const encabezado = isBoleta
       ? {

@@ -7,8 +7,13 @@ import {
   DispatchGuideTransport,
 } from './entities/dispatch-guide.entity';
 import { CalculateCartResult } from '../pricing/dto/pricing.dto';
+import {
+  roundClp,
+  splitIvaIncluded,
+  TAX_RATE,
+} from '../common/utils/money.util';
 
-export const TAX_RATE = 0.19;
+export { TAX_RATE };
 
 export type PreparedDispatchGuideItem = {
   storeProductID: string;
@@ -25,6 +30,8 @@ export type PreparedDispatchGuideItem = {
 export type PreparedDispatchGuide = {
   status: DispatchGuideStatus;
   issueDate: Date;
+  indTraslado: string;
+  includePrices: boolean;
   receiver: DispatchGuideReceiver;
   destination: DispatchGuideDestination;
   transport: DispatchGuideTransport | null;
@@ -39,6 +46,20 @@ export type PreparedDispatchGuide = {
 
 export type DispatchGuideCoverageItem = {
   variationID: string;
+  quantity: number;
+};
+
+export type DispatchGuideConsumptionItem = {
+  dispatchGuideID: string;
+  variationID: string;
+  quantity: number;
+};
+
+export type DispatchGuideResolvedItem = {
+  storeProductID: string;
+  variationID: string;
+  productName: string;
+  sku: string;
   quantity: number;
 };
 
@@ -102,22 +123,55 @@ export function buildPreparedDispatchGuide(
     lineTotal: item.lineTotal,
     baseTotal: item.basePrice,
   }));
+  return buildPreparedDispatchGuideWithItems(dto, items);
+}
+
+export function buildPreparedDispatchGuideWithoutPrices(
+  dto: CreateDispatchGuideDto,
+  resolvedItems: DispatchGuideResolvedItem[],
+): PreparedDispatchGuide {
+  validateDispatchGuideRequest(dto);
+  if (dto.manualDiscount !== undefined) {
+    throw new BadRequestException(
+      'Las guías de despacho sin precios no admiten descuento manual',
+    );
+  }
+
+  const items: PreparedDispatchGuideItem[] = resolvedItems.map((item) => ({
+    storeProductID: item.storeProductID,
+    variationID: item.variationID,
+    productName: item.productName,
+    sku: item.sku,
+    quantity: item.quantity,
+    unitPrice: 0,
+    unitCost: 0,
+    lineTotal: 0,
+    baseTotal: 0,
+  }));
+
+  return buildPreparedDispatchGuideWithItems(dto, items);
+}
+
+function buildPreparedDispatchGuideWithItems(
+  dto: CreateDispatchGuideDto,
+  items: PreparedDispatchGuideItem[],
+): PreparedDispatchGuide {
+  validateDispatchGuideRequest(dto);
   const cogsTotal = toMoney(
     items.reduce((acc, item) => acc + item.unitCost * item.quantity, 0),
   );
-  const total = Math.round(
-    items.reduce((acc, item) => acc + item.lineTotal, 0),
-  );
-  const subtotal = Math.round(
+  const total = roundClp(items.reduce((acc, item) => acc + item.lineTotal, 0));
+  const subtotal = roundClp(
     items.reduce((acc, item) => acc + item.baseTotal, 0),
   );
   const discount = Math.max(subtotal - total, 0);
-  const netTotal = Math.round(total / (1 + TAX_RATE));
-  const taxTotal = total - netTotal;
+  const { netTotal, taxTotal } = splitIvaIncluded(total);
 
   return {
     status: DispatchGuideStatus.PENDIENTE,
     issueDate: toDateOnly(dto.issueDate ?? new Date()),
+    indTraslado: dto.indTraslado ?? '1',
+    includePrices: dto.includePrices ?? true,
     receiver: {
       rut: dto.receiver.rut,
       name: dto.receiver.name,
@@ -155,31 +209,129 @@ export function buildPreparedDispatchGuide(
 }
 
 /**
- * Valida que cada ítem de la venta tenga cobertura de stock despachado en las
- * guías EMITIDA. No consume las cantidades: una misma guía puede referenciarse
- * por N facturas mientras la suma despachada alcance.
+ * Calcula el saldo restante por guía/variación:
+ * cantidad despachada menos consumo ya registrado en DispatchGuideReferenceItem.
+ */
+export function getRemainingQuantities(
+  guides: Array<{
+    dispatchGuideID: string;
+    items?: DispatchGuideCoverageItem[];
+  }>,
+  consumedItems: DispatchGuideConsumptionItem[],
+): Map<string, Map<string, number>> {
+  const remaining = new Map<string, Map<string, number>>();
+
+  for (const guide of guides) {
+    const byVariation = new Map<string, number>();
+    for (const item of guide.items ?? []) {
+      byVariation.set(
+        item.variationID,
+        (byVariation.get(item.variationID) ?? 0) + item.quantity,
+      );
+    }
+    remaining.set(guide.dispatchGuideID, byVariation);
+  }
+
+  for (const consumed of consumedItems) {
+    const byVariation = remaining.get(consumed.dispatchGuideID);
+    if (!byVariation) continue;
+    byVariation.set(
+      consumed.variationID,
+      Math.max(
+        (byVariation.get(consumed.variationID) ?? 0) - consumed.quantity,
+        0,
+      ),
+    );
+  }
+
+  return remaining;
+}
+
+/**
+ * Asigna el consumo de una factura/boleta entre las guías en el orden
+ * determinístico entregado por el cliente, validando contra el saldo
+ * acumulado (despachado − consumido). Devuelve los ítems de consumo a
+ * persistir junto con DispatchGuideReference.
+ */
+export function planConsumption(
+  guides: Array<{
+    dispatchGuideID: string;
+    items?: DispatchGuideCoverageItem[];
+  }>,
+  consumedItems: DispatchGuideConsumptionItem[],
+  saleItems: DispatchGuideCoverageItem[],
+): DispatchGuideConsumptionItem[] {
+  const remaining = getRemainingQuantities(guides, consumedItems);
+  const plan: DispatchGuideConsumptionItem[] = [];
+
+  for (const saleItem of saleItems) {
+    let needed = saleItem.quantity;
+    let availableTotal = 0;
+    for (const guide of guides) {
+      availableTotal +=
+        remaining.get(guide.dispatchGuideID)?.get(saleItem.variationID) ?? 0;
+    }
+    if (needed > availableTotal) {
+      throw new BadRequestException(
+        `La cantidad de la variación ${saleItem.variationID} (${saleItem.quantity}) supera el saldo acumulado disponible de las guías de despacho referenciadas (${availableTotal})`,
+      );
+    }
+
+    for (const guide of guides) {
+      if (needed <= 0) break;
+      const byVariation = remaining.get(guide.dispatchGuideID);
+      if (!byVariation) continue;
+      const available = byVariation.get(saleItem.variationID) ?? 0;
+      if (available <= 0) continue;
+
+      const taken = Math.min(needed, available);
+      byVariation.set(saleItem.variationID, available - taken);
+      plan.push({
+        dispatchGuideID: guide.dispatchGuideID,
+        variationID: saleItem.variationID,
+        quantity: taken,
+      });
+      needed -= taken;
+    }
+  }
+
+  return plan;
+}
+
+/**
+ * Compatibilidad con la validación pre-consumo: una misma guía puede
+ * referenciarse por N facturas mientras la suma despachada alcance.
  */
 export function validateDispatchGuideCoverage(
   guides: Array<{ items?: DispatchGuideCoverageItem[] }>,
   saleItems: DispatchGuideCoverageItem[],
 ): void {
-  const dispatchedByVariation = new Map<string, number>();
-  for (const guide of guides) {
-    for (const item of guide.items ?? []) {
-      dispatchedByVariation.set(
-        item.variationID,
-        (dispatchedByVariation.get(item.variationID) ?? 0) + item.quantity,
-      );
-    }
-  }
+  planConsumption(
+    guides.map((guide, index) => ({
+      dispatchGuideID:
+        (guide as { dispatchGuideID?: string }).dispatchGuideID ??
+        `guide-${index}`,
+      items: guide.items,
+    })),
+    [],
+    saleItems,
+  );
+}
 
-  for (const saleItem of saleItems) {
-    const available = dispatchedByVariation.get(saleItem.variationID) ?? 0;
-    if (saleItem.quantity > available) {
-      throw new BadRequestException(
-        `La cantidad de la variación ${saleItem.variationID} (${saleItem.quantity}) supera la cobertura de las guías de despacho referenciadas (${available})`,
-      );
-    }
+export function assertCanReference(guide: {
+  status: DispatchGuideStatus;
+  folio?: number | null;
+  dteDocumentID?: string | null;
+}): void {
+  if (guide.status !== DispatchGuideStatus.EMITIDA) {
+    throw new BadRequestException(
+      `Solo guías de despacho EMITIDA pueden referenciarse (actual: ${guide.status})`,
+    );
+  }
+  if (!guide.folio || !guide.dteDocumentID) {
+    throw new BadRequestException(
+      'La guía de despacho no tiene folio SII o documento DTE asociado para ser referenciada',
+    );
   }
 }
 
@@ -187,6 +339,14 @@ export function assertCanAnular(status: DispatchGuideStatus): void {
   if (status !== DispatchGuideStatus.EMITIDA) {
     throw new BadRequestException(
       `Solo guías de despacho EMITIDA pueden anularse (actual: ${status})`,
+    );
+  }
+}
+
+export function assertCanConfirmAnulacion(status: DispatchGuideStatus): void {
+  if (status !== DispatchGuideStatus.ANULACION_PENDIENTE) {
+    throw new BadRequestException(
+      `Solo guías de despacho ANULACION_PENDIENTE pueden confirmar su anulación (actual: ${status})`,
     );
   }
 }

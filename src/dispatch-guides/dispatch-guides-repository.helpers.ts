@@ -1,11 +1,13 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { EntityManager, In } from 'typeorm';
 import { Store } from '../stores/entities/store.entity';
+import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import {
   DispatchGuide,
   DispatchGuideStatus,
 } from './entities/dispatch-guide.entity';
 import { DispatchGuideItem } from './entities/dispatch-guide-item.entity';
+import { DispatchGuideReferenceItem } from './entities/dispatch-guide-reference-item.entity';
 import { ListDispatchGuidesQueryDto } from './dto/list-dispatch-guides.query.dto';
 import { PreparedDispatchGuide } from './dispatch-guides-engine';
 
@@ -15,6 +17,7 @@ export const DISPATCH_GUIDE_LOAD_RELATIONS = [
   'dteDocument',
   'references',
   'references.dteDocument',
+  'references.items',
 ] as const;
 
 export async function findStoreById(
@@ -97,6 +100,92 @@ export async function findEmittedDispatchGuides(
   });
 }
 
+/**
+ * Bloquea las guías EMITIDA en la transacción y luego carga sus ítems para
+ * planificar consumo acumulado sin carreras entre emisiones concurrentes.
+ */
+export async function findEmittedDispatchGuidesForUpdate(
+  manager: EntityManager,
+  storeID: string,
+  dispatchGuideIDs: string[],
+): Promise<DispatchGuide[]> {
+  const locked = await manager.getRepository(DispatchGuide).find({
+    where: {
+      dispatchGuideID: In(dispatchGuideIDs),
+      storeID,
+      status: DispatchGuideStatus.EMITIDA,
+    },
+    lock: { mode: 'pessimistic_write' },
+  });
+
+  if (locked.length === 0) return [];
+
+  const full = await manager.getRepository(DispatchGuide).find({
+    where: {
+      dispatchGuideID: In(locked.map((guide) => guide.dispatchGuideID)),
+    },
+    relations: ['items'],
+  });
+  const byId = new Map(full.map((guide) => [guide.dispatchGuideID, guide]));
+  return dispatchGuideIDs
+    .map((dispatchGuideID) => byId.get(dispatchGuideID))
+    .filter((guide): guide is DispatchGuide => Boolean(guide));
+}
+
+export async function findDispatchGuideReferenceItems(
+  manager: EntityManager,
+  dispatchGuideIDs: string[],
+): Promise<DispatchGuideReferenceItem[]> {
+  if (dispatchGuideIDs.length === 0) return [];
+  return manager.getRepository(DispatchGuideReferenceItem).find({
+    where: { dispatchGuideID: In(dispatchGuideIDs) },
+  });
+}
+
+export async function findStoreProductsForGuide(
+  manager: EntityManager,
+  storeID: string,
+  items: Array<{ storeProductID: string; quantity: number }>,
+): Promise<
+  Array<{
+    storeProductID: string;
+    variationID: string;
+    productName: string;
+    sku: string;
+    quantity: number;
+  }>
+> {
+  const found = await manager.getRepository(StoreProduct).find({
+    where: {
+      store: { storeID },
+      storeProductID: In(items.map((item) => item.storeProductID)),
+    },
+    relations: ['variation', 'variation.product'],
+  });
+  const byId = new Map(
+    found.map((storeProduct) => [storeProduct.storeProductID, storeProduct]),
+  );
+  const missing = items.filter((item) => !byId.has(item.storeProductID));
+  if (missing.length > 0) {
+    throw new BadRequestException(
+      `Uno o más productos de tienda no existen o no pertenecen a la tienda: ${missing
+        .map((item) => item.storeProductID)
+        .join(', ')}`,
+    );
+  }
+
+  return items.map((item) => {
+    const storeProduct = byId.get(item.storeProductID)!;
+    return {
+      storeProductID: storeProduct.storeProductID,
+      variationID: storeProduct.variation.variationID,
+      productName: storeProduct.variation.product.name,
+      sku: storeProduct.variation.sku,
+      quantity: item.quantity,
+    };
+  });
+}
+
 export async function listDispatchGuides(
   manager: EntityManager,
   storeID: string,
@@ -113,6 +202,7 @@ export async function listDispatchGuides(
     .leftJoinAndSelect('guide.dteDocument', 'dteDocument')
     .leftJoinAndSelect('guide.references', 'references')
     .leftJoinAndSelect('references.dteDocument', 'referenceDte')
+    .leftJoinAndSelect('references.items', 'referenceItems')
     .where('guide.storeID = :storeID', { storeID });
 
   if (query.status) {
@@ -156,6 +246,8 @@ export function createDispatchGuideEntity(
     receiver: input.prepared.receiver,
     destination: input.prepared.destination,
     transport: input.prepared.transport,
+    indTraslado: input.prepared.indTraslado,
+    includePrices: input.prepared.includePrices,
     subtotal: input.prepared.subtotal,
     discount: input.prepared.discount,
     netTotal: input.prepared.netTotal,

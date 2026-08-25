@@ -59,6 +59,11 @@ export type DteFinalizedListener = (
   document: DteDocument,
 ) => Promise<void> | void;
 
+export type DteFailedListener = (
+  manager: EntityManager,
+  document: DteDocument,
+) => Promise<void> | void;
+
 type DtePreparation = {
   document: DteDocument;
   idempotencyKeyToUse: string | null;
@@ -79,6 +84,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
   private reconcileTimer?: ReturnType<typeof setInterval>;
   private readonly openfacturaClient: OpenfacturaClientService;
   private readonly finalizedListeners: DteFinalizedListener[] = [];
+  private readonly failedListeners: DteFailedListener[] = [];
 
   constructor(
     @InjectRepository(DteDocument)
@@ -127,6 +133,10 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
 
   registerFinalizedListener(listener: DteFinalizedListener): void {
     this.finalizedListeners.push(listener);
+  }
+
+  registerFailedListener(listener: DteFailedListener): void {
+    this.failedListeners.push(listener);
   }
 
   private runInTransaction<T>(
@@ -399,6 +409,9 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     this.logger.error(
       `Documento DTE en ERROR | dteDocumentID=${saved.dteDocumentID} | detail=${document.errorDetail}`,
     );
+    for (const listener of this.failedListeners) {
+      await listener(manager, saved);
+    }
     return {
       kind: 'error',
       message: plan.message,

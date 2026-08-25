@@ -328,6 +328,44 @@ describe('DteService', () => {
     ).toBe(true);
   });
 
+  it('invoca listeners de fallo (y no los de EMITIDO) cuando el DTE termina en ERROR', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      text: async () =>
+        JSON.stringify({ TOKEN: 'token-1', FOLIO: 200, status: 'ERROR' }),
+    });
+
+    const service = createService();
+    const finalizedListener = jest.fn();
+    const failedListener = jest.fn();
+    service.registerFinalizedListener(finalizedListener);
+    service.registerFailedListener(failedListener);
+
+    await expect(
+      service.create('store-1', undefined, createDteDto() as any),
+    ).rejects.toBeInstanceOf(BadGatewayException);
+
+    expect(finalizedListener).not.toHaveBeenCalled();
+    expect(failedListener).toHaveBeenCalledTimes(1);
+    const [listenerManager, listenerDocument] = failedListener.mock.calls[0];
+    expect(listenerManager).toBe(manager);
+    expect(listenerDocument).toMatchObject({
+      dteDocumentID: 'dte-1',
+      status: DteDocumentStatus.ERROR,
+    });
+  });
+
+  it('no invoca listeners de fallo cuando el DTE termina EMITIDO', async () => {
+    const service = createService();
+    const failedListener = jest.fn();
+    service.registerFailedListener(failedListener);
+
+    await service.create('store-1', undefined, createDteDto() as any);
+
+    expect(failedListener).not.toHaveBeenCalled();
+  });
+
   it('marks ERROR and reverts stock on HTTP 5xx without ledger', async () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: false,

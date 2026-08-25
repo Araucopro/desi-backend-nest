@@ -19,6 +19,7 @@ import { DispatchGuideReference } from './dispatch-guide-reference.entity';
 export enum DispatchGuideStatus {
   PENDIENTE = 'PENDIENTE',
   EMITIDA = 'EMITIDA',
+  ANULACION_PENDIENTE = 'ANULACION_PENDIENTE',
   ANULADA = 'ANULADA',
 }
 
@@ -87,6 +88,12 @@ export class DispatchGuide {
 
   @Column({ type: 'date' })
   issueDate!: Date;
+
+  @Column({ type: 'varchar', length: 1, default: '1' })
+  indTraslado!: string;
+
+  @Column({ type: 'boolean', default: true })
+  includePrices!: boolean;
 
   @Column({ type: 'jsonb' })
   receiver!: DispatchGuideReceiver;

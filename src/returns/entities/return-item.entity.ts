@@ -11,6 +11,11 @@ import { Return } from './return.entity';
 import { SaleItem } from '../../sales/entities/sale-item.entity';
 import { ColumnNumericTransformer } from '../../common/transformers/numeric.transformer';
 
+export enum ReturnItemCondition {
+  SELLABLE = 'SELLABLE',
+  DEFECTIVE = 'DEFECTIVE',
+}
+
 @Entity({ name: 'ReturnItem' })
 @Index(['tenantID', 'returnID'])
 export class ReturnItem {
@@ -72,6 +77,13 @@ export class ReturnItem {
     transformer: new ColumnNumericTransformer(),
   })
   lineTotal!: number;
+
+  @Column({
+    type: 'enum',
+    enum: ReturnItemCondition,
+    default: ReturnItemCondition.SELLABLE,
+  })
+  condition!: ReturnItemCondition;
 
   @CreateDateColumn()
   createdAt!: Date;

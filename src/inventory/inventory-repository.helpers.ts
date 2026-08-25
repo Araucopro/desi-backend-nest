@@ -5,6 +5,7 @@ import {
   InventoryMovement,
   InventoryMovementReason,
 } from './entities/inventory-movement.entity';
+import { ReturnItemCondition } from '../returns/entities/return-item.entity';
 import { calculateInventoryDelta } from './inventory-engine';
 
 export type StockReservationItem = {
@@ -27,6 +28,7 @@ export type ApplyInventoryMovementInput = {
   priceCost?: number;
   priceList?: number;
   skipZeroDelta?: boolean;
+  condition?: ReturnItemCondition;
 };
 
 export type AppliedInventoryMovement = {
@@ -86,6 +88,7 @@ export type UpsertStoreProductInput = {
   newStock?: number;
   createIfMissing?: boolean;
   allowNegativeStock?: boolean;
+  condition?: ReturnItemCondition;
 };
 
 /**
@@ -102,13 +105,17 @@ export async function upsertStoreProduct(
     input.variationID,
   );
   const availableStock = existing ? Number(existing.stock) : 0;
+  const availableDefectiveStock = existing
+    ? Number(existing.stockDefective ?? 0)
+    : 0;
+  const isDefective = input.condition === ReturnItemCondition.DEFECTIVE;
   const createIfMissing = input.createIfMissing ?? true;
   const delta =
     input.stockDelta ??
     (input.reason
       ? calculateInventoryDelta({
           reason: input.reason,
-          currentStock: availableStock,
+          currentStock: isDefective ? availableDefectiveStock : availableStock,
           quantity: input.quantity,
           newStock: input.newStock,
         })
@@ -126,6 +133,7 @@ export async function upsertStoreProduct(
       store: { storeID: input.storeID },
       variation: { variationID: input.variationID },
       stock: 0,
+      stockDefective: 0,
       priceCost: input.priceCost ?? 0,
       priceList: input.priceList ?? 0,
       ...(input.tenantID ? { tenantID: input.tenantID } : {}),
@@ -137,11 +145,18 @@ export async function upsertStoreProduct(
   if (input.priceList !== undefined) {
     storeProduct.priceList = input.priceList;
   }
-  storeProduct.stock = availableStock + delta;
+  if (isDefective) {
+    storeProduct.stockDefective = availableDefectiveStock + delta;
+  } else {
+    storeProduct.stock = availableStock + delta;
+  }
 
-  if (input.allowNegativeStock !== true && Number(storeProduct.stock) < 0) {
+  const resultingStock = isDefective
+    ? Number(storeProduct.stockDefective)
+    : Number(storeProduct.stock);
+  if (input.allowNegativeStock !== true && resultingStock < 0) {
     throw new BadRequestException(
-      `Stock insuficiente en tienda para VariationID: ${input.variationID}. Solicitado: ${input.quantity ?? Math.abs(delta)}, Disponible: ${availableStock}`,
+      `Stock insuficiente en tienda para VariationID: ${input.variationID}. Solicitado: ${input.quantity ?? Math.abs(delta)}, Disponible: ${isDefective ? availableDefectiveStock : availableStock}`,
     );
   }
 
@@ -167,6 +182,7 @@ export async function applyInventoryMovement(
     newStock: input.newStock,
     createIfMissing: input.createIfMissing ?? true,
     allowNegativeStock: input.allowNegativeStock ?? false,
+    condition: input.condition,
   });
 
   if (delta === 0 && input.skipZeroDelta) {
@@ -180,6 +196,7 @@ export async function applyInventoryMovement(
     delta,
     reason: input.reason,
     referenceID: input.referenceID,
+    condition: input.condition ?? null,
   });
   const savedMovement = await manager.save(movement);
 

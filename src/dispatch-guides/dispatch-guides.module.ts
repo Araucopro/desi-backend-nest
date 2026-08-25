@@ -6,6 +6,7 @@ import { DispatchGuideDteMapperService } from './dispatch-guide-dte-mapper.servi
 import { DispatchGuide } from './entities/dispatch-guide.entity';
 import { DispatchGuideItem } from './entities/dispatch-guide-item.entity';
 import { DispatchGuideReference } from './entities/dispatch-guide-reference.entity';
+import { DispatchGuideReferenceItem } from './entities/dispatch-guide-reference-item.entity';
 import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
@@ -22,6 +23,7 @@ import { TransactionRunnerService } from '../common/services/transaction-runner.
       DispatchGuide,
       DispatchGuideItem,
       DispatchGuideReference,
+      DispatchGuideReferenceItem,
       Store,
       StoreProduct,
       ProductVariation,

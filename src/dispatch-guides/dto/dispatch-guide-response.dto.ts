@@ -84,9 +84,26 @@ export class DispatchGuideTransportDto {
   fechaTraslado?: string;
 }
 
+export class DispatchGuideReferenceItemDto {
+  @ApiProperty({ description: 'ID del ítem de consumo' })
+  dispatchGuideReferenceItemID!: string;
+
+  @ApiProperty({ description: 'ID de la variación consumida' })
+  variationID!: string;
+
+  @ApiProperty({ description: 'Cantidad consumida' })
+  quantity!: number;
+}
+
 export class DispatchGuideReferenceDto {
   @ApiProperty({ description: 'ID del vínculo' })
   dispatchGuideReferenceID!: string;
+
+  @ApiProperty({
+    description: 'Cantidades consumidas de la guía por este documento',
+    type: [DispatchGuideReferenceItemDto],
+  })
+  items!: DispatchGuideReferenceItemDto[];
 
   @ApiProperty({ description: 'ID del documento DTE que referencia la guía' })
   dteDocumentID!: string;
@@ -129,6 +146,19 @@ export class DispatchGuideDto {
     format: 'date',
   })
   issueDate!: Date;
+
+  @ApiProperty({
+    description: 'Indicador de traslado SII',
+    example: '1',
+    enum: ['1', '2', '3', '4', '5'],
+  })
+  indTraslado!: string;
+
+  @ApiProperty({
+    description: 'Indica si la guía transporta precios en el DTE',
+    example: true,
+  })
+  includePrices!: boolean;
 
   @ApiProperty({ type: DispatchGuideReceiverDto })
   receiver!: DispatchGuideReceiver;

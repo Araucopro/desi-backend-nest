@@ -35,7 +35,9 @@ import { DispatchGuideReference } from './entities/dispatch-guide-reference.enti
 import { DispatchGuideDteMapperService } from './dispatch-guide-dte-mapper.service';
 import {
   assertCanAnular,
+  assertCanConfirmAnulacion,
   buildPreparedDispatchGuide,
+  buildPreparedDispatchGuideWithoutPrices,
   toDateOnly,
 } from './dispatch-guides-engine';
 import {
@@ -43,6 +45,7 @@ import {
   createDispatchGuideItems,
   findDispatchGuideByIdempotencyKey,
   findStoreById,
+  findStoreProductsForGuide,
   listDispatchGuides,
   loadDispatchGuide,
   loadDispatchGuideForUpdate,
@@ -126,22 +129,38 @@ export class DispatchGuidesService implements OnModuleInit {
           );
         }
 
-        const pricing = await this.pricingService.calculateCart({
-          storeID,
-          items: dto.items.map((item) => ({
-            storeProductID: item.storeProductID,
-            quantity: item.quantity,
-          })),
-          userID: userId ?? null,
-          ...(dto.manualDiscount !== undefined && dto.manualDiscount > 0
-            ? { manualDiscount: dto.manualDiscount }
-            : {}),
-          pricingDate: toDateOnly(dto.issueDate ?? new Date()),
-        });
-        const prepared = buildPreparedDispatchGuide(dto, pricing);
+        const includePrices = dto.includePrices ?? true;
+        let prepared;
+        if (includePrices) {
+          const pricing = await this.pricingService.calculateCart({
+            storeID,
+            items: dto.items.map((item) => ({
+              storeProductID: item.storeProductID,
+              quantity: item.quantity,
+            })),
+            userID: userId ?? null,
+            ...(dto.manualDiscount !== undefined && dto.manualDiscount > 0
+              ? { manualDiscount: dto.manualDiscount }
+              : {}),
+            pricingDate: toDateOnly(dto.issueDate ?? new Date()),
+          });
+          prepared = buildPreparedDispatchGuide(dto, pricing);
+        } else {
+          const resolvedItems = await findStoreProductsForGuide(
+            manager,
+            storeID,
+            dto.items,
+          );
+          prepared = buildPreparedDispatchGuideWithoutPrices(
+            dto,
+            resolvedItems,
+          );
+        }
         const dteDto = this.dispatchGuideDteMapperService.mapDispatchGuideToDte(
           {
             issueDate: prepared.issueDate,
+            indTraslado: prepared.indTraslado,
+            includePrices: prepared.includePrices,
             receiver: prepared.receiver,
             destination: prepared.destination,
             transport: prepared.transport,
@@ -291,6 +310,39 @@ export class DispatchGuidesService implements OnModuleInit {
         'Una guía de despacho anulada no puede reconciliarse',
       );
     }
+    if (current.status === DispatchGuideStatus.ANULACION_PENDIENTE) {
+      if (!current.folio || !current.dteDocumentID) {
+        throw new BadRequestException(
+          'La guía de despacho no tiene folio SII o documento DTE asociado para completar su anulación',
+        );
+      }
+
+      const apikey = await this.storesService.resolveOpenfacturaKey(storeID);
+      const result = await this.openfacturaClient.anularDte52(
+        apikey,
+        current.folio,
+        toDateOnly(current.issueDate).toISOString().slice(0, 10),
+      );
+      if (!result.ok) {
+        await this.runInTransaction(async (manager) => {
+          const guide = await loadDispatchGuideForUpdate(
+            manager,
+            dispatchGuideID,
+            storeID,
+          );
+          if (guide.status === DispatchGuideStatus.ANULACION_PENDIENTE) {
+            guide.errorDetail = result.errorDetail;
+            await manager.save(guide);
+          }
+        });
+        throw new BadGatewayException(
+          `No se pudo completar la anulación de la guía de despacho en Openfactura: ${result.errorDetail}`,
+        );
+      }
+
+      await this.confirmAnulacion(dispatchGuideID, storeID);
+      return this.findOne(dispatchGuideID, storeID);
+    }
     if (!current.payloadRaw) {
       throw new BadRequestException(
         'La guía de despacho no tiene payload DTE para reintentar',
@@ -341,6 +393,9 @@ export class DispatchGuidesService implements OnModuleInit {
     if (current.status === DispatchGuideStatus.ANULADA) {
       return toDispatchGuideView(current);
     }
+    if (current.status === DispatchGuideStatus.ANULACION_PENDIENTE) {
+      return toDispatchGuideView(current);
+    }
     assertCanAnular(current.status);
 
     if (!current.folio) {
@@ -365,18 +420,6 @@ export class DispatchGuidesService implements OnModuleInit {
       );
     }
 
-    const apikey = await this.storesService.resolveOpenfacturaKey(storeID);
-    const result = await this.openfacturaClient.anularDte52(
-      apikey,
-      current.folio,
-      toDateOnly(current.issueDate).toISOString().slice(0, 10),
-    );
-    if (!result.ok) {
-      throw new BadGatewayException(
-        `No se pudo anular la guía de despacho en Openfactura: ${result.errorDetail}`,
-      );
-    }
-
     await this.runInTransaction(async (manager) => {
       const guide = await loadDispatchGuideForUpdate(
         manager,
@@ -384,6 +427,61 @@ export class DispatchGuidesService implements OnModuleInit {
         storeID,
       );
       assertCanAnular(guide.status);
+
+      const referenceCount = await manager
+        .getRepository(DispatchGuideReference)
+        .count({ where: { dispatchGuideID } });
+      if (referenceCount > 0) {
+        throw new BadRequestException(
+          'La guía de despacho ya está referenciada por una factura/boleta y no puede anularse',
+        );
+      }
+
+      guide.status = DispatchGuideStatus.ANULACION_PENDIENTE;
+      guide.errorDetail = null;
+      await manager.save(guide);
+    });
+
+    const apikey = await this.storesService.resolveOpenfacturaKey(storeID);
+    const result = await this.openfacturaClient.anularDte52(
+      apikey,
+      current.folio,
+      toDateOnly(current.issueDate).toISOString().slice(0, 10),
+    );
+    if (!result.ok) {
+      await this.runInTransaction(async (manager) => {
+        const guide = await loadDispatchGuideForUpdate(
+          manager,
+          dispatchGuideID,
+          storeID,
+        );
+        if (guide.status === DispatchGuideStatus.ANULACION_PENDIENTE) {
+          guide.errorDetail = result.errorDetail;
+          await manager.save(guide);
+        }
+      });
+      throw new BadGatewayException(
+        `No se pudo anular la guía de despacho en Openfactura: ${result.errorDetail}`,
+      );
+    }
+
+    await this.confirmAnulacion(dispatchGuideID, storeID);
+
+    return this.findOne(dispatchGuideID, storeID);
+  }
+
+  private async confirmAnulacion(
+    dispatchGuideID: string,
+    storeID: string,
+  ): Promise<void> {
+    await this.runInTransaction(async (manager) => {
+      const guide = await loadDispatchGuideForUpdate(
+        manager,
+        dispatchGuideID,
+        storeID,
+      );
+      if (guide.status === DispatchGuideStatus.ANULADA) return;
+      assertCanConfirmAnulacion(guide.status);
 
       const referenceCount = await manager
         .getRepository(DispatchGuideReference)
@@ -417,8 +515,6 @@ export class DispatchGuidesService implements OnModuleInit {
 
       await manager.save(guide);
     });
-
-    return this.findOne(dispatchGuideID, storeID);
   }
 
   private async withDteResponse(

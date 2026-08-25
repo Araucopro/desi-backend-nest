@@ -2,8 +2,10 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEmail,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -197,4 +199,25 @@ export class CreateDispatchGuideDto {
   @ValidateNested()
   @Type(() => CreateDispatchGuideTransportDto)
   transport?: CreateDispatchGuideTransportDto;
+
+  @ApiPropertyOptional({
+    description:
+      'Indicador de traslado SII: 1 venta, 2 venta por encargo, 3 consignación, 4 entrega gratuita, 5 traslados internos',
+    example: '1',
+    enum: ['1', '2', '3', '4', '5'],
+    default: '1',
+  })
+  @IsOptional()
+  @IsIn(['1', '2', '3', '4', '5'])
+  indTraslado?: '1' | '2' | '3' | '4' | '5' = '1';
+
+  @ApiPropertyOptional({
+    description:
+      'Si false, la guía se emite sin precios (montos en cero) y omite PricingService',
+    example: true,
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  includePrices?: boolean = true;
 }

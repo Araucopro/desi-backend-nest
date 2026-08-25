@@ -38,6 +38,14 @@ export class StoreProduct {
   @Column('int', { default: 0 })
   stock!: number;
 
+  /**
+   * @deprecated logic should use InventoryMovements as source of truth.
+   * Cache/read model del stock defectuoso (devoluciones DEFECTIVE), derivado
+   * de movimientos con condition = DEFECTIVE.
+   */
+  @Column('int', { default: 0 })
+  stockDefective!: number;
+
   @Column('decimal', {
     precision: 10,
     scale: 2,

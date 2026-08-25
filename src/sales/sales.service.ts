@@ -20,8 +20,16 @@ import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { InventoryService } from '../inventory/inventory.service';
 import { DispatchGuide } from '../dispatch-guides/entities/dispatch-guide.entity';
 import { DispatchGuideReference } from '../dispatch-guides/entities/dispatch-guide-reference.entity';
-import { findEmittedDispatchGuides } from '../dispatch-guides/dispatch-guides-repository.helpers';
-import { validateDispatchGuideCoverage } from '../dispatch-guides/dispatch-guides-engine';
+import { DispatchGuideReferenceItem } from '../dispatch-guides/entities/dispatch-guide-reference-item.entity';
+import {
+  findDispatchGuideReferenceItems,
+  findEmittedDispatchGuidesForUpdate,
+} from '../dispatch-guides/dispatch-guides-repository.helpers';
+import {
+  assertCanReference,
+  DispatchGuideConsumptionItem,
+  planConsumption,
+} from '../dispatch-guides/dispatch-guides-engine';
 import { Sale, SaleStatus, SaleType } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
@@ -236,14 +244,13 @@ export class SalesService {
     let dispatchGuides: DispatchGuide[] = [];
     if (dto.dispatchGuideIDs?.length) {
       dispatchGuides = await this.runInTransaction((manager) =>
-        findEmittedDispatchGuides(manager, storeID, dto.dispatchGuideIDs!),
+        this.loadDispatchGuidesForSale(
+          manager,
+          storeID,
+          dto.dispatchGuideIDs!,
+          prepared.items,
+        ),
       );
-      if (dispatchGuides.length !== dto.dispatchGuideIDs.length) {
-        throw new BadRequestException(
-          'Una o más guías de despacho no existen, no pertenecen a la tienda o no están EMITIDA',
-        );
-      }
-      validateDispatchGuideCoverage(dispatchGuides, prepared.items);
     }
 
     const references = dispatchGuides.map((guide, index) => ({
@@ -367,7 +374,13 @@ export class SalesService {
       );
 
       if (dto.dispatchGuideIDs?.length) {
-        await manager.save(
+        const consumptionPlan = await this.planConsumptionForGuides(
+          manager,
+          storeID,
+          dto.dispatchGuideIDs,
+          prepared.items,
+        );
+        const savedReferences = await manager.save(
           dto.dispatchGuideIDs.map((dispatchGuideID) =>
             manager.create(DispatchGuideReference, {
               tenantID,
@@ -377,10 +390,76 @@ export class SalesService {
             }),
           ),
         );
+        const referenceIDByGuide = new Map(
+          savedReferences.map((reference) => [
+            reference.dispatchGuideID,
+            reference.dispatchGuideReferenceID,
+          ]),
+        );
+        await manager.save(
+          consumptionPlan.map((allocation) =>
+            manager.create(DispatchGuideReferenceItem, {
+              tenantID,
+              dispatchGuideReferenceID: referenceIDByGuide.get(
+                allocation.dispatchGuideID,
+              )!,
+              dispatchGuideID: allocation.dispatchGuideID,
+              variationID: allocation.variationID,
+              quantity: allocation.quantity,
+            }),
+          ),
+        );
       }
 
       return loadSale(manager, saleID);
     });
+  }
+
+  private async loadDispatchGuidesForSale(
+    manager: EntityManager,
+    storeID: string,
+    dispatchGuideIDs: string[],
+    saleItems?: PreparedSale['items'],
+  ): Promise<DispatchGuide[]> {
+    const guides = await findEmittedDispatchGuidesForUpdate(
+      manager,
+      storeID,
+      dispatchGuideIDs,
+    );
+    if (guides.length !== dispatchGuideIDs.length) {
+      throw new BadRequestException(
+        'Una o más guías de despacho no existen, no pertenecen a la tienda o no están EMITIDA',
+      );
+    }
+    for (const guide of guides) {
+      assertCanReference(guide);
+    }
+    if (saleItems) {
+      const consumedItems = await findDispatchGuideReferenceItems(
+        manager,
+        dispatchGuideIDs,
+      );
+      planConsumption(guides, consumedItems, saleItems);
+    }
+    return guides;
+  }
+
+  private async planConsumptionForGuides(
+    manager: EntityManager,
+    storeID: string,
+    dispatchGuideIDs: string[],
+    saleItems: PreparedSale['items'],
+  ): Promise<DispatchGuideConsumptionItem[]> {
+    const guides = await this.loadDispatchGuidesForSale(
+      manager,
+      storeID,
+      dispatchGuideIDs,
+    );
+    const consumedItems = await findDispatchGuideReferenceItems(
+      manager,
+      dispatchGuideIDs,
+    );
+    return planConsumption(guides, consumedItems, saleItems);
   }
 
   async findAll(storeID: string, query: ListSalesQueryDto) {

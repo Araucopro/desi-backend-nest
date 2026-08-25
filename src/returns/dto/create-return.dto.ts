@@ -14,6 +14,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ReturnType } from '../entities/return.entity';
+import { ReturnItemCondition } from '../entities/return-item.entity';
 
 export class CreateReturnItemDto {
   @ApiProperty({
@@ -32,6 +33,16 @@ export class CreateReturnItemDto {
   @IsInt()
   @Min(1)
   quantity!: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Condición del producto devuelto: SELLABLE (reingresa a stock vendible) o DEFECTIVE (reingresa a stock defectuoso). Default: SELLABLE',
+    enum: ReturnItemCondition,
+    example: ReturnItemCondition.SELLABLE,
+  })
+  @IsOptional()
+  @IsEnum(ReturnItemCondition)
+  condition?: ReturnItemCondition;
 }
 
 export class CreateReturnDto {

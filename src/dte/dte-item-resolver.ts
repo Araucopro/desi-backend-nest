@@ -1,5 +1,6 @@
 import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
+import { roundClp } from '../common/utils/money.util';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { Store } from '../stores/entities/store.entity';
 import { Product } from '../products/entities/product.entity';
@@ -349,7 +350,7 @@ export async function mapToDocumentPayload(
         : item.MontoItem !== undefined && quantity > 0
           ? Number(item.MontoItem) / quantity
           : 0;
-    const amount = toMoney(
+    const amount = roundClp(
       item.MontoItem !== undefined
         ? Number(item.MontoItem)
         : unitPrice * quantity,
@@ -365,7 +366,7 @@ export async function mapToDocumentPayload(
         NroLinDet: item.NroLinDet,
         NmbItem: item.NmbItem,
         QtyItem: quantity,
-        PrcItem: toMoney(unitPrice),
+        PrcItem: roundClp(unitPrice),
         MontoItem: amount,
         costPrice: 0,
         costTotal: 0,
@@ -381,7 +382,7 @@ export async function mapToDocumentPayload(
       NroLinDet: item.NroLinDet,
       NmbItem: item.NmbItem,
       QtyItem: quantity,
-      PrcItem: toMoney(unitPrice),
+      PrcItem: roundClp(unitPrice),
       MontoItem: amount,
       costPrice: 0,
       costTotal: 0,
@@ -403,15 +404,17 @@ export async function mapToDocumentPayload(
   const effectiveCogsTotal =
     cogsTotalOverride !== undefined ? toMoney(cogsTotalOverride) : cogsTotal;
 
-  const net = toMoney(dto.dte.Encabezado.Totales?.MntNeto ?? subtotal);
-  const tax = toMoney(dto.dte.Encabezado.Totales?.IVA ?? 0);
-  const total = toMoney(dto.dte.Encabezado.Totales?.MntTotal ?? subtotal + tax);
+  const net = roundClp(dto.dte.Encabezado.Totales?.MntNeto ?? subtotal);
+  const tax = roundClp(dto.dte.Encabezado.Totales?.IVA ?? 0);
+  const total = roundClp(
+    dto.dte.Encabezado.Totales?.MntTotal ?? subtotal + tax,
+  );
 
   return {
     normalizedItems: normalizedItemsWithCosts,
     store,
     totals: {
-      subtotal: toMoney(subtotal),
+      subtotal: roundClp(subtotal),
       net,
       tax,
       total,

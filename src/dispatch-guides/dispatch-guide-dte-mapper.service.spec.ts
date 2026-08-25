@@ -6,6 +6,8 @@ describe('DispatchGuideDteMapperService', () => {
   function input(overrides: Record<string, unknown> = {}) {
     return {
       issueDate: new Date('2026-08-25T12:00:00.000Z'),
+      indTraslado: '1',
+      includePrices: true,
       receiver: {
         rut: '76123456-7',
         name: 'Cliente SpA',
@@ -87,6 +89,28 @@ describe('DispatchGuideDteMapperService', () => {
       CdgItem: { TpoCodigo: 'INT1', VlrCodigo: 'SKU-1' },
     });
     expect(dto.dte.Transporte).toBeUndefined();
+  });
+
+  it('emite sin precios con IndTraslado configurable y totales/detalle en cero', () => {
+    const dto = service.mapDispatchGuideToDte(
+      input({ indTraslado: '5', includePrices: false }) as any,
+    );
+
+    expect(dto.dte.Encabezado.IdDoc).toMatchObject({
+      TipoDTE: 52,
+      IndTraslado: '5',
+    });
+    expect(dto.dte.Encabezado.Totales).toEqual({
+      MntNeto: 0,
+      IVA: 0,
+      MntTotal: 0,
+      VlrPagar: 0,
+    });
+    expect(dto.dte.Encabezado.Totales).not.toHaveProperty('TasaIVA');
+    expect(dto.dte.Detalle[0]).toMatchObject({
+      PrcItem: 0,
+      MontoItem: 0,
+    });
   });
 
   it('agrega Transporte solo cuando el creador lo entregó', () => {

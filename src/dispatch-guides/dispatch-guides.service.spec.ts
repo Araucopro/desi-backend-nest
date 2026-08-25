@@ -7,6 +7,7 @@ import {
 import { DteDocumentStatus } from '../dte/entities/dte-document.entity';
 import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
 import { Store } from '../stores/entities/store.entity';
+import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 
 function createContext() {
   const store = {
@@ -16,6 +17,15 @@ function createContext() {
     name: 'Tienda Demo',
     businessName: 'Tienda Demo SpA',
     hasOpenfacturaKey: true,
+  };
+  const storeProduct = {
+    storeProductID: 'sp-1',
+    tenantID: 'tenant-1',
+    variation: {
+      variationID: 'var-1',
+      sku: 'SKU-1',
+      product: { name: 'Producto A' },
+    },
   };
 
   let guideState: Partial<DispatchGuide> = {
@@ -29,6 +39,8 @@ function createContext() {
     dteDocument: null,
     idempotencyKey: 'idem-1',
     issueDate: new Date('2026-08-25T00:00:00.000Z'),
+    indTraslado: '1',
+    includePrices: true,
     receiver: {
       rut: '76123456-7',
       name: 'Cliente SpA',
@@ -78,6 +90,7 @@ function createContext() {
         return guideState;
       }
       if (entity === Store) return store;
+      if (entity === StoreProduct) return storeProduct;
       return null;
     }),
     getRepository: jest.fn((entity: unknown) => {
@@ -97,6 +110,11 @@ function createContext() {
             }
             return [];
           }),
+        };
+      }
+      if (entity === StoreProduct) {
+        return {
+          find: jest.fn(async () => [storeProduct]),
         };
       }
       return {
@@ -322,6 +340,38 @@ describe('DispatchGuidesService', () => {
     expect(ctx.dteService.create).not.toHaveBeenCalled();
   });
 
+  it('crea una guía sin precios omitiendo PricingService y con montos en cero', async () => {
+    const ctx = createContext();
+    ctx.dteService.create.mockImplementation(async () => {
+      ctx.setGuide({
+        status: DispatchGuideStatus.EMITIDA,
+        folio: 101,
+        dteDocumentID: 'dte-2',
+      });
+      return emittedDteResponse({ FOLIO: 101, dteDocumentID: 'dte-2' });
+    });
+
+    const result = await ctx.service.create('store-1', 'idem-no-prices', {
+      ...validDto(),
+      includePrices: false,
+      indTraslado: '5',
+    } as any);
+
+    expect(ctx.pricingService.calculateCart).not.toHaveBeenCalled();
+    expect(ctx.guide().includePrices).toBe(false);
+    expect(ctx.guide().indTraslado).toBe('5');
+    expect(
+      ctx.saved
+        .flatMap((record) => (Array.isArray(record) ? record : [record]))
+        .some(
+          (record) =>
+            (record as { unitPrice?: number }).unitPrice === 0 &&
+            (record as { lineTotal?: number }).lineTotal === 0,
+        ),
+    ).toBe(true);
+    expect(result.dispatchGuide.status).toBe(DispatchGuideStatus.EMITIDA);
+  });
+
   it('finaliza vía listener de forma idempotente', async () => {
     const ctx = createContext();
     let listener:
@@ -381,6 +431,67 @@ describe('DispatchGuidesService', () => {
     expect(result.dispatchGuide.status).toBe(DispatchGuideStatus.ANULADA);
   });
 
+  it('deja ANULACION_PENDIENTE y lanza BadGateway cuando Openfactura falla', async () => {
+    const ctx = createContext();
+    ctx.setGuide({
+      status: DispatchGuideStatus.EMITIDA,
+      folio: 100,
+      dteDocumentID: 'dte-1',
+    });
+    ctx.openfacturaClient.anularDte52.mockResolvedValue({
+      ok: false,
+      errorDetail: 'Openfactura respondió con estado 500',
+    });
+
+    await expect(ctx.service.anular('dg-1', 'store-1')).rejects.toThrow(
+      BadGatewayException,
+    );
+    expect(ctx.guide().status).toBe(DispatchGuideStatus.ANULACION_PENDIENTE);
+    expect(ctx.guide().errorDetail).toContain('Openfactura respondió');
+    expect(ctx.inventoryService.revertReservedStock).not.toHaveBeenCalled();
+  });
+
+  it('reconcilia una ANULACION_PENDIENTE completando la anulación y revirtiendo stock', async () => {
+    const ctx = createContext();
+    ctx.setGuide({
+      status: DispatchGuideStatus.ANULACION_PENDIENTE,
+      folio: 100,
+      dteDocumentID: 'dte-1',
+      errorDetail: 'Timeout',
+    });
+
+    const result = await ctx.service.reconcile('dg-1', 'store-1');
+
+    expect(ctx.openfacturaClient.anularDte52).toHaveBeenCalledWith(
+      'apikey',
+      100,
+      '2026-08-25',
+    );
+    expect(ctx.guide().status).toBe(DispatchGuideStatus.ANULADA);
+    expect(ctx.guide().errorDetail).toBeNull();
+    expect(ctx.inventoryService.revertReservedStock).toHaveBeenCalled();
+    expect(result.dispatchGuide.status).toBe(DispatchGuideStatus.ANULADA);
+  });
+
+  it('mantiene ANULACION_PENDIENTE cuando reconcile de anulación vuelve a fallar', async () => {
+    const ctx = createContext();
+    ctx.setGuide({
+      status: DispatchGuideStatus.ANULACION_PENDIENTE,
+      folio: 100,
+      dteDocumentID: 'dte-1',
+    });
+    ctx.openfacturaClient.anularDte52.mockResolvedValue({
+      ok: false,
+      errorDetail: 'Timeout llamando a Openfactura',
+    });
+
+    await expect(ctx.service.reconcile('dg-1', 'store-1')).rejects.toThrow(
+      BadGatewayException,
+    );
+    expect(ctx.guide().status).toBe(DispatchGuideStatus.ANULACION_PENDIENTE);
+    expect(ctx.inventoryService.revertReservedStock).not.toHaveBeenCalled();
+  });
+
   it('bloquea la anulación cuando la guía ya está referenciada', async () => {
     const ctx = createContext();
     ctx.setGuide({
@@ -437,5 +548,34 @@ describe('DispatchGuidesService', () => {
     await expect(ctx.service.reconcile('dg-1', 'store-1')).rejects.toThrow(
       BadRequestException,
     );
+  });
+
+  it('el listener ignora guías en ANULACION_PENDIENTE', async () => {
+    const ctx = createContext();
+    ctx.setGuide({
+      status: DispatchGuideStatus.ANULACION_PENDIENTE,
+      folio: 100,
+      dteDocumentID: 'dte-1',
+    });
+    let listener:
+      | ((manager: unknown, document: unknown) => Promise<void>)
+      | undefined;
+    ctx.dteService.registerFinalizedListener.mockImplementation(
+      (fn: typeof listener) => {
+        listener = fn;
+      },
+    );
+    ctx.service.onModuleInit();
+
+    const savesBefore = ctx.saved.length;
+    await listener!(ctx.manager, {
+      status: DteDocumentStatus.EMITIDO,
+      dteDocumentID: 'dte-1',
+      folio: 100,
+      idempotencyKey: 'idem-1',
+    });
+
+    expect(ctx.guide().status).toBe(DispatchGuideStatus.ANULACION_PENDIENTE);
+    expect(ctx.saved.length).toBe(savesBefore);
   });
 });
