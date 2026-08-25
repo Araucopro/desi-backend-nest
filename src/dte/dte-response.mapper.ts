@@ -19,9 +19,9 @@ export type NormalizedDteItem = {
   MontoItem: number;
   costPrice: number;
   costTotal: number;
-  variationID: string;
-  sku?: string;
-  productName?: string;
+  variationID: string | null;
+  sku?: string | null;
+  productName?: string | null;
   resolvedByName?: boolean;
 };
 

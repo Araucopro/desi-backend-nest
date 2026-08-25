@@ -45,8 +45,14 @@ export async function aggregateDteCountAndTotal(
 ): Promise<CountTotalAggregate> {
   const qb = repo
     .createQueryBuilder('document')
-    .select('COUNT(document.dteDocumentID)', 'count')
-    .addSelect('COALESCE(SUM(document.total),0)', 'total')
+    .select(
+      'COALESCE(SUM(CASE WHEN document.documentType = 61 THEN -document.total ELSE document.total END),0)',
+      'total',
+    )
+    .addSelect(
+      'COALESCE(SUM(CASE WHEN document.documentType IS DISTINCT FROM 61 THEN 1 ELSE 0 END),0)',
+      'count',
+    )
     .where('document.createdAt >= :start AND document.createdAt < :end', {
       start: startIso,
       end: endIso,
@@ -101,8 +107,14 @@ export async function fetchDtePaymentBreakdown(
   const qb = repo
     .createQueryBuilder('document')
     .select('document.paymentType', 'key')
-    .addSelect('COUNT(document.dteDocumentID)', 'count')
-    .addSelect('SUM(document.total)', 'total')
+    .addSelect(
+      'SUM(CASE WHEN document.documentType = 61 THEN -document.total ELSE document.total END)',
+      'total',
+    )
+    .addSelect(
+      'SUM(CASE WHEN document.documentType IS DISTINCT FROM 61 THEN 1 ELSE 0 END)',
+      'count',
+    )
     .where('document.createdAt >= :from AND document.createdAt < :to', {
       from,
       to,
@@ -125,8 +137,14 @@ export async function fetchDteStatusBreakdown(
   const qb = repo
     .createQueryBuilder('document')
     .select('document.status', 'key')
-    .addSelect('COUNT(document.dteDocumentID)', 'count')
-    .addSelect('SUM(document.total)', 'total')
+    .addSelect(
+      'SUM(CASE WHEN document.documentType = 61 THEN -document.total ELSE document.total END)',
+      'total',
+    )
+    .addSelect(
+      'SUM(CASE WHEN document.documentType IS DISTINCT FROM 61 THEN 1 ELSE 0 END)',
+      'count',
+    )
     .where('document.createdAt >= :from AND document.createdAt < :to', {
       from,
       to,

@@ -75,7 +75,7 @@ export class FinancialMovementsService {
         date: dte.issueDate,
         direction: FinancialMovementDirection.EGRESO,
         category: FinancialMovementCategory.COSTO_VENTA,
-        amount: this.toMoney(Number(dte.cogsTotal)),
+        amount: this.toMoney(sign * Number(dte.cogsTotal)),
         taxAmount: 0,
         taxCredit: false,
         acceptedForTax: true,
@@ -236,5 +236,57 @@ export class FinancialMovementsService {
       FinancialMovementSourceType.SALE_NOTE,
       saleID,
     );
+  }
+
+  /**
+   * Ledger de reverso de nota de venta: anula el ingreso por venta y el
+   * costo de venta registrados originalmente (montos negativos).
+   */
+  async recordReturnForSaleNote(
+    manager: EntityManager,
+    ret: {
+      returnID: string;
+      tenantID: string;
+      storeID: string;
+      issueDate: Date;
+      netTotal: number;
+      taxTotal: number;
+      cogsTotal: number;
+    },
+  ): Promise<void> {
+    await this.removeForSource(
+      manager,
+      FinancialMovementSourceType.RETURN,
+      ret.returnID,
+    );
+
+    await manager.save([
+      manager.create(FinancialMovement, {
+        tenantID: ret.tenantID,
+        storeID: ret.storeID,
+        date: ret.issueDate,
+        direction: FinancialMovementDirection.INGRESO,
+        category: FinancialMovementCategory.VENTA,
+        amount: this.toMoney(-Number(ret.netTotal)),
+        taxAmount: this.toMoney(-Number(ret.taxTotal)),
+        taxCredit: false,
+        acceptedForTax: true,
+        sourceType: FinancialMovementSourceType.RETURN,
+        sourceID: ret.returnID,
+      }),
+      manager.create(FinancialMovement, {
+        tenantID: ret.tenantID,
+        storeID: ret.storeID,
+        date: ret.issueDate,
+        direction: FinancialMovementDirection.EGRESO,
+        category: FinancialMovementCategory.COSTO_VENTA,
+        amount: this.toMoney(-Number(ret.cogsTotal)),
+        taxAmount: 0,
+        taxCredit: false,
+        acceptedForTax: true,
+        sourceType: FinancialMovementSourceType.RETURN,
+        sourceID: ret.returnID,
+      }),
+    ]);
   }
 }

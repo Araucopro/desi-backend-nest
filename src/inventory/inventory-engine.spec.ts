@@ -35,6 +35,13 @@ describe('inventory-engine', () => {
         quantity: 2,
       }),
     ).toBe(2);
+    expect(
+      calculateInventoryDelta({
+        reason: InventoryMovementReason.RETURN,
+        currentStock: 10,
+        quantity: 3,
+      }),
+    ).toBe(3);
   });
 
   it('calculates ADJUSTMENT as newStock minus currentStock', () => {

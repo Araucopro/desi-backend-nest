@@ -35,6 +35,12 @@ function isBoletaEncabezado(
   return encabezado.IdDoc.TipoDTE === 39;
 }
 
+function isNotaCreditoEncabezado(
+  encabezado: DteEncabezadoDto,
+): encabezado is import('./dto/create-dte-document.dto').NotaCreditoEncabezadoDto {
+  return encabezado.IdDoc.TipoDTE === 61;
+}
+
 export async function resolveVariation(
   manager: EntityManager,
   item: CreateDteDocumentDto['dte']['Detalle'][number],
@@ -99,6 +105,12 @@ export async function snapshotItemCosts(
   let cogsTotal = 0;
 
   for (const item of items) {
+    if (!item.variationID) {
+      item.costPrice = 0;
+      item.costTotal = 0;
+      continue;
+    }
+
     const storeProduct = await manager.findOne(StoreProduct, {
       where: {
         store: { storeID },
@@ -120,6 +132,7 @@ export async function mapToDocumentPayload(
   manager: EntityManager,
   dto: CreateDteDocumentDto,
   storeID: string,
+  cogsTotalOverride?: number,
 ): Promise<{
   normalizedItems: NormalizedDteItem[];
   store: Store;
@@ -173,7 +186,65 @@ export async function mapToDocumentPayload(
   // Acteco/Telefono) o Factura (RznSoc/GiroEmis con Acteco/Telefono) que
   // exige Openfactura.
   const encabezado = dto.dte.Encabezado;
-  if (isBoletaEncabezado(encabezado)) {
+  if (isNotaCreditoEncabezado(encabezado)) {
+    const existing = encabezado.Emisor;
+    const isBoletaStyle = Boolean(existing?.RznSocEmisor) || !existing?.RznSoc;
+
+    if (isBoletaStyle) {
+      encabezado.Emisor = {
+        RUTEmisor: store.rut,
+        RznSocEmisor: store.businessName || store.name,
+        GiroEmisor: store.giro || existing?.GiroEmisor || 'VENTA AL POR MENOR',
+        DirOrigen: store.address || existing?.DirOrigen || 'DIRECCION',
+        CmnaOrigen: store.city || existing?.CmnaOrigen || 'SANTIAGO',
+        CdgSIISucur: store.cdgSIISucur || existing?.CdgSIISucur || undefined,
+      };
+    } else {
+      encabezado.Emisor = {
+        RUTEmisor: store.rut,
+        RznSoc: store.businessName || store.name,
+        GiroEmis: store.giro || existing?.GiroEmis || 'VENTA AL POR MENOR',
+        Acteco: store.acteco
+          ? store.acteco.split(',').map((code) => code.trim())
+          : existing?.Acteco || ['479100'],
+        DirOrigen: store.address || existing?.DirOrigen || 'DIRECCION',
+        CmnaOrigen: store.city || existing?.CmnaOrigen || 'SANTIAGO',
+        Telefono: store.phone || existing?.Telefono || '0 0',
+        CdgSIISucur: store.cdgSIISucur || existing?.CdgSIISucur || undefined,
+      };
+    }
+
+    if (encabezado.Totales) {
+      const {
+        MntNeto,
+        MntExe,
+        TasaIVA,
+        IVA,
+        MntTotal,
+        MontoPeriodo,
+        VlrPagar,
+      } = encabezado.Totales;
+      if (isBoletaStyle) {
+        encabezado.Totales = {
+          ...(MntNeto !== undefined ? { MntNeto } : {}),
+          ...(MntExe !== undefined ? { MntExe } : {}),
+          ...(IVA !== undefined ? { IVA } : {}),
+          ...(MntTotal !== undefined ? { MntTotal } : {}),
+          ...(VlrPagar !== undefined ? { VlrPagar } : {}),
+        };
+      } else {
+        encabezado.Totales = {
+          ...(MntNeto !== undefined ? { MntNeto } : {}),
+          ...(MntExe !== undefined ? { MntExe } : {}),
+          ...(TasaIVA !== undefined ? { TasaIVA } : {}),
+          ...(IVA !== undefined ? { IVA } : {}),
+          ...(MntTotal !== undefined ? { MntTotal } : {}),
+          ...(MontoPeriodo !== undefined ? { MontoPeriodo } : {}),
+          ...(VlrPagar !== undefined ? { VlrPagar } : {}),
+        };
+      }
+    }
+  } else if (isBoletaEncabezado(encabezado)) {
     const existing = encabezado.Emisor;
     encabezado.Emisor = {
       RUTEmisor: store.rut,
@@ -228,7 +299,6 @@ export async function mapToDocumentPayload(
   let subtotal = 0;
 
   for (const item of dto.dte.Detalle) {
-    const variation = await resolveVariation(manager, item, nameFallbackStats);
     const quantity = Number(item.QtyItem);
     const unitPrice =
       item.PrcItem !== undefined
@@ -243,6 +313,27 @@ export async function mapToDocumentPayload(
     );
 
     subtotal += amount;
+
+    if (
+      dto.dte.Encabezado.IdDoc.TipoDTE === 61 &&
+      !item.CdgItem?.VlrCodigo?.trim()
+    ) {
+      normalizedItems.push({
+        NroLinDet: item.NroLinDet,
+        NmbItem: item.NmbItem,
+        QtyItem: quantity,
+        PrcItem: toMoney(unitPrice),
+        MontoItem: amount,
+        costPrice: 0,
+        costTotal: 0,
+        variationID: null,
+        sku: null,
+        productName: null,
+      });
+      continue;
+    }
+
+    const variation = await resolveVariation(manager, item, nameFallbackStats);
     normalizedItems.push({
       NroLinDet: item.NroLinDet,
       NmbItem: item.NmbItem,
@@ -266,6 +357,8 @@ export async function mapToDocumentPayload(
 
   const { items: normalizedItemsWithCosts, cogsTotal } =
     await snapshotItemCosts(manager, store.storeID, normalizedItems);
+  const effectiveCogsTotal =
+    cogsTotalOverride !== undefined ? toMoney(cogsTotalOverride) : cogsTotal;
 
   const net = toMoney(dto.dte.Encabezado.Totales?.MntNeto ?? subtotal);
   const tax = toMoney(dto.dte.Encabezado.Totales?.IVA ?? 0);
@@ -279,7 +372,7 @@ export async function mapToDocumentPayload(
       net,
       tax,
       total,
-      cogsTotal,
+      cogsTotal: effectiveCogsTotal,
     },
   };
 }

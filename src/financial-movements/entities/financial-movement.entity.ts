@@ -30,6 +30,7 @@ export enum FinancialMovementSourceType {
   PURCHASE_ORDER = 'PURCHASE_ORDER',
   EXPENSE = 'EXPENSE',
   SALE_NOTE = 'SALE_NOTE',
+  RETURN = 'RETURN',
 }
 
 @Entity({ name: 'FinancialMovement' })

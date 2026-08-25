@@ -112,7 +112,7 @@ export function buildDtePreparationValues(input: {
       input.folio,
       paymentType,
       DteDocumentStatus.PENDIENTE,
-    ) as unknown as Record<string, unknown>,
+    ),
     errorDetail: null,
   };
 }

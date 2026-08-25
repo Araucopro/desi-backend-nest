@@ -11,6 +11,8 @@ export type DteCreateOptions = {
   saleID?: string;
   /** Forma de pago real del POS, preservada aunque el payload boleta no incluya FmaPago. */
   paymentType?: DteDocumentPaymentType;
+  /** Costo de venta congelado del documento original (usado en NCE 61). */
+  cogsTotalOverride?: number;
 };
 
 export type DtePreparationValues = {

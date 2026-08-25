@@ -269,6 +269,55 @@ describe('CreateDteDocumentDto', () => {
     expect(errors).toEqual([]);
   });
 
+  it('accepts a nota de crédito (61) with Referencia', async () => {
+    const errors = await validateDto(
+      basePayload({
+        dte: {
+          Encabezado: {
+            IdDoc: {
+              TipoDTE: 61,
+              FchEmis: '2026-08-25',
+              IndServicio: '3',
+            },
+            Emisor: {
+              RUTEmisor: '76123456-7',
+              RznSocEmisor: 'Tienda Demo SpA',
+            },
+            Receptor: {
+              RUTRecep: '66666666-6',
+              RznSocRecep: 'Anonimo',
+            },
+            Totales: {
+              MntNeto: 1000,
+              IVA: 190,
+              MntTotal: 1190,
+              VlrPagar: 1190,
+            },
+          },
+          Detalle: [
+            {
+              NroLinDet: 1,
+              NmbItem: 'Producto A',
+              QtyItem: 1,
+              PrcItem: 1190,
+              MontoItem: 1190,
+            },
+          ],
+          Referencia: {
+            NroLinRef: 1,
+            TpoDocRef: 39,
+            FolioRef: 1024,
+            FchRef: '2026-08-18',
+            CodRef: '6',
+            RazonRef: 'Devolución parcial',
+          },
+        },
+      }),
+    );
+
+    expect(errors).toEqual([]);
+  });
+
   it('rejects a factura without receptor', async () => {
     const errors = await validateDto(
       basePayload({

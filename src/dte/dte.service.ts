@@ -31,6 +31,7 @@ import {
 import {
   applyFinalStatusToNormalized,
   buildResponse,
+  NormalizedDteItem,
 } from './dte-response.mapper';
 import { mapToDocumentPayload } from './dte-item-resolver';
 import {
@@ -53,6 +54,11 @@ import { StoresService } from '../stores/stores.service';
 
 export type { DteCreateOptions } from './dte.types';
 
+export type DteFinalizedListener = (
+  manager: EntityManager,
+  document: DteDocument,
+) => Promise<void> | void;
+
 type DtePreparation = {
   document: DteDocument;
   idempotencyKeyToUse: string | null;
@@ -72,6 +78,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DteService.name);
   private reconcileTimer?: ReturnType<typeof setInterval>;
   private readonly openfacturaClient: OpenfacturaClientService;
+  private readonly finalizedListeners: DteFinalizedListener[] = [];
 
   constructor(
     @InjectRepository(DteDocument)
@@ -116,6 +123,10 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       clearInterval(this.reconcileTimer);
       this.reconcileTimer = undefined;
     }
+  }
+
+  registerFinalizedListener(listener: DteFinalizedListener): void {
+    this.finalizedListeners.push(listener);
   }
 
   private runInTransaction<T>(
@@ -166,6 +177,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       manager,
       dto,
       storeID,
+      options?.cogsTotalOverride,
     );
 
     if (existing && existing.storeID && existing.storeID !== store.storeID) {
@@ -262,7 +274,10 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       const reservedCogsTotal = await this.inventoryService.reserveStock(
         manager,
         store.storeID,
-        normalizedItems,
+        normalizedItems.filter(
+          (item): item is NormalizedDteItem & { variationID: string } =>
+            item.variationID !== null,
+        ),
         document.dteDocumentID,
         this.tenantContext?.getTenantId(),
       );
@@ -342,6 +357,9 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       const saved = await manager.save(document);
       if (saved.status === DteDocumentStatus.EMITIDO) {
         await this.financialMovementsService.recordDte(manager, saved);
+        for (const listener of this.finalizedListeners) {
+          await listener(manager, saved);
+        }
       }
 
       this.logger.log(
@@ -363,7 +381,10 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       await this.inventoryService.revertReservedStock(
         manager,
         saved.storeID,
-        readNormalizedItems(saved),
+        readNormalizedItems(saved).filter(
+          (item): item is NormalizedDteItem & { variationID: string } =>
+            item.variationID !== null,
+        ),
         saved.dteDocumentID,
         this.tenantContext?.getTenantId() ?? saved.tenantID,
         (variationID) => {

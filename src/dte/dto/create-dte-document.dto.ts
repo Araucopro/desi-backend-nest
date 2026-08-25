@@ -94,6 +94,33 @@ export class DteIdDocFacturaDto {
   FmaPago?: string;
 }
 
+export class DteIdDocNotaCreditoDto {
+  @ApiProperty({ description: 'Tipo de DTE', example: 61 })
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([61])
+  TipoDTE!: 61;
+
+  @ApiPropertyOptional({ description: 'Folio del documento', example: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  Folio?: number;
+
+  @ApiProperty({ description: 'Fecha de emisión', example: '2026-08-25' })
+  @IsDateString()
+  FchEmis!: string;
+
+  @ApiPropertyOptional({
+    description: 'Indicador de servicio (solo para NCE de boleta)',
+    example: '3',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['1', '2', '3'])
+  IndServicio?: string;
+}
+
 export class DteEmisorBoletaDto {
   @ApiProperty({ description: 'RUT del emisor', example: '76795561-8' })
   @IsString()
@@ -152,6 +179,79 @@ export class DteEmisorFacturaDto {
   @ApiPropertyOptional({
     description: 'Giro comercial del emisor',
     example: 'VENTA AL POR MENOR POR CORREO, POR INTERNET Y VIA TELEFONICA',
+  })
+  @IsOptional()
+  @IsString()
+  GiroEmis?: string;
+
+  @ApiPropertyOptional({
+    description: 'Códigos de actividad',
+    example: ['479100'],
+  })
+  @IsOptional()
+  @IsArray()
+  Acteco?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Dirección origen',
+    example: 'ARTURO PRAT 527 CURICO',
+  })
+  @IsOptional()
+  @IsString()
+  DirOrigen?: string;
+
+  @ApiPropertyOptional({ description: 'Comuna de origen', example: 'Curicó' })
+  @IsOptional()
+  @IsString()
+  CmnaOrigen?: string;
+
+  @ApiPropertyOptional({ description: 'Teléfono', example: '0 0' })
+  @IsOptional()
+  @IsString()
+  Telefono?: string;
+
+  @ApiPropertyOptional({
+    description: 'Código sucursal SII',
+    example: '81303347',
+  })
+  @IsOptional()
+  @IsString()
+  CdgSIISucur?: string;
+}
+
+export class DteEmisorNotaCreditoDto {
+  @ApiProperty({ description: 'RUT del emisor', example: '76795561-8' })
+  @IsString()
+  @IsNotEmpty()
+  RUTEmisor!: string;
+
+  @ApiPropertyOptional({
+    description: 'Razón social del emisor (estilo boleta)',
+    example: 'HAULMER SPA',
+  })
+  @IsOptional()
+  @IsString()
+  RznSocEmisor?: string;
+
+  @ApiPropertyOptional({
+    description: 'Razón social del emisor (estilo factura)',
+    example: 'HAULMER SPA',
+  })
+  @IsOptional()
+  @IsString()
+  RznSoc?: string;
+
+  @ApiPropertyOptional({
+    description: 'Giro comercial (estilo boleta)',
+    example: 'VENTA AL POR MENOR',
+  })
+  @IsOptional()
+  @IsString()
+  GiroEmisor?: string;
+
+  @ApiPropertyOptional({
+    description: 'Giro comercial (estilo factura)',
+    example: 'VENTA AL POR MENOR',
   })
   @IsOptional()
   @IsString()
@@ -300,6 +400,49 @@ class DteTotalesFacturaDto {
   VlrPagar?: number;
 }
 
+class DteTotalesNotaCreditoDto {
+  @ApiPropertyOptional({ description: 'Monto neto', example: 21008 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  MntNeto?: number;
+
+  @ApiPropertyOptional({ description: 'Monto exento', example: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  MntExe?: number;
+
+  @ApiPropertyOptional({ description: 'Tasa IVA', example: '19' })
+  @IsOptional()
+  @IsString()
+  TasaIVA?: string;
+
+  @ApiPropertyOptional({ description: 'IVA', example: 3992 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  IVA?: number;
+
+  @ApiPropertyOptional({ description: 'Monto total', example: 25000 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  MntTotal?: number;
+
+  @ApiPropertyOptional({ description: 'Monto del período', example: 25000 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  MontoPeriodo?: number;
+
+  @ApiPropertyOptional({ description: 'Valor a pagar', example: 25000 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  VlrPagar?: number;
+}
+
 class DteCodigoItemDto {
   @ApiPropertyOptional({ description: 'Tipo de código', example: 'INT1' })
   @IsOptional()
@@ -405,14 +548,96 @@ export class FacturaEncabezadoDto {
   Totales?: DteTotalesFacturaDto;
 }
 
-export type DteEncabezadoDto = BoletaEncabezadoDto | FacturaEncabezadoDto;
+export class NotaCreditoEncabezadoDto {
+  @ApiProperty({ type: DteIdDocNotaCreditoDto })
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => DteIdDocNotaCreditoDto)
+  IdDoc!: DteIdDocNotaCreditoDto;
 
-@ApiExtraModels(BoletaEncabezadoDto, FacturaEncabezadoDto)
+  @ApiPropertyOptional({ type: DteEmisorNotaCreditoDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DteEmisorNotaCreditoDto)
+  Emisor?: DteEmisorNotaCreditoDto;
+
+  @ApiProperty({ type: DteReceptorDto })
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => DteReceptorDto)
+  Receptor!: DteReceptorDto;
+
+  @ApiPropertyOptional({ type: DteTotalesNotaCreditoDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DteTotalesNotaCreditoDto)
+  Totales?: DteTotalesNotaCreditoDto;
+}
+
+export type DteEncabezadoDto =
+  | BoletaEncabezadoDto
+  | FacturaEncabezadoDto
+  | NotaCreditoEncabezadoDto;
+
+export class DteReferenciaDto {
+  @ApiProperty({ description: 'Número de línea de referencia', example: 1 })
+  @Type(() => Number)
+  @IsInt()
+  NroLinRef!: number;
+
+  @ApiProperty({
+    description: 'Tipo de documento referenciado (33 factura, 39 boleta)',
+    example: 39,
+  })
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([33, 39])
+  TpoDocRef!: 33 | 39;
+
+  @ApiProperty({
+    description: 'Folio del documento referenciado',
+    example: 1024,
+  })
+  @Type(() => Number)
+  @IsInt()
+  FolioRef!: number;
+
+  @ApiProperty({
+    description: 'Fecha del documento referenciado',
+    example: '2026-08-18',
+  })
+  @IsDateString()
+  FchRef!: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Código de referencia SII: 1 anulación total, 6 devolución parcial, 4 descuento posterior',
+    example: '6',
+  })
+  @IsOptional()
+  @IsString()
+  CodRef?: string;
+
+  @ApiPropertyOptional({
+    description: 'Razón de la referencia',
+    example: 'Devolución parcial de mercadería',
+  })
+  @IsOptional()
+  @IsString()
+  RazonRef?: string;
+}
+
+@ApiExtraModels(
+  BoletaEncabezadoDto,
+  FacturaEncabezadoDto,
+  NotaCreditoEncabezadoDto,
+)
 export class DteDto {
   @ApiProperty({
     oneOf: [
       { $ref: getSchemaPath(BoletaEncabezadoDto) },
       { $ref: getSchemaPath(FacturaEncabezadoDto) },
+      { $ref: getSchemaPath(NotaCreditoEncabezadoDto) },
     ],
   })
   @IsDefined()
@@ -423,9 +648,10 @@ export class DteDto {
         | { Encabezado?: { IdDoc?: { TipoDTE?: unknown } } }
         | undefined
     )?.Encabezado;
-    return Number(encabezado?.IdDoc?.TipoDTE) === 39
-      ? BoletaEncabezadoDto
-      : FacturaEncabezadoDto;
+    const tipoDTE = Number(encabezado?.IdDoc?.TipoDTE);
+    if (tipoDTE === 39) return BoletaEncabezadoDto;
+    if (tipoDTE === 61) return NotaCreditoEncabezadoDto;
+    return FacturaEncabezadoDto;
   })
   Encabezado!: DteEncabezadoDto;
 
@@ -434,6 +660,12 @@ export class DteDto {
   @ValidateNested({ each: true })
   @Type(() => DteDetalleItemDto)
   Detalle!: DteDetalleItemDto[];
+
+  @ApiPropertyOptional({ type: DteReferenciaDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DteReferenciaDto)
+  Referencia?: DteReferenciaDto;
 }
 
 class DteCustomerDto {

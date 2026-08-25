@@ -370,6 +370,47 @@ describe('ReportsService', () => {
     expect(builder.groupByValue).toBe('month');
   });
 
+  it('excludes NCE 61 del conteo y resta su monto en los resúmenes DTE', async () => {
+    const documentsRepo = createRepositoryMock(
+      { document: [] },
+      {
+        rawOne: {
+          document: { count: '2', total: '1000' },
+        },
+      },
+    );
+    const movementsRepo = createRepositoryMock({ movement: [] });
+    const saleRepo = createRepositoryMock({ sale: [] });
+
+    const service = new ReportsService(
+      documentsRepo as any,
+      movementsRepo as any,
+      saleRepo as any,
+    );
+
+    await service.getSalesReport({});
+
+    const summaryBuilder = documentsRepo.builders.find((builder) =>
+      builder.selects.some((select) =>
+        select.expr.includes('documentType = 61'),
+      ),
+    );
+
+    expect(summaryBuilder).toBeDefined();
+    expect(
+      summaryBuilder!.selects.some((select) =>
+        select.expr.includes(
+          'CASE WHEN document.documentType = 61 THEN -document.total',
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      summaryBuilder!.selects.some((select) =>
+        select.expr.includes('documentType IS DISTINCT FROM 61'),
+      ),
+    ).toBe(true);
+  });
+
   it('defaults to the current year when year is omitted', async () => {
     const documentsRepo = createRepositoryMock({ document: [] });
     const movementsRepo = createRepositoryMock({ movement: [] });

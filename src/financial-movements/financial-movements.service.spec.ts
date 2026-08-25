@@ -80,7 +80,7 @@ describe('FinancialMovementsService', () => {
       documentType: 61,
       netTotal: 500,
       taxTotal: 95,
-      cogsTotal: 0,
+      cogsTotal: 200,
     };
 
     await service.recordDte(manager as any, dte as any);
@@ -93,7 +93,7 @@ describe('FinancialMovementsService', () => {
       }),
       expect.objectContaining({
         category: FinancialMovementCategory.COSTO_VENTA,
-        amount: 0,
+        amount: -200,
       }),
     ]);
   });
@@ -243,5 +243,41 @@ describe('FinancialMovementsService', () => {
       sourceType: FinancialMovementSourceType.SALE_NOTE,
       sourceID: 'sale-1',
     });
+  });
+
+  it('records negative VENTA and COSTO_VENTA for a returned nota de venta', async () => {
+    const ret = {
+      returnID: 'return-1',
+      tenantID: 'tenant-1',
+      storeID: 'store-1',
+      issueDate: new Date('2026-08-25'),
+      netTotal: 840.34,
+      taxTotal: 159.66,
+      cogsTotal: 400,
+    };
+
+    await service.recordReturnForSaleNote(manager as any, ret as any);
+
+    expect(manager.delete).toHaveBeenCalledWith(FinancialMovement, {
+      sourceType: FinancialMovementSourceType.RETURN,
+      sourceID: 'return-1',
+    });
+    expect(manager.save).toHaveBeenCalledWith([
+      expect.objectContaining({
+        direction: FinancialMovementDirection.INGRESO,
+        category: FinancialMovementCategory.VENTA,
+        amount: -840.34,
+        taxAmount: -159.66,
+        sourceType: FinancialMovementSourceType.RETURN,
+        sourceID: 'return-1',
+      }),
+      expect.objectContaining({
+        direction: FinancialMovementDirection.EGRESO,
+        category: FinancialMovementCategory.COSTO_VENTA,
+        amount: -400,
+        sourceType: FinancialMovementSourceType.RETURN,
+        sourceID: 'return-1',
+      }),
+    ]);
   });
 });

@@ -23,6 +23,7 @@ export function calculateInventoryDelta(input: InventoryDeltaInput): number {
 
     case InventoryMovementReason.PURCHASE:
     case InventoryMovementReason.TRANSFER_IN:
+    case InventoryMovementReason.RETURN:
       if (input.quantity === undefined || input.quantity <= 0) {
         throw new BadRequestException('Quantity required for this operation');
       }
