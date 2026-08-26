@@ -1,5 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
-import { EntityManager } from 'typeorm';
+import { EntityManager, In } from 'typeorm';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { Sale } from '../sales/entities/sale.entity';
 import { Return, ReturnStatus } from './entities/return.entity';
@@ -98,7 +98,7 @@ export async function findActiveReturnsForSale(
   return manager.getRepository(Return).find({
     where: {
       saleID,
-      status: activeReturnStatuses() as unknown as ReturnStatus,
+      status: In(activeReturnStatuses()),
     },
     relations: ['items'],
   });
