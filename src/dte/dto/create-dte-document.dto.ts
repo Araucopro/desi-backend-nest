@@ -765,12 +765,14 @@ export class DteReferenciaDto {
 
   @ApiPropertyOptional({
     description:
-      'Código de referencia SII: 1 anulación total, 6 devolución parcial, 4 descuento posterior',
-    example: '6',
+      'Código de referencia SII: 1 anula documento de referencia, 2 corrige texto, 3 corrige montos',
+    example: 3,
   })
   @IsOptional()
-  @IsString()
-  CodRef?: string;
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([1, 2, 3])
+  CodRef?: number;
 
   @ApiPropertyOptional({
     description: 'Razón de la referencia',

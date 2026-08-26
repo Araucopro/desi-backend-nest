@@ -16,7 +16,7 @@ export type ReturnNceInput = {
   sale: Sale & { store: Store };
   ret: Return;
   originalDocumentType: 33 | 39;
-  codRef: '1' | '6' | '4' | null;
+  codRef: 1 | 3 | null;
 };
 
 @Injectable()

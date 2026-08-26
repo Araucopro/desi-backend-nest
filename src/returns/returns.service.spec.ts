@@ -288,7 +288,7 @@ describe('ReturnsService', () => {
     const result = await ctx.service.approve('ret-1', 'store-1', 'admin-1');
 
     expect(ctx.mapper.mapReturnToNce).toHaveBeenCalledWith(
-      expect.objectContaining({ originalDocumentType: 39, codRef: '6' }),
+      expect.objectContaining({ originalDocumentType: 39, codRef: 3 }),
     );
     expect(ctx.dteService.create).toHaveBeenCalledWith(
       'store-1',

@@ -124,7 +124,7 @@ describe('returns-engine', () => {
     expect(resolveEffectiveDocument(converted, ReturnType.PARCIAL)).toEqual({
       requiresNce: true,
       documentType: 33,
-      codRef: '6',
+      codRef: 3,
     });
   });
 
@@ -135,14 +135,12 @@ describe('returns-engine', () => {
       dteDocument: { documentType: 39 } as any,
     });
 
-    expect(resolveEffectiveDocument(dteSale, ReturnType.TOTAL).codRef).toBe(
-      '1',
-    );
+    expect(resolveEffectiveDocument(dteSale, ReturnType.TOTAL).codRef).toBe(1);
     expect(resolveEffectiveDocument(dteSale, ReturnType.PARCIAL).codRef).toBe(
-      '6',
+      3,
     );
     expect(resolveEffectiveDocument(dteSale, ReturnType.DESCUENTO).codRef).toBe(
-      '4',
+      3,
     );
   });
 

@@ -45,7 +45,7 @@ export type PreparedReturn = {
 export type EffectiveDocument = {
   requiresNce: boolean;
   documentType: 33 | 39 | null;
-  codRef: '1' | '6' | '4' | null;
+  codRef: 1 | 3 | null;
 };
 
 export function toMoney(value: number): number {
@@ -100,10 +100,9 @@ export function resolveEffectiveDocument(
   return { requiresNce: false, documentType: null, codRef: null };
 }
 
-function resolveCodRef(returnType: ReturnType): '1' | '6' | '4' {
-  if (returnType === ReturnType.TOTAL) return '1';
-  if (returnType === ReturnType.PARCIAL) return '6';
-  return '4';
+function resolveCodRef(returnType: ReturnType): 1 | 3 {
+  if (returnType === ReturnType.TOTAL) return 1;
+  return 3;
 }
 
 export function calculateAvailableQuantities(

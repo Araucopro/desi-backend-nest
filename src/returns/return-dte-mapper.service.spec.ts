@@ -101,7 +101,7 @@ describe('ReturnDteMapperService', () => {
       sale: sale(),
       ret: ret(),
       originalDocumentType: 39,
-      codRef: '6',
+      codRef: 3,
     });
 
     expect(dto.dte.Encabezado.IdDoc).toMatchObject({
@@ -135,7 +135,7 @@ describe('ReturnDteMapperService', () => {
         TpoDocRef: 39,
         FolioRef: 1024,
         FchRef: '2026-08-18',
-        CodRef: '6',
+        CodRef: 3,
       },
     ]);
   });
@@ -156,7 +156,7 @@ describe('ReturnDteMapperService', () => {
       sale: facturaSale,
       ret: ret(),
       originalDocumentType: 33,
-      codRef: '6',
+      codRef: 3,
     });
 
     expect(dto.dte.Encabezado.IdDoc).toMatchObject({ TipoDTE: 61 });
@@ -200,7 +200,7 @@ describe('ReturnDteMapperService', () => {
         total: 595,
       }),
       originalDocumentType: 39,
-      codRef: '4',
+      codRef: 3,
     });
 
     expect(dto.dte.Detalle).toHaveLength(1);
@@ -209,6 +209,6 @@ describe('ReturnDteMapperService', () => {
       MontoItem: 595,
     });
     expect(dto.dte.Detalle[0]).not.toHaveProperty('CdgItem');
-    expect(dto.dte.Referencia).toMatchObject([{ CodRef: '4' }]);
+    expect(dto.dte.Referencia).toMatchObject([{ CodRef: 3 }]);
   });
 });

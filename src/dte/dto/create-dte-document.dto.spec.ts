@@ -308,7 +308,7 @@ describe('CreateDteDocumentDto', () => {
             TpoDocRef: 39,
             FolioRef: 1024,
             FchRef: '2026-08-18',
-            CodRef: '6',
+            CodRef: 3,
             RazonRef: 'Devolución parcial',
           },
         },
@@ -479,7 +479,7 @@ describe('CreateDteDocumentDto', () => {
           TpoDocRef: 39,
           FolioRef: 1024,
           FchRef: '2026-08-18',
-          CodRef: '6',
+          CodRef: 3,
         },
       },
     });
@@ -487,11 +487,54 @@ describe('CreateDteDocumentDto', () => {
     const instance = plainToInstance(CreateDteDocumentDto, payload);
     expect(instance.dte.Referencia).toHaveLength(1);
     expect(instance.dte.Referencia![0].TpoDocRef).toBe(39);
+    expect(instance.dte.Referencia![0].CodRef).toBe(3);
     const errors = await validate(instance, {
       whitelist: true,
       forbidNonWhitelisted: true,
     });
     expect(errors).toEqual([]);
+  });
+
+  it('rejects CodRef fuera del rango SII (1-3)', async () => {
+    const errors = await validateDto(
+      basePayload({
+        dte: {
+          Encabezado: {
+            IdDoc: {
+              TipoDTE: 61,
+              FchEmis: '2026-08-25',
+              IndServicio: '3',
+            },
+            Emisor: {
+              RUTEmisor: '76123456-7',
+              RznSocEmisor: 'Tienda Demo SpA',
+            },
+            Receptor: {
+              RUTRecep: '66666666-6',
+              RznSocRecep: 'Anonimo',
+            },
+          },
+          Detalle: [
+            {
+              NroLinDet: 1,
+              NmbItem: 'Producto A',
+              QtyItem: 1,
+              PrcItem: 1190,
+              MontoItem: 1190,
+            },
+          ],
+          Referencia: {
+            NroLinRef: 1,
+            TpoDocRef: 39,
+            FolioRef: 1024,
+            FchRef: '2026-08-18',
+            CodRef: 4,
+          },
+        },
+      }),
+    );
+
+    expect(errors.length).toBeGreaterThan(0);
   });
 
   it('rejects a factura without receptor', async () => {
