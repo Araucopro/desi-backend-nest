@@ -1,5 +1,11 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsEnum, MinLength } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsEnum,
+  MinLength,
+  IsUUID,
+} from 'class-validator';
 import { UserRole, UserStatus } from '../entities/user.entity';
 
 export class UpdateUserDto {
@@ -19,6 +25,11 @@ export class UpdateUserDto {
   @IsOptional()
   @IsEnum(UserRole)
   role?: UserRole;
+
+  @ApiPropertyOptional({ description: 'ID del rol tenant asignado' })
+  @IsOptional()
+  @IsUUID()
+  roleID?: string;
 
   @ApiPropertyOptional({
     description: 'Estado del usuario',

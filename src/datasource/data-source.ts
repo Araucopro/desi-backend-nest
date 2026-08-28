@@ -11,5 +11,6 @@ export default new DataSource({
   database: process.env.PGDATABASE || 'postgres',
   entities: [__dirname + '/../**/*.entity{.ts,.js}'],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
+  migrationsTransactionMode: 'each',
   synchronize: false,
 });

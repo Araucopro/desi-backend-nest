@@ -27,6 +27,9 @@ export class UserListItemDto {
   })
   role!: UserRole;
 
+  @ApiPropertyOptional({ description: 'ID del rol tenant' })
+  roleID?: string | null;
+
   @ApiPropertyOptional({
     description: 'URL de la imagen de perfil',
     nullable: true,

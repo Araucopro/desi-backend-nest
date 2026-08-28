@@ -10,6 +10,10 @@ import { DispatchGuideItem } from './entities/dispatch-guide-item.entity';
 import { DispatchGuideReferenceItem } from './entities/dispatch-guide-reference-item.entity';
 import { ListDispatchGuidesQueryDto } from './dto/list-dispatch-guides.query.dto';
 import { PreparedDispatchGuide } from './dispatch-guides-engine';
+import { applyOwnershipScope } from '../common/authorization/apply-ownership-scope';
+import { PermissionScope } from '../roles/entities/role-permission.entity';
+
+type Ownership = { scope: PermissionScope; ownerId: string };
 
 export const DISPATCH_GUIDE_LOAD_RELATIONS = [
   'items',
@@ -46,13 +50,36 @@ export async function loadDispatchGuide(
   manager: EntityManager,
   dispatchGuideID: string,
   storeID?: string,
+  ownership?: Ownership,
 ): Promise<DispatchGuide> {
-  const guide = await manager.getRepository(DispatchGuide).findOne({
-    where: storeID
-      ? { dispatchGuideID, store: { storeID } }
-      : { dispatchGuideID },
-    relations: [...DISPATCH_GUIDE_LOAD_RELATIONS],
-  });
+  if (!ownership) {
+    const guide = await manager.getRepository(DispatchGuide).findOne({
+      where: storeID
+        ? { dispatchGuideID, store: { storeID } }
+        : { dispatchGuideID },
+      relations: [...DISPATCH_GUIDE_LOAD_RELATIONS],
+    });
+    if (!guide) {
+      throw new NotFoundException(
+        `Guía de despacho con ID ${dispatchGuideID} no encontrada`,
+      );
+    }
+    return guide;
+  }
+  const qb = manager
+    .getRepository(DispatchGuide)
+    .createQueryBuilder('guide')
+    .leftJoinAndSelect('guide.items', 'items')
+    .leftJoinAndSelect('guide.store', 'store')
+    .leftJoinAndSelect('guide.dteDocument', 'dteDocument')
+    .leftJoinAndSelect('guide.references', 'references')
+    .leftJoinAndSelect('references.dteDocument', 'referenceDte')
+    .leftJoinAndSelect('references.items', 'referenceItems')
+    .where('guide.dispatchGuideID = :dispatchGuideID', { dispatchGuideID });
+  if (storeID) qb.andWhere('guide.storeID = :storeID', { storeID });
+  if (ownership)
+    applyOwnershipScope(qb, 'guide', ownership.scope, ownership.ownerId);
+  const guide = await qb.getOne();
   if (!guide) {
     throw new NotFoundException(
       `Guía de despacho con ID ${dispatchGuideID} no encontrada`,
@@ -190,6 +217,7 @@ export async function listDispatchGuides(
   manager: EntityManager,
   storeID: string,
   query: ListDispatchGuidesQueryDto,
+  ownership?: Ownership,
 ): Promise<{ dispatchGuides: DispatchGuide[]; total: number }> {
   const page = query.page ?? 1;
   const limit = query.limit ?? 50;
@@ -204,6 +232,8 @@ export async function listDispatchGuides(
     .leftJoinAndSelect('references.dteDocument', 'referenceDte')
     .leftJoinAndSelect('references.items', 'referenceItems')
     .where('guide.storeID = :storeID', { storeID });
+  if (ownership)
+    applyOwnershipScope(qb, 'guide', ownership.scope, ownership.ownerId);
 
   if (query.status) {
     qb.andWhere('guide.status = :status', { status: query.status });
@@ -230,7 +260,8 @@ export function createDispatchGuideEntity(
     dispatchGuideID: string;
     tenantID: string | undefined;
     storeID: string;
-    userID: string | null;
+    userID: string;
+    impersonatedBy?: string | null;
     idempotencyKey: string | null;
     prepared: PreparedDispatchGuide;
   },
@@ -240,6 +271,7 @@ export function createDispatchGuideEntity(
     tenantID: input.tenantID,
     store: { storeID: input.storeID },
     userID: input.userID,
+    impersonatedBy: input.impersonatedBy ?? null,
     status: input.prepared.status,
     idempotencyKey: input.idempotencyKey,
     issueDate: input.prepared.issueDate,

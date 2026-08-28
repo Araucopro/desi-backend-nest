@@ -130,8 +130,11 @@ export class Return {
   })
   cogsTotal!: number;
 
+  @Column({ type: 'uuid' })
+  userID!: string;
+
   @Column({ type: 'uuid', nullable: true })
-  userID!: string | null;
+  impersonatedBy!: string | null;
 
   @Column({ type: 'uuid', nullable: true })
   approvedBy!: string | null;

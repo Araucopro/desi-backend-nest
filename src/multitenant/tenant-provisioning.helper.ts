@@ -15,9 +15,10 @@ import { UpdateUserDto } from '../users/dto/update-user.dto';
 import { CreateStoreDto } from '../stores/dto/create-store.dto';
 import { UpdateStoreDto } from '../stores/dto/update-store.dto';
 import { Store } from '../stores/entities/store.entity';
-import { User } from '../users/entities/user.entity';
+import { User, UserRole, UserStatus } from '../users/entities/user.entity';
 import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { Category } from '../categories/entities/category.entity';
+import { ensureTenantRoles } from '../roles/tenant-roles.helper';
 
 export async function provisionTenant(
   tenants: Repository<Tenant>,
@@ -38,6 +39,22 @@ export async function provisionTenant(
     { tenantId: tenantID, masterUserId: masterUserID, impersonating: false },
     () =>
       tenantContext.transaction(async (manager) => {
+        const roles = await ensureTenantRoles(manager, tenantID);
+        if (roles.size > 0) {
+          const systemUser = manager.create(User, {
+            tenantID,
+            email: `system+${tenantID}@system.invalid`,
+            name: 'System',
+            password:
+              '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+            role: UserRole.SYSTEM,
+            roleID: roles.get('system')!.id,
+            isSystem: true,
+            status: UserStatus.INACTIVE,
+            sessionVersion: 1,
+          });
+          await manager.save(User, systemUser);
+        }
         const store = manager.create(Store, {
           ...dto.store,
           tenantID,
@@ -49,7 +66,11 @@ export async function provisionTenant(
           email: dto.user.email,
           name: dto.user.name,
           password: passwordHash,
-          role: dto.user.role,
+          role: dto.user.role ?? UserRole.ADMIN,
+          roleID: (dto.user.roleID
+            ? roles.get(dto.user.roleID)
+            : roles.get(dto.user.role ?? UserRole.ADMIN)
+          )?.id,
           userImg: dto.user.userImg ?? null,
           sessionVersion: 1,
         });
@@ -116,19 +137,26 @@ export async function createTenantUser(
 
         const userRepository = manager.getRepository(User);
         const userCount = await userRepository.count({
-          where: { tenantID },
+          where: { tenantID, isSystem: false },
         });
         if (userCount >= tenant.maxUsers)
           throw new ForbiddenException(
             `Tenant user limit (${tenant.maxUsers}) exceeded`,
           );
 
+        const roles = await ensureTenantRoles(manager, tenantID);
+        const selectedRole = dto.roleID
+          ? roles.get(dto.roleID)
+          : roles.get(dto.role!);
+        if (!selectedRole && roles.size > 0)
+          throw new NotFoundException('Role not found for tenant');
         let savedUser: User;
         try {
           savedUser = await userRepository.save(
             userRepository.create({
               ...dto,
               tenantID,
+              roleID: selectedRole?.id,
               password: passwordHash,
               sessionVersion: 1,
             }),

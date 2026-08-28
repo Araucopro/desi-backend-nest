@@ -18,8 +18,8 @@ import { UserListResponseDto } from './dto/user-list-response.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { Store } from '../stores/entities/store.entity';
 import { CustomMessage } from '../common/decorators/response-message';
-import { User, UserRole } from './entities/user.entity';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { User } from './entities/user.entity';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 
 @ApiTags('Usuarios')
 @Controller('users')
@@ -27,7 +27,7 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('users:manage')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Crear un nuevo usuario' })
   @ApiResponse({
@@ -42,7 +42,7 @@ export class UsersController {
   }
 
   @Get()
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('users:manage')
   @CustomMessage('Lista de usuarios obtenida exitosamente')
   @ApiOperation({
     summary: 'Obtener usuarios con paginación, búsqueda y filtros',
@@ -59,6 +59,7 @@ export class UsersController {
   }
 
   @Get(':id/stores')
+  @RequirePermission('users:manage')
   @ApiOperation({ summary: 'Obtener todas las tiendas de un usuario' })
   @ApiParam({
     name: 'id',
@@ -76,7 +77,7 @@ export class UsersController {
   }
 
   @Get(':email')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('users:manage')
   @CustomMessage('Usuario encontrado exitosamente')
   @ApiOperation({ summary: 'Buscar un usuario por su email' })
   @ApiParam({
@@ -91,7 +92,7 @@ export class UsersController {
   }
 
   @Patch(':id')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('users:manage')
   @ApiOperation({ summary: 'Actualizar un usuario por su ID' })
   @ApiParam({
     name: 'id',
@@ -109,7 +110,7 @@ export class UsersController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('users:manage')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Eliminar un usuario por su ID' })
   @ApiParam({

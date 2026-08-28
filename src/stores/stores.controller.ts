@@ -11,11 +11,11 @@ import { StoresService } from './stores.service';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { SetOpenfacturaKeyDto } from './dto/set-openfactura-key.dto';
-import { User, UserRole } from '../users/entities/user.entity';
+import { User } from '../users/entities/user.entity';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { Store } from './entities/store.entity';
 import { CustomMessage } from '../common/decorators/response-message';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 
 @ApiTags('Tiendas')
 @Controller('stores')
@@ -23,7 +23,7 @@ export class StoresController {
   constructor(private readonly storesService: StoresService) {}
 
   @Post()
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('stores:manage')
   @ApiOperation({
     summary: 'Crear una nueva tienda',
     description:
@@ -44,6 +44,7 @@ export class StoresController {
   }
 
   @Get()
+  @RequirePermission('stores:read')
   @ApiOperation({
     summary: 'Obtener todas las tiendas',
     description:
@@ -59,6 +60,7 @@ export class StoresController {
   }
 
   @Get(':id/users')
+  @RequirePermission('stores:read')
   @ApiOperation({ summary: 'Obtener todos los usuarios de una tienda' })
   @ApiParam({
     name: 'id',
@@ -76,6 +78,7 @@ export class StoresController {
   }
 
   @Get(':id')
+  @RequirePermission('stores:read')
   @ApiOperation({
     summary: 'Obtener una tienda por ID',
     description: 'Retorna la información detallada de una tienda específica.',
@@ -96,7 +99,7 @@ export class StoresController {
   }
 
   @Patch(':id')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('stores:manage')
   @ApiOperation({
     summary: 'Actualizar información de una tienda',
     description:
@@ -118,7 +121,7 @@ export class StoresController {
   }
 
   @Patch(':id/openfactura-key')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('stores:manage')
   @ApiOperation({
     summary: 'Configurar o actualizar la API key de Openfactura de una tienda',
     description:
@@ -148,7 +151,7 @@ export class StoresController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('stores:manage')
   @ApiOperation({
     summary: 'Eliminar una tienda',
     description: 'Elimina permanentemente una tienda del sistema.',

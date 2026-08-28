@@ -15,6 +15,7 @@ import { InventoryModule } from '../inventory/inventory.module';
 import { FinancialMovementsModule } from '../financial-movements/financial-movements.module';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { TransactionRunnerService } from '../common/services/transaction-runner.
     DteModule,
     InventoryModule,
     FinancialMovementsModule,
+    AuthModule,
   ],
   controllers: [ReturnsController],
   providers: [ReturnsService, ReturnDteMapperService, TransactionRunnerService],

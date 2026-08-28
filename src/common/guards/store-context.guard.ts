@@ -7,16 +7,17 @@ import {
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../../auth/decorators/public.decorator';
 import { MASTER_ROUTE } from '../../auth/decorators/master.decorator';
-import { UserRole } from '../../users/entities/user.entity';
 import { UserStore } from '../../relations/userstores/entities/userstore.entity';
 import { STORE_ID_HEADER } from '../../multitenant/multitenant.constants';
 import { TenantContextService } from '../../multitenant/tenant-context.service';
+import { AbilityFactory } from '../../auth/ability/ability.factory';
 
 @Injectable()
 export class StoreContextGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly tenantContext: TenantContextService,
+    private readonly abilityFactory: AbilityFactory,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -53,8 +54,8 @@ export class StoreContextGuard implements CanActivate {
       throw new ForbiddenException('User context missing');
     }
 
-    // Los administradores de tenant o master admins tienen acceso a todas las tiendas
-    if (payload.role === UserRole.ADMIN || payload.type === 'master') {
+    const ability = await this.abilityFactory.createFor(payload);
+    if (ability.can('stores:bypass-scope')) {
       request.storeId = storeId;
       return true;
     }

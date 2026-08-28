@@ -11,6 +11,10 @@ import {
   PreparedReturn,
   PreparedReturnItem,
 } from './returns-engine';
+import { applyOwnershipScope } from '../common/authorization/apply-ownership-scope';
+import { PermissionScope } from '../roles/entities/role-permission.entity';
+
+type Ownership = { scope: PermissionScope; ownerId: string };
 
 export async function findSaleForReturn(
   manager: EntityManager,
@@ -40,20 +44,40 @@ export async function loadReturn(
   manager: EntityManager,
   returnID: string,
   storeID?: string,
+  ownership?: Ownership,
 ): Promise<Return> {
-  const where = storeID ? { returnID, store: { storeID } } : { returnID };
-  const ret = await manager.getRepository(Return).findOne({
-    where,
-    relations: [
-      'items',
-      'sale',
-      'sale.items',
-      'sale.store',
-      'sale.dteDocument',
-      'dteDocument',
-      'store',
-    ],
-  });
+  if (!ownership) {
+    const where = storeID ? { returnID, store: { storeID } } : { returnID };
+    const ret = await manager.getRepository(Return).findOne({
+      where,
+      relations: [
+        'items',
+        'sale',
+        'sale.items',
+        'sale.store',
+        'sale.dteDocument',
+        'dteDocument',
+        'store',
+      ],
+    });
+    if (!ret)
+      throw new NotFoundException(
+        `Devolución con ID ${returnID} no encontrada`,
+      );
+    return ret;
+  }
+  const qb = manager
+    .getRepository(Return)
+    .createQueryBuilder('ret')
+    .leftJoinAndSelect('ret.items', 'items')
+    .leftJoinAndSelect('ret.sale', 'sale')
+    .leftJoinAndSelect('ret.dteDocument', 'dteDocument')
+    .leftJoinAndSelect('ret.store', 'store')
+    .where('ret.returnID = :returnID', { returnID });
+  if (storeID) qb.andWhere('ret.storeID = :storeID', { storeID });
+  if (ownership)
+    applyOwnershipScope(qb, 'ret', ownership.scope, ownership.ownerId);
+  const ret = await qb.getOne();
   if (!ret) {
     throw new NotFoundException(`Devolución con ID ${returnID} no encontrada`);
   }
@@ -108,6 +132,7 @@ export async function listReturns(
   manager: EntityManager,
   storeID: string,
   query: ListReturnsQueryDto,
+  ownership?: Ownership,
 ): Promise<{ returns: Return[]; total: number }> {
   const page = query.page ?? 1;
   const limit = query.limit ?? 50;
@@ -119,6 +144,8 @@ export async function listReturns(
     .leftJoinAndSelect('ret.sale', 'sale')
     .leftJoinAndSelect('ret.dteDocument', 'dteDocument')
     .where('ret.storeID = :storeID', { storeID });
+  if (ownership)
+    applyOwnershipScope(qb, 'ret', ownership.scope, ownership.ownerId);
 
   if (query.saleID)
     qb.andWhere('ret.saleID = :saleID', { saleID: query.saleID });
@@ -180,7 +207,8 @@ export function createReturnEntity(
     tenantID: string | undefined;
     storeID: string;
     saleID: string;
-    userID: string | null;
+    userID: string;
+    impersonatedBy?: string | null;
     prepared: PreparedReturn;
     idempotencyKey: string | null;
   },
@@ -191,6 +219,7 @@ export function createReturnEntity(
     store: { storeID: input.storeID },
     sale: { saleID: input.saleID },
     userID: input.userID,
+    impersonatedBy: input.impersonatedBy ?? null,
     returnType: input.prepared.returnType,
     status: ReturnStatus.PENDIENTE,
     reason: input.prepared.reason,

@@ -7,7 +7,7 @@ import * as bcrypt from 'bcrypt';
 import { Tenant, TenantStatus } from '../multitenant/entities/tenant.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import { User } from '../users/entities/user.entity';
+import { User, UserStatus } from '../users/entities/user.entity';
 
 @Injectable()
 export class AuthService {
@@ -39,7 +39,8 @@ export class AuthService {
       // Buscamos al usuario por email globalmente porque el login aún no
       // tiene token/tenant_id (problema chicken-and-egg).
       const user = await this.findUserByEmailGlobal(email);
-      if (!user) throw new UnauthorizedException('Invalid credentials');
+      if (!user || user.isSystem || user.status === UserStatus.INACTIVE)
+        throw new UnauthorizedException('Invalid credentials');
 
       // Validar que el tenant del usuario esté activo
       const tenant = await this.tenantRepo.findOne({
@@ -62,6 +63,7 @@ export class AuthService {
         id: user.userID,
         email: user.email,
         role: user.role,
+        roleID: user.roleID ?? undefined,
       };
 
       return {
@@ -70,6 +72,7 @@ export class AuthService {
           email: user.email,
           name: user.name,
           role: user.role,
+          roleID: user.roleID,
           userImg: user.userImg,
         },
         accessToken: await this.jwtService.signAsync(payload),
@@ -93,6 +96,7 @@ export class AuthService {
       id: user.userID,
       email: user.email,
       role: user.role,
+      roleID: user.roleID ?? undefined,
     };
 
     return {
@@ -101,6 +105,7 @@ export class AuthService {
         email: user.email,
         name: user.name,
         role: user.role,
+        roleID: user.roleID,
         userImg: user.userImg,
       },
       accessToken: await this.jwtService.signAsync(payload),

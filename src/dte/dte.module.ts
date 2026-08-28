@@ -17,10 +17,12 @@ import { UserstoresModule } from '../relations/userstores/userstores.module';
 import { StoresModule } from '../stores/stores.module';
 import { FinancialMovementsModule } from '../financial-movements/financial-movements.module';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
     ConfigModule,
+    AuthModule,
     MultitenantModule,
     UserstoresModule,
     StoresModule,

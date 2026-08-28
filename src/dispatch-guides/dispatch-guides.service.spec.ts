@@ -32,7 +32,7 @@ function createContext() {
     dispatchGuideID: 'dg-1',
     tenantID: 'tenant-1',
     storeID: 'store-1',
-    userID: null,
+    userID: 'user-1',
     status: DispatchGuideStatus.PENDIENTE,
     folio: null,
     dteDocumentID: null,

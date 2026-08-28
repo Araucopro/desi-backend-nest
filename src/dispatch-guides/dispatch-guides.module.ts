@@ -16,6 +16,7 @@ import { PricingModule } from '../pricing/pricing.module';
 import { DteModule } from '../dte/dte.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { TransactionRunnerService } from '../common/services/transaction-runner.
     PricingModule,
     DteModule,
     InventoryModule,
+    AuthModule,
   ],
   controllers: [DispatchGuidesController],
   providers: [

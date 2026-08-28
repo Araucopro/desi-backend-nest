@@ -56,6 +56,9 @@ describe('UsersService', () => {
     email: 'test@example.com',
     name: 'Test User',
     role: UserRole.STORE_MANAGER,
+    roleID: 'role-1',
+    isSystem: false,
+    sessionVersion: 1,
     status: UserStatus.ACTIVE,
     password: 'hashedPassword',
     userStores: [],
@@ -128,6 +131,8 @@ describe('UsersService', () => {
       expect(mockQueryBuilder.getExists).toHaveBeenCalled();
       expect(mockUserTxRepository.create).toHaveBeenCalledWith({
         ...createDto,
+        roleID: undefined,
+        tenantID: undefined,
         status: UserStatus.ACTIVE,
         password: 'hashedPassword',
       });
@@ -349,13 +354,14 @@ describe('UsersService', () => {
   });
 
   describe('remove', () => {
-    it('should remove a user', async () => {
+    it('should deactivate a user instead of deleting it', async () => {
       mockUserRepository.findOne.mockResolvedValue(mockUser);
-      mockUserRepository.remove.mockResolvedValue(mockUser);
+      mockUserRepository.save.mockResolvedValue(mockUser);
 
       await service.remove('uuid-1');
 
-      expect(mockUserRepository.remove).toHaveBeenCalledWith(mockUser);
+      expect(mockUser.status).toBe(UserStatus.INACTIVE);
+      expect(mockUserRepository.save).toHaveBeenCalledWith(mockUser);
     });
 
     it('should throw NotFoundException if user not found', async () => {

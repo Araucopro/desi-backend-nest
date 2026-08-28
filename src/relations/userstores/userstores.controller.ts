@@ -14,8 +14,7 @@ import { UserStore } from './entities/userstore.entity';
 import { AuthGuard } from '../../auth/guards/auth.guard';
 import { GetUser } from '../../auth/decorators/get-user.decorator';
 import type { JwtPayload } from '../../auth/interfaces/jwt-payload.interface';
-import { Roles } from '../../auth/decorators/roles.decorator';
-import { UserRole } from '../../users/entities/user.entity';
+import { RequirePermission } from '../../auth/decorators/require-permission.decorator';
 
 @ApiTags('Usuarios de las Tiendas')
 @Controller('userstores')
@@ -23,7 +22,7 @@ export class UserstoresController {
   constructor(private readonly userstoresService: UserstoresService) {}
 
   @Post()
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('userstores:manage')
   @ApiOperation({
     summary: 'Asignar un usuario a una tienda',
     description:
@@ -40,7 +39,7 @@ export class UserstoresController {
   }
 
   @Get()
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('userstores:manage')
   @ApiOperation({
     summary: 'Obtener todas las relaciones usuario-tienda',
     description:
@@ -75,6 +74,7 @@ export class UserstoresController {
   }
 
   @Get(':id')
+  @RequirePermission('userstores:manage')
   @ApiOperation({
     summary: 'Obtener tiendas de un usuario',
     description: 'Retorna todas las tiendas a las que un usuario tiene acceso.',
@@ -95,7 +95,7 @@ export class UserstoresController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('userstores:manage')
   @ApiOperation({
     summary: 'Eliminar asignación usuario-tienda',
     description:

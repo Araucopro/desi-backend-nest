@@ -7,6 +7,10 @@ import { SaleItem } from './entities/sale-item.entity';
 import { Sale, SaleStatus } from './entities/sale.entity';
 import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
 import { PreparedSale, PreparedSaleItem } from './sales.types';
+import { applyOwnershipScope } from '../common/authorization/apply-ownership-scope';
+import { PermissionScope } from '../roles/entities/role-permission.entity';
+
+type Ownership = { scope: PermissionScope; ownerId: string };
 
 export async function findStoreById(
   manager: EntityManager,
@@ -34,11 +38,28 @@ export async function loadSale(
   manager: EntityManager,
   saleID: string,
   storeID?: string,
+  ownership?: Ownership,
 ): Promise<Sale> {
-  const sale = await manager.getRepository(Sale).findOne({
-    where: storeID ? { saleID, store: { storeID } } : { saleID },
-    relations: ['items', 'store', 'dteDocument'],
-  });
+  if (!ownership) {
+    const sale = await manager.getRepository(Sale).findOne({
+      where: storeID ? { saleID, store: { storeID } } : { saleID },
+      relations: ['items', 'store', 'dteDocument'],
+    });
+    if (!sale)
+      throw new NotFoundException(`Venta con ID ${saleID} no encontrada`);
+    return sale;
+  }
+  const repository = manager.getRepository(Sale);
+  const qb = repository
+    .createQueryBuilder('sale')
+    .leftJoinAndSelect('sale.items', 'items')
+    .leftJoinAndSelect('sale.store', 'store')
+    .leftJoinAndSelect('sale.dteDocument', 'dteDocument')
+    .where('sale.saleID = :saleID', { saleID });
+  if (storeID) qb.andWhere('sale.storeID = :storeID', { storeID });
+  if (ownership)
+    applyOwnershipScope(qb, 'sale', ownership.scope, ownership.ownerId);
+  const sale = await qb.getOne();
   if (!sale) {
     throw new NotFoundException(`Venta con ID ${saleID} no encontrada`);
   }
@@ -105,6 +126,7 @@ export async function listSales(
   manager: EntityManager,
   storeID: string,
   query: ListSalesQueryDto,
+  ownership?: Ownership,
 ): Promise<{ sales: Sale[]; total: number }> {
   const page = query.page ?? 1;
   const limit = query.limit ?? 50;
@@ -116,6 +138,8 @@ export async function listSales(
     .leftJoinAndSelect('sale.store', 'store')
     .leftJoinAndSelect('sale.dteDocument', 'dteDocument')
     .where('sale.storeID = :storeID', { storeID });
+  if (ownership)
+    applyOwnershipScope(qb, 'sale', ownership.scope, ownership.ownerId);
 
   if (query.saleType) {
     qb.andWhere('sale.saleType = :saleType', {
@@ -145,7 +169,8 @@ export type CreateSaleEntityInput = {
   saleID: string;
   tenantID: string | undefined;
   storeID: string;
-  userID: string | null;
+  userID: string;
+  impersonatedBy?: string | null;
   saleType: PreparedSale['saleType'];
   status: SaleStatus;
   paymentType: PreparedSale['paymentType'];
@@ -171,6 +196,7 @@ export function createSaleEntity(
     tenantID: input.tenantID,
     store: { storeID: input.storeID },
     userID: input.userID,
+    impersonatedBy: input.impersonatedBy ?? null,
     saleType: input.saleType,
     status: input.status,
     paymentType: input.paymentType,

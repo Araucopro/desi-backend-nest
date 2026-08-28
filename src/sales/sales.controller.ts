@@ -18,23 +18,17 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { GetUser } from '../auth/decorators/get-user.decorator';
+import { GetAbility } from '../auth/decorators/get-ability.decorator';
+import { TenantAbility } from '../auth/ability/ability.factory';
 import { GetStoreId } from '../common/decorators/get-store-id.decorator';
 import { StoreContextGuard } from '../common/guards/store-context.guard';
-import { UserRole } from '../users/entities/user.entity';
 import { SalesService } from './sales.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { ListSalesQueryDto } from './dto/list-sales.query.dto';
 import { ConvertSaleDto } from './dto/convert-sale.dto';
 import { SaleListResponseDto, SaleResponseDto } from './dto/sale-response.dto';
-
-const SALE_ROLES = [
-  UserRole.ADMIN,
-  UserRole.STORE_MANAGER,
-  UserRole.CONSIGNADO,
-  UserRole.TERCERO,
-];
 
 @ApiTags('Ventas')
 @Controller('sales')
@@ -43,7 +37,7 @@ export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
   @Post()
-  @Roles(...SALE_ROLES)
+  @RequirePermission('sales:write')
   @ApiOperation({
     summary: 'Crear venta (boleta, factura o nota de venta)',
     description:
@@ -64,14 +58,21 @@ export class SalesController {
   create(
     @GetStoreId() storeID: string,
     @GetUser('userId') userId: string | undefined,
+    @GetUser('masterUserId') impersonatedBy: string | undefined,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() dto: CreateSaleDto,
   ) {
-    return this.salesService.create(storeID, idempotencyKey, dto, userId);
+    return this.salesService.create(
+      storeID,
+      idempotencyKey,
+      dto,
+      userId,
+      impersonatedBy,
+    );
   }
 
   @Get()
-  @Roles(...SALE_ROLES)
+  @RequirePermission('sales:read')
   @ApiOperation({
     summary: 'Listar ventas',
     description:
@@ -97,24 +98,31 @@ export class SalesController {
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
   @ApiResponse({ status: 200, type: SaleListResponseDto })
-  findAll(@GetStoreId() storeID: string, @Query() query: ListSalesQueryDto) {
-    return this.salesService.findAll(storeID, query);
+  findAll(
+    @GetStoreId() storeID: string,
+    @Query() query: ListSalesQueryDto,
+    @GetUser('userId') userId: string | undefined,
+    @GetAbility() ability: TenantAbility | undefined,
+  ) {
+    return this.salesService.findAll(storeID, query, userId, ability);
   }
 
   @Get(':saleID')
-  @Roles(...SALE_ROLES)
+  @RequirePermission('sales:read')
   @ApiOperation({ summary: 'Obtener venta por ID' })
   @ApiParam({ name: 'saleID', description: 'UUID de la venta' })
   @ApiResponse({ status: 200, type: SaleResponseDto })
   findOne(
     @Param('saleID', ParseUUIDPipe) saleID: string,
     @GetStoreId() storeID: string,
+    @GetUser('userId') userId: string | undefined,
+    @GetAbility() ability: TenantAbility | undefined,
   ) {
-    return this.salesService.findOne(saleID, storeID);
+    return this.salesService.findOne(saleID, storeID, userId, ability);
   }
 
   @Post(':saleID/convert')
-  @Roles(...SALE_ROLES)
+  @RequirePermission('sales:convert')
   @ApiOperation({
     summary: 'Convertir nota de venta a boleta o factura electrónica',
     description:
@@ -126,8 +134,10 @@ export class SalesController {
   convert(
     @Param('saleID', ParseUUIDPipe) saleID: string,
     @GetStoreId() storeID: string,
-    @Body() dto?: ConvertSaleDto,
+    @Body() dto: ConvertSaleDto | undefined,
+    @GetUser('userId') userId: string | undefined,
+    @GetAbility() ability: TenantAbility | undefined,
   ) {
-    return this.salesService.convert(saleID, storeID, dto);
+    return this.salesService.convert(saleID, storeID, dto, userId, ability);
   }
 }

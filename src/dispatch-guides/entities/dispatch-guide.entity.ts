@@ -61,8 +61,11 @@ export class DispatchGuide {
   @Column({ type: 'uuid' })
   storeID!: string;
 
+  @Column({ type: 'uuid' })
+  userID!: string;
+
   @Column({ type: 'uuid', nullable: true })
-  userID!: string | null;
+  impersonatedBy!: string | null;
 
   @Column({
     type: 'enum',

@@ -42,6 +42,9 @@ import {
 } from './returns-engine';
 import { toReturnView } from './returns-view.mapper';
 import { ReturnView } from './returns.types';
+import { TenantAbility } from '../auth/ability/ability.factory';
+import { PermissionScope } from '../roles/entities/role-permission.entity';
+import { AbilityFactory } from '../auth/ability/ability.factory';
 
 @Injectable()
 export class ReturnsService implements OnModuleInit {
@@ -59,6 +62,7 @@ export class ReturnsService implements OnModuleInit {
     private readonly financialMovementsService: FinancialMovementsService,
     @Optional() private readonly tenantContext?: TenantContextService,
     @Optional() private readonly transactionRunner?: TransactionRunnerService,
+    @Optional() private readonly abilityFactory?: AbilityFactory,
   ) {}
 
   onModuleInit(): void {
@@ -91,7 +95,13 @@ export class ReturnsService implements OnModuleInit {
     idempotencyKey: string | undefined,
     dto: CreateReturnDto,
     userId?: string,
+    impersonatedBy?: string,
   ): Promise<ReturnView> {
+    const ownerId =
+      userId ??
+      (this.abilityFactory
+        ? await this.abilityFactory.getSystemUserId()
+        : undefined);
     return this.runInTransaction(async (manager) => {
       if (idempotencyKey) {
         const existing = await findReturnByIdempotencyKey(
@@ -128,7 +138,8 @@ export class ReturnsService implements OnModuleInit {
         tenantID,
         storeID,
         saleID: dto.saleID,
-        userID: userId ?? null,
+        userID: ownerId!,
+        impersonatedBy: impersonatedBy ?? null,
         prepared,
         idempotencyKey: idempotencyKey ?? null,
       });
@@ -160,11 +171,26 @@ export class ReturnsService implements OnModuleInit {
     });
   }
 
-  async findAll(storeID: string, query: ListReturnsQueryDto) {
+  async findAll(
+    storeID: string,
+    query: ListReturnsQueryDto,
+    userId?: string,
+    ability?: TenantAbility,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
     const { returns, total } = await this.runInTransaction((manager) =>
-      listReturns(manager, storeID, query),
+      listReturns(
+        manager,
+        storeID,
+        query,
+        userId && ability
+          ? {
+              scope: ability.scopeFor('returns:read') ?? PermissionScope.ALL,
+              ownerId: userId,
+            }
+          : undefined,
+      ),
     );
     return {
       returns: returns.map((ret) => toReturnView(ret)),
@@ -172,9 +198,26 @@ export class ReturnsService implements OnModuleInit {
     };
   }
 
-  async findOne(returnID: string, storeID: string): Promise<ReturnView> {
+  async findOne(
+    returnID: string,
+    storeID: string,
+    userId?: string,
+    ability?: TenantAbility,
+  ): Promise<ReturnView> {
     return this.runInTransaction(async (manager) =>
-      toReturnView(await loadReturn(manager, returnID, storeID)),
+      toReturnView(
+        await loadReturn(
+          manager,
+          returnID,
+          storeID,
+          userId && ability
+            ? {
+                scope: ability.scopeFor('returns:read') ?? PermissionScope.ALL,
+                ownerId: userId,
+              }
+            : undefined,
+        ),
+      ),
     );
   }
 
@@ -182,10 +225,18 @@ export class ReturnsService implements OnModuleInit {
     returnID: string,
     storeID: string,
     userId?: string,
+    ability?: TenantAbility,
   ): Promise<ReturnView> {
     const current = await this.runInTransaction((manager) =>
       loadReturnForUpdate(manager, returnID, storeID),
     );
+    if (
+      userId &&
+      ability &&
+      !ability.can('returns:approve', current.userID, userId)
+    ) {
+      throw new BadRequestException('La devolución no está disponible');
+    }
 
     if (current.status === ReturnStatus.COMPLETADA) {
       return toReturnView(current);
@@ -287,9 +338,21 @@ export class ReturnsService implements OnModuleInit {
     });
   }
 
-  async reject(returnID: string, storeID: string): Promise<ReturnView> {
+  async reject(
+    returnID: string,
+    storeID: string,
+    userId?: string,
+    ability?: TenantAbility,
+  ): Promise<ReturnView> {
     return this.runInTransaction(async (manager) => {
       const ret = await loadReturnForUpdate(manager, returnID, storeID);
+      if (
+        userId &&
+        ability &&
+        !ability.can('returns:reject', ret.userID, userId)
+      ) {
+        throw new BadRequestException('La devolución no está disponible');
+      }
       if (ret.status === ReturnStatus.RECHAZADA) {
         return toReturnView(ret);
       }
@@ -304,9 +367,21 @@ export class ReturnsService implements OnModuleInit {
     });
   }
 
-  async cancel(returnID: string, storeID: string): Promise<ReturnView> {
+  async cancel(
+    returnID: string,
+    storeID: string,
+    userId?: string,
+    ability?: TenantAbility,
+  ): Promise<ReturnView> {
     return this.runInTransaction(async (manager) => {
       const ret = await loadReturnForUpdate(manager, returnID, storeID);
+      if (
+        userId &&
+        ability &&
+        !ability.can('returns:cancel', ret.userID, userId)
+      ) {
+        throw new BadRequestException('La devolución no está disponible');
+      }
       if (ret.status === ReturnStatus.CANCELADA) {
         return toReturnView(ret);
       }
@@ -321,10 +396,22 @@ export class ReturnsService implements OnModuleInit {
     });
   }
 
-  async reconcile(returnID: string, storeID: string): Promise<ReturnView> {
+  async reconcile(
+    returnID: string,
+    storeID: string,
+    userId?: string,
+    ability?: TenantAbility,
+  ): Promise<ReturnView> {
     const current = await this.runInTransaction((manager) =>
       loadReturn(manager, returnID, storeID),
     );
+    if (
+      userId &&
+      ability &&
+      !ability.can('returns:reconcile', current.userID, userId)
+    ) {
+      throw new BadRequestException('La devolución no está disponible');
+    }
 
     if (current.status === ReturnStatus.COMPLETADA) {
       return toReturnView(current);

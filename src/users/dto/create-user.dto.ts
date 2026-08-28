@@ -5,6 +5,8 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
+  ValidateIf,
   MinLength,
 } from 'class-validator';
 import { UserRole, UserStatus } from '../entities/user.entity';
@@ -30,8 +32,14 @@ export class CreateUserDto {
     enum: UserRole,
     example: UserRole.STORE_MANAGER,
   })
+  @ValidateIf((dto) => !dto.roleID)
   @IsEnum(UserRole)
-  role!: UserRole;
+  role?: UserRole;
+
+  @ApiProperty({ description: 'ID del rol tenant asignado', required: false })
+  @ValidateIf((dto) => !dto.role)
+  @IsUUID()
+  roleID?: string;
 
   @ApiProperty({
     description: 'Estado del usuario',

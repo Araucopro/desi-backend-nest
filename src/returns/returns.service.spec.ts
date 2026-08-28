@@ -62,7 +62,7 @@ function createContext() {
     taxTotal: 190,
     total: 1190,
     cogsTotal: 400,
-    userID: null,
+    userID: 'user-1',
     approvedBy: null,
     approvedAt: null,
     completedAt: null,

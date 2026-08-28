@@ -5,7 +5,7 @@ import { UsersModule } from './users/users.module';
 import { DatabaseModule } from './datasource/database.module';
 import { AuthModule } from './auth/auth.module';
 import { AuthGuard } from './auth/guards/auth.guard';
-import { RolesGuard } from './auth/guards/roles.guard';
+import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { TenantContextGuard } from './multitenant/tenant-context.guard';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { StoresModule } from './stores/stores.module';
@@ -29,6 +29,7 @@ import { FinancialMovementsModule } from './financial-movements/financial-moveme
 import { SalesModule } from './sales/sales.module';
 import { ReturnsModule } from './returns/returns.module';
 import { DispatchGuidesModule } from './dispatch-guides/dispatch-guides.module';
+import { RoleAdminModule } from './roles/roles.module';
 
 @Module({
   imports: [
@@ -58,11 +59,12 @@ import { DispatchGuidesModule } from './dispatch-guides/dispatch-guides.module';
     SalesModule,
     ReturnsModule,
     DispatchGuidesModule,
+    RoleAdminModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: TenantContextGuard },
-    { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
     {
       provide: APP_INTERCEPTOR,
       useClass: ResponseInterceptor,

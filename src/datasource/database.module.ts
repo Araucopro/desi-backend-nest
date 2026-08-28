@@ -17,6 +17,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
             synchronize: false,
             migrationsRun: false,
             migrations: [__dirname + '/migrations/*{.ts,.js}'],
+            migrationsTransactionMode: 'each',
             //dropSchema: true, // ELIMINA TODAS LAS TABLAS - Solo para desarrollo
             autoLoadEntities: true,
           } as const;
@@ -37,6 +38,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
           synchronize: false,
           migrationsRun: false,
           migrations: [__dirname + '/migrations/*{.ts,.js}'],
+          migrationsTransactionMode: 'each',
           //dropSchema: true, // ELIMINA TODAS LAS TABLAS - Solo para desarrollo
           autoLoadEntities: true,
         } as const;

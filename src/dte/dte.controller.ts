@@ -15,10 +15,9 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { GetStoreId } from '../common/decorators/get-store-id.decorator';
 import { StoreContextGuard } from '../common/guards/store-context.guard';
-import { UserRole } from '../users/entities/user.entity';
 import { CreateDteDocumentDto } from './dto/create-dte-document.dto';
 import { DteDocumentResponseDto } from './dto/dte-document-response.dto';
 import { DteService } from './dte.service';
@@ -30,12 +29,7 @@ export class DteController {
   constructor(private readonly dteService: DteService) {}
 
   @Post('document')
-  @Roles(
-    UserRole.ADMIN,
-    UserRole.STORE_MANAGER,
-    UserRole.CONSIGNADO,
-    UserRole.TERCERO,
-  )
+  @RequirePermission('sales:write')
   @ApiOperation({
     summary: 'Crear documento DTE compatible con v2_dte_document',
     description:
@@ -62,7 +56,7 @@ export class DteController {
   }
 
   @Post(':dteDocumentID/reconcile')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('dte:reconcile')
   @ApiOperation({
     summary: 'Reconciliar un documento DTE pendiente contra Openfactura',
     description:

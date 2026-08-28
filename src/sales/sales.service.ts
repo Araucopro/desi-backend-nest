@@ -57,6 +57,9 @@ import {
 } from './sales-repository.helpers';
 import { toSaleView } from './sales-view.mapper';
 import { PreparedSale } from './sales.types';
+import { TenantAbility } from '../auth/ability/ability.factory';
+import { PermissionScope } from '../roles/entities/role-permission.entity';
+import { AbilityFactory } from '../auth/ability/ability.factory';
 
 @Injectable()
 export class SalesService {
@@ -75,6 +78,7 @@ export class SalesService {
     private readonly inventoryService: InventoryService,
     @Optional() private readonly tenantContext?: TenantContextService,
     @Optional() private readonly transactionRunner?: TransactionRunnerService,
+    @Optional() private readonly abilityFactory?: AbilityFactory,
   ) {}
 
   private runInTransaction<T>(
@@ -120,23 +124,42 @@ export class SalesService {
     idempotencyKey: string | undefined,
     dto: CreateSaleDto,
     userId?: string,
+    impersonatedBy?: string,
   ) {
+    const ownerId =
+      userId ??
+      (this.abilityFactory
+        ? await this.abilityFactory.getSystemUserId()
+        : undefined);
     if (dto.saleType === SaleType.NOTA_VENTA && dto.dispatchGuideIDs?.length) {
       throw new BadRequestException(
         'Las guías de despacho solo pueden referenciarse en boletas o facturas electrónicas',
       );
     }
     if (dto.saleType === SaleType.NOTA_VENTA) {
-      return this.createNotaVenta(storeID, idempotencyKey, dto, userId);
+      return this.createNotaVenta(
+        storeID,
+        idempotencyKey,
+        dto,
+        ownerId,
+        impersonatedBy,
+      );
     }
-    return this.createElectronicSale(storeID, idempotencyKey, dto, userId);
+    return this.createElectronicSale(
+      storeID,
+      idempotencyKey,
+      dto,
+      ownerId,
+      impersonatedBy,
+    );
   }
 
   private async createNotaVenta(
     storeID: string,
     idempotencyKey: string | undefined,
     dto: CreateSaleDto,
-    userId?: string,
+    userId: string | undefined,
+    impersonatedBy?: string,
   ) {
     return this.runInTransaction(async (manager) => {
       if (idempotencyKey) {
@@ -163,7 +186,8 @@ export class SalesService {
         saleID,
         tenantID,
         storeID,
-        userID: userId ?? null,
+        userID: userId!,
+        impersonatedBy: impersonatedBy ?? null,
         saleType: SaleType.NOTA_VENTA,
         status: SaleStatus.EMITIDA,
         paymentType: prepared.paymentType,
@@ -214,7 +238,8 @@ export class SalesService {
     storeID: string,
     idempotencyKey: string | undefined,
     dto: CreateSaleDto,
-    userId?: string,
+    userId: string | undefined,
+    impersonatedBy?: string,
   ) {
     if (idempotencyKey) {
       const existing = await this.runInTransaction((manager) =>
@@ -299,6 +324,7 @@ export class SalesService {
       prepared,
       dteResponse,
       userId,
+      impersonatedBy,
     );
 
     return toSaleView(sale, dteResponse);
@@ -310,7 +336,8 @@ export class SalesService {
     dto: CreateSaleDto,
     prepared: PreparedSale,
     dteResponse: DteDocumentResponseDto,
-    userId?: string,
+    userId: string | undefined,
+    impersonatedBy?: string,
   ): Promise<Sale> {
     return this.runInTransaction(async (manager) => {
       if (idempotencyKey) {
@@ -334,7 +361,8 @@ export class SalesService {
         saleID,
         tenantID,
         storeID,
-        userID: userId ?? null,
+        userID: userId!,
+        impersonatedBy: impersonatedBy ?? null,
         saleType: dto.saleType,
         status: SaleStatus.EMITIDA,
         paymentType: prepared.paymentType,
@@ -462,12 +490,27 @@ export class SalesService {
     return planConsumption(guides, consumedItems, saleItems);
   }
 
-  async findAll(storeID: string, query: ListSalesQueryDto) {
+  async findAll(
+    storeID: string,
+    query: ListSalesQueryDto,
+    userId?: string,
+    ability?: TenantAbility,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
 
     const { sales, total } = await this.runInTransaction((manager) =>
-      listSales(manager, storeID, query),
+      listSales(
+        manager,
+        storeID,
+        query,
+        userId && ability
+          ? {
+              scope: ability.scopeFor('sales:read') ?? PermissionScope.ALL,
+              ownerId: userId,
+            }
+          : undefined,
+      ),
     );
 
     return {
@@ -476,17 +519,42 @@ export class SalesService {
     };
   }
 
-  async findOne(saleID: string, storeID: string) {
+  async findOne(
+    saleID: string,
+    storeID: string,
+    userId?: string,
+    ability?: TenantAbility,
+  ) {
     return this.runInTransaction(async (manager) => {
-      const sale = await loadSale(manager, saleID, storeID);
+      const ownership =
+        userId && ability
+          ? {
+              scope: ability.scopeFor('sales:read') ?? PermissionScope.ALL,
+              ownerId: userId,
+            }
+          : undefined;
+      const sale = await loadSale(manager, saleID, storeID, ownership);
       return toSaleView(sale);
     });
   }
 
-  async convert(saleID: string, storeID: string, dto?: ConvertSaleDto) {
+  async convert(
+    saleID: string,
+    storeID: string,
+    dto?: ConvertSaleDto,
+    userId?: string,
+    ability?: TenantAbility,
+  ) {
     const sale = await this.runInTransaction((manager) =>
       loadSale(manager, saleID, storeID),
     );
+    if (
+      userId &&
+      ability &&
+      !ability.can('sales:convert', sale.userID, userId)
+    ) {
+      throw new NotFoundException(`Venta con ID ${saleID} no encontrada`);
+    }
 
     if (sale.saleType !== SaleType.NOTA_VENTA) {
       throw new BadRequestException(

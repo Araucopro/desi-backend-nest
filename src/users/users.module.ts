@@ -4,9 +4,10 @@ import { UsersController } from './users.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
 import { MultitenantModule } from '../multitenant/multitenant.module';
+import { Role } from '../roles/entities/role.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User]), MultitenantModule],
+  imports: [TypeOrmModule.forFeature([User, Role]), MultitenantModule],
   controllers: [UsersController],
   providers: [UsersService],
   exports: [UsersService],

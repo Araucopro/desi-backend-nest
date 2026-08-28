@@ -52,6 +52,9 @@ import {
 } from './dispatch-guides-repository.helpers';
 import { toDispatchGuideView } from './dispatch-guides-view.mapper';
 import { DispatchGuideView } from './dispatch-guides.types';
+import { TenantAbility } from '../auth/ability/ability.factory';
+import { PermissionScope } from '../roles/entities/role-permission.entity';
+import { AbilityFactory } from '../auth/ability/ability.factory';
 
 @Injectable()
 export class DispatchGuidesService implements OnModuleInit {
@@ -73,6 +76,7 @@ export class DispatchGuidesService implements OnModuleInit {
     private readonly openfacturaClient: OpenfacturaClientService,
     @Optional() private readonly tenantContext?: TenantContextService,
     @Optional() private readonly transactionRunner?: TransactionRunnerService,
+    @Optional() private readonly abilityFactory?: AbilityFactory,
   ) {}
 
   onModuleInit(): void {
@@ -100,7 +104,13 @@ export class DispatchGuidesService implements OnModuleInit {
     idempotencyKey: string | undefined,
     dto: CreateDispatchGuideDto,
     userId?: string,
+    impersonatedBy?: string,
   ): Promise<DispatchGuideView> {
+    const ownerId =
+      userId ??
+      (this.abilityFactory
+        ? await this.abilityFactory.getSystemUserId()
+        : undefined);
     const { dispatchGuideID, dteDto } = await this.runInTransaction(
       async (manager) => {
         if (idempotencyKey) {
@@ -138,7 +148,7 @@ export class DispatchGuidesService implements OnModuleInit {
               storeProductID: item.storeProductID,
               quantity: item.quantity,
             })),
-            userID: userId ?? null,
+            userID: ownerId!,
             ...(dto.manualDiscount !== undefined && dto.manualDiscount > 0
               ? { manualDiscount: dto.manualDiscount }
               : {}),
@@ -178,7 +188,8 @@ export class DispatchGuidesService implements OnModuleInit {
           dispatchGuideID,
           tenantID,
           storeID,
-          userID: userId ?? null,
+          userID: ownerId!,
+          impersonatedBy: impersonatedBy ?? null,
           idempotencyKey: idempotencyKey ?? null,
           prepared,
         });
@@ -269,12 +280,28 @@ export class DispatchGuidesService implements OnModuleInit {
     }
   }
 
-  async findAll(storeID: string, query: ListDispatchGuidesQueryDto) {
+  async findAll(
+    storeID: string,
+    query: ListDispatchGuidesQueryDto,
+    userId?: string,
+    ability?: TenantAbility,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
 
     const { dispatchGuides, total } = await this.runInTransaction((manager) =>
-      listDispatchGuides(manager, storeID, query),
+      listDispatchGuides(
+        manager,
+        storeID,
+        query,
+        userId && ability
+          ? {
+              scope:
+                ability.scopeFor('dispatch-guides:read') ?? PermissionScope.ALL,
+              ownerId: userId,
+            }
+          : undefined,
+      ),
     );
 
     return {
@@ -286,10 +313,24 @@ export class DispatchGuidesService implements OnModuleInit {
   async findOne(
     dispatchGuideID: string,
     storeID: string,
+    userId?: string,
+    ability?: TenantAbility,
   ): Promise<DispatchGuideView> {
     return this.runInTransaction(async (manager) =>
       toDispatchGuideView(
-        await loadDispatchGuide(manager, dispatchGuideID, storeID),
+        await loadDispatchGuide(
+          manager,
+          dispatchGuideID,
+          storeID,
+          userId && ability
+            ? {
+                scope:
+                  ability.scopeFor('dispatch-guides:read') ??
+                  PermissionScope.ALL,
+                ownerId: userId,
+              }
+            : undefined,
+        ),
       ),
     );
   }
@@ -297,10 +338,19 @@ export class DispatchGuidesService implements OnModuleInit {
   async reconcile(
     dispatchGuideID: string,
     storeID: string,
+    userId?: string,
+    ability?: TenantAbility,
   ): Promise<DispatchGuideView> {
     const current = await this.runInTransaction((manager) =>
       loadDispatchGuide(manager, dispatchGuideID, storeID),
     );
+    if (
+      userId &&
+      ability &&
+      !ability.can('dispatch-guides:reconcile', current.userID, userId)
+    ) {
+      throw new BadRequestException('La guía de despacho no está disponible');
+    }
 
     if (current.status === DispatchGuideStatus.EMITIDA) {
       return toDispatchGuideView(current);
@@ -385,10 +435,19 @@ export class DispatchGuidesService implements OnModuleInit {
   async anular(
     dispatchGuideID: string,
     storeID: string,
+    userId?: string,
+    ability?: TenantAbility,
   ): Promise<DispatchGuideView> {
     const current = await this.runInTransaction((manager) =>
       loadDispatchGuide(manager, dispatchGuideID, storeID),
     );
+    if (
+      userId &&
+      ability &&
+      !ability.can('dispatch-guides:anular', current.userID, userId)
+    ) {
+      throw new BadRequestException('La guía de despacho no está disponible');
+    }
 
     if (current.status === DispatchGuideStatus.ANULADA) {
       return toDispatchGuideView(current);

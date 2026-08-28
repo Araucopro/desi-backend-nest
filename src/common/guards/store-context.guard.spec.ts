@@ -22,7 +22,18 @@ describe('StoreContextGuard', () => {
           callback(manager),
       ),
     };
-    const guard = new StoreContextGuard(reflector as any, tenantContext as any);
+    const abilityFactory = {
+      createFor: jest
+        .fn()
+        .mockImplementation(async (user: { role?: string }) => ({
+          can: jest.fn().mockReturnValue(user.role === UserRole.ADMIN),
+        })),
+    };
+    const guard = new StoreContextGuard(
+      reflector as any,
+      tenantContext as any,
+      abilityFactory as any,
+    );
     return { guard, manager, tenantContext };
   }
 

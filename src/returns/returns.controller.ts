@@ -18,11 +18,12 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 import { GetUser } from '../auth/decorators/get-user.decorator';
+import { GetAbility } from '../auth/decorators/get-ability.decorator';
+import { TenantAbility } from '../auth/ability/ability.factory';
 import { GetStoreId } from '../common/decorators/get-store-id.decorator';
 import { StoreContextGuard } from '../common/guards/store-context.guard';
-import { UserRole } from '../users/entities/user.entity';
 import { ReturnsService } from './returns.service';
 import { CreateReturnDto } from './dto/create-return.dto';
 import { ListReturnsQueryDto } from './dto/list-returns.query.dto';
@@ -31,13 +32,6 @@ import {
   ReturnResponseDto,
 } from './dto/return-response.dto';
 
-const SALE_ROLES = [
-  UserRole.ADMIN,
-  UserRole.STORE_MANAGER,
-  UserRole.CONSIGNADO,
-  UserRole.TERCERO,
-];
-
 @ApiTags('Devoluciones')
 @Controller('returns')
 @UseGuards(StoreContextGuard)
@@ -45,7 +39,7 @@ export class ReturnsController {
   constructor(private readonly returnsService: ReturnsService) {}
 
   @Post()
-  @Roles(...SALE_ROLES)
+  @RequirePermission('returns:write')
   @ApiOperation({
     summary: 'Crear devolución (TOTAL, PARCIAL o DESCUENTO)',
     description:
@@ -66,14 +60,21 @@ export class ReturnsController {
   create(
     @GetStoreId() storeID: string,
     @GetUser('userId') userId: string | undefined,
+    @GetUser('masterUserId') impersonatedBy: string | undefined,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() dto: CreateReturnDto,
   ) {
-    return this.returnsService.create(storeID, idempotencyKey, dto, userId);
+    return this.returnsService.create(
+      storeID,
+      idempotencyKey,
+      dto,
+      userId,
+      impersonatedBy,
+    );
   }
 
   @Get()
-  @Roles(...SALE_ROLES)
+  @RequirePermission('returns:read')
   @ApiOperation({
     summary: 'Listar devoluciones de la tienda activa',
     description:
@@ -98,24 +99,31 @@ export class ReturnsController {
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
   @ApiResponse({ status: 200, type: ReturnListResponseDto })
-  findAll(@GetStoreId() storeID: string, @Query() query: ListReturnsQueryDto) {
-    return this.returnsService.findAll(storeID, query);
+  findAll(
+    @GetStoreId() storeID: string,
+    @Query() query: ListReturnsQueryDto,
+    @GetUser('userId') userId: string | undefined,
+    @GetAbility() ability: TenantAbility | undefined,
+  ) {
+    return this.returnsService.findAll(storeID, query, userId, ability);
   }
 
   @Get(':returnID')
-  @Roles(...SALE_ROLES)
+  @RequirePermission('returns:read')
   @ApiOperation({ summary: 'Obtener devolución por ID' })
   @ApiParam({ name: 'returnID', description: 'UUID de la devolución' })
   @ApiResponse({ status: 200, type: ReturnResponseDto })
   findOne(
     @Param('returnID', ParseUUIDPipe) returnID: string,
     @GetStoreId() storeID: string,
+    @GetUser('userId') userId: string | undefined,
+    @GetAbility() ability: TenantAbility | undefined,
   ) {
-    return this.returnsService.findOne(returnID, storeID);
+    return this.returnsService.findOne(returnID, storeID, userId, ability);
   }
 
   @Post(':returnID/approve')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('returns:approve')
   @ApiOperation({
     summary: 'Aprobar devolución',
     description:
@@ -127,36 +135,41 @@ export class ReturnsController {
     @Param('returnID', ParseUUIDPipe) returnID: string,
     @GetStoreId() storeID: string,
     @GetUser('userId') userId: string | undefined,
+    @GetAbility() ability: TenantAbility | undefined,
   ) {
-    return this.returnsService.approve(returnID, storeID, userId);
+    return this.returnsService.approve(returnID, storeID, userId, ability);
   }
 
   @Post(':returnID/reject')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('returns:reject')
   @ApiOperation({ summary: 'Rechazar devolución pendiente' })
   @ApiParam({ name: 'returnID', description: 'UUID de la devolución' })
   @ApiResponse({ status: 200, type: ReturnResponseDto })
   reject(
     @Param('returnID', ParseUUIDPipe) returnID: string,
     @GetStoreId() storeID: string,
+    @GetUser('userId') userId: string | undefined,
+    @GetAbility() ability: TenantAbility | undefined,
   ) {
-    return this.returnsService.reject(returnID, storeID);
+    return this.returnsService.reject(returnID, storeID, userId, ability);
   }
 
   @Post(':returnID/cancel')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('returns:cancel')
   @ApiOperation({ summary: 'Cancelar devolución pendiente' })
   @ApiParam({ name: 'returnID', description: 'UUID de la devolución' })
   @ApiResponse({ status: 200, type: ReturnResponseDto })
   cancel(
     @Param('returnID', ParseUUIDPipe) returnID: string,
     @GetStoreId() storeID: string,
+    @GetUser('userId') userId: string | undefined,
+    @GetAbility() ability: TenantAbility | undefined,
   ) {
-    return this.returnsService.cancel(returnID, storeID);
+    return this.returnsService.cancel(returnID, storeID, userId, ability);
   }
 
   @Post(':returnID/reconcile')
-  @Roles(UserRole.ADMIN)
+  @RequirePermission('returns:reconcile')
   @ApiOperation({
     summary: 'Reconciliar NCE pendiente',
     description:
@@ -167,7 +180,9 @@ export class ReturnsController {
   reconcile(
     @Param('returnID', ParseUUIDPipe) returnID: string,
     @GetStoreId() storeID: string,
+    @GetUser('userId') userId: string | undefined,
+    @GetAbility() ability: TenantAbility | undefined,
   ) {
-    return this.returnsService.reconcile(returnID, storeID);
+    return this.returnsService.reconcile(returnID, storeID, userId, ability);
   }
 }

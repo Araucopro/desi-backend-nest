@@ -12,7 +12,7 @@ import {
   Repository,
   SelectQueryBuilder,
 } from 'typeorm';
-import { User, UserStatus } from './entities/user.entity';
+import { User, UserRole, UserStatus } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserListQueryDto } from './dto/user-list.query.dto';
@@ -21,6 +21,7 @@ import { Store, StoreType } from '../stores/entities/store.entity';
 import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { Tenant } from '../multitenant/entities/tenant.entity';
+import { Role } from '../roles/entities/role.entity';
 
 @Injectable()
 export class UsersService {
@@ -49,12 +50,13 @@ export class UsersService {
           })
         : null;
       if (tenantId && !tenant) throw new NotFoundException('Tenant not found');
-      const hasUsers = await userRepository
-        .createQueryBuilder('user')
-        .getExists();
+      const userQuery = userRepository.createQueryBuilder('user');
+      const hasUsers = await (typeof userQuery.where === 'function'
+        ? userQuery.where('user.isSystem = false').getExists()
+        : userQuery.getExists());
       if (tenant) {
         const userCount = await userRepository.count({
-          where: { tenantID: tenant.tenantID },
+          where: { tenantID: tenant.tenantID, isSystem: false },
         });
         if (userCount >= tenant.maxUsers)
           throw new ForbiddenException(
@@ -62,8 +64,21 @@ export class UsersService {
           );
       }
 
+      const roleRepository = manager.getRepository(Role);
+      const role = roleRepository
+        ? await roleRepository.findOne({
+            where: {
+              tenantID: tenantId!,
+              ...(dto.roleID ? { id: dto.roleID } : { name: dto.role }),
+            },
+          })
+        : null;
+      if (tenantId && !role)
+        throw new NotFoundException('Role not found for tenant');
       const user = userRepository.create({
         ...dto,
+        role: dto.role ?? UserRole.TERCERO,
+        roleID: role?.id ?? dto.roleID,
         status: dto.status ?? UserStatus.ACTIVE,
         password: hashedPassword,
         tenantID: tenantId,
@@ -110,12 +125,11 @@ export class UsersService {
 
   async findAll(query: UserListQueryDto = {}): Promise<UserListResponseDto> {
     const tenantId = this.tenantContext?.get(false)?.tenantId;
-    const { limit = 10, offset = 0, search, role, status } = query;
+    const { limit = 10, offset = 0, search, role, roleID, status } = query;
 
     const applyFilters = (qb: SelectQueryBuilder<User>) => {
-      if (tenantId) {
-        qb.andWhere('user.tenantID = :tenantId', { tenantId });
-      }
+      if (tenantId) qb.andWhere('user.tenantID = :tenantId', { tenantId });
+      qb.andWhere('user.isSystem = false');
       if (search?.trim()) {
         const term = `%${search.trim()}%`;
         qb.andWhere('(user.name ILIKE :term OR user.email ILIKE :term)', {
@@ -125,6 +139,7 @@ export class UsersService {
       if (role) {
         qb.andWhere('user.role = :role', { role });
       }
+      if (roleID) qb.andWhere('user.roleID = :roleID', { roleID });
       if (status) {
         qb.andWhere('user.status = :status', { status });
       }
@@ -147,6 +162,7 @@ export class UsersService {
           email: user.email,
           name: user.name,
           role: user.role,
+          roleID: user.roleID,
           userImg: user.userImg,
           status: user.status,
           createdAt: user.createdAt,
@@ -226,7 +242,29 @@ export class UsersService {
       dto.password = await bcrypt.hash(dto.password, saltRounds);
     }
 
-    Object.assign(user, dto);
+    if (dto.roleID || dto.role) {
+      const role = await (this.tenantContext
+        ? this.tenantContext.transaction((manager) =>
+            manager.getRepository(Role).findOne({
+              where: {
+                tenantID: user.tenantID,
+                ...(dto.roleID ? { id: dto.roleID } : { name: dto.role }),
+              },
+            }),
+          )
+        : this.dataSource.getRepository(Role).findOne({
+            where: {
+              tenantID: user.tenantID,
+              ...(dto.roleID ? { id: dto.roleID } : { name: dto.role }),
+            },
+          }));
+      if (!role) throw new NotFoundException('Role not found for tenant');
+      user.roleID = role.id;
+      if (role.name in UserRole) user.role = role.name as UserRole;
+      user.sessionVersion += 1;
+    }
+    if (dto.status && dto.status !== user.status) user.sessionVersion += 1;
+    Object.assign(user, { ...dto, roleID: user.roleID });
     return this.tenantContext
       ? this.tenantContext.transaction((manager) =>
           manager.getRepository(User).save(user),
@@ -237,10 +275,14 @@ export class UsersService {
   async remove(id: string): Promise<void> {
     const user = await this.findOneById(id);
     if (!user) throw new NotFoundException(`User with ID ${id} not found`);
+    if (user.isSystem)
+      throw new ForbiddenException('System user cannot be removed');
+    user.status = UserStatus.INACTIVE;
+    user.sessionVersion += 1;
     if (this.tenantContext)
       await this.tenantContext.transaction((manager) =>
-        manager.getRepository(User).remove(user),
+        manager.getRepository(User).save(user),
       );
-    else await this.userRepo.remove(user);
+    else await this.userRepo.save(user);
   }
 }
