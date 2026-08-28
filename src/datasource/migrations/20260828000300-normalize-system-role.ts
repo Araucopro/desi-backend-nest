@@ -52,7 +52,7 @@ export class NormalizeSystemRole20260828000300 implements MigrationInterface {
     }
   }
 
-  async down(queryRunner: QueryRunner): Promise<void> {
+  down(): Promise<void> {
     throw new Error(
       'Cannot safely remove Users_role_enum.system; restore system users first',
     );

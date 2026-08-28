@@ -99,6 +99,9 @@ Una vez iniciada la aplicación, accede a la documentación interactiva de Swagg
 http://localhost:3001/docs
 ```
 
+- [Catálogo de permisos RBAC](docs/permissions-catalog.md): claves globales
+  expuestas por `GET /roles/permissions` y asignaciones de los roles protegidos.
+
 ## 🗂️ Estructura del Proyecto
 
 ```

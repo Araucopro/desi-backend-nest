@@ -1,27 +1,32 @@
+import { InternalServerErrorException } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { PermissionScope } from './entities/role-permission.entity';
 import { RolePermission } from './entities/role-permission.entity';
 import { Role } from './entities/role.entity';
 import { Permission } from './entities/permission.entity';
-
-const BASE_PERMISSION_KEYS = [
-  'sales:read',
-  'sales:write',
-  'sales:convert',
-  'dispatch-guides:read',
-  'dispatch-guides:write',
-  'returns:read',
-  'returns:write',
-  'dte:read',
-  'stores:read',
-];
+import { BASE_PERMISSION_KEYS } from './permission-catalog.constants';
 
 export async function ensureTenantRoles(
   manager: EntityManager,
   tenantID: string,
 ): Promise<Map<string, Role>> {
   const roleRepository = manager.getRepository(Role);
-  if (!roleRepository) return new Map<string, Role>();
+  const permissionRepository = manager.getRepository(Permission);
+  if (!roleRepository || !permissionRepository) return new Map<string, Role>();
+
+  const permissions = await permissionRepository.find();
+  const permissionKeys = new Set(
+    permissions.map((permission) => permission.key),
+  );
+  const missingKeys = BASE_PERMISSION_KEYS.filter(
+    (key) => !permissionKeys.has(key),
+  );
+  if (missingKeys.length > 0) {
+    throw new InternalServerErrorException(
+      `Role seed blocked: permissions missing from catalog: ${missingKeys.join(', ')}`,
+    );
+  }
+
   for (const [name, systemKey] of [
     ['admin', 'TENANT_ADMIN'],
     ['store_manager', 'STORE_MANAGER'],
@@ -43,13 +48,6 @@ export async function ensureTenantRoles(
       .execute();
   }
   const roles = await roleRepository.find({ where: { tenantID } });
-  const permissionRepository = manager.getRepository(Permission);
-  if (!permissionRepository)
-    return new Map(roles.map((role) => [role.name, role]));
-  const permissions = await permissionRepository.find();
-  const permissionKeys = new Set(
-    permissions.map((permission) => permission.key),
-  );
   for (const role of roles) {
     if (role.isSystem) continue;
     const keys =

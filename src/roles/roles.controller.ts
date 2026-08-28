@@ -51,7 +51,7 @@ export class RolesController {
   @ApiOperation({
     summary: 'Listar catálogo global de permisos',
     description:
-      'Consulta de solo lectura del catálogo fijo. Los tenants no pueden crear ni modificar permisos.',
+      'Consulta de solo lectura del catálogo fijo. Los tenants no pueden crear ni modificar permisos. El catálogo completo está documentado en docs/permissions-catalog.md.',
   })
   @ApiResponse({
     status: 200,
