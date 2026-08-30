@@ -2,98 +2,142 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   ParseUUIDPipe,
-  Patch,
   Post,
+  Query,
+  UseGuards,
 } from '@nestjs/common';
+import {
+  ApiBody,
+  ApiHeader,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
+import { GetUser } from '../auth/decorators/get-user.decorator';
+import { GetAbility } from '../auth/decorators/get-ability.decorator';
+import { TenantAbility } from '../auth/ability/ability.factory';
+import { GetStoreId } from '../common/decorators/get-store-id.decorator';
+import { StoreContextGuard } from '../common/guards/store-context.guard';
 import { SalesService } from './sales.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
-import { UpdateSaleStatusDto } from './dto/update-sale-status.dto';
-import { ApiOperation, ApiResponse, ApiTags, ApiParam } from '@nestjs/swagger';
-import { Sale } from './entities/sale.entity';
+import { ListSalesQueryDto } from './dto/list-sales.query.dto';
+import { ConvertSaleDto } from './dto/convert-sale.dto';
+import { SaleListResponseDto, SaleResponseDto } from './dto/sale-response.dto';
 
 @ApiTags('Ventas')
 @Controller('sales')
+@UseGuards(StoreContextGuard)
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
   @Post()
+  @RequirePermission('sales:write')
   @ApiOperation({
-    summary: 'Registrar una venta',
+    summary: 'Crear venta (boleta, factura o nota de venta)',
     description:
-      'Registra una nueva venta para una tienda específica. Si la tienda es Central, se descuenta del stock global de variaciones. Si es una tienda asociada (franquicia, etc.), se descuenta del stock local de la tienda (StoreProduct).',
+      'Boleta (39) y factura (33) se emiten vía Openfactura a través de DteService. La nota de venta descuenta stock, registra movimientos de inventario y ledger financiero sin facturador. Las ofertas activas se aplican automáticamente; opcionalmente se acepta manualDiscount validado contra el rol/usuario y el margen mínimo.',
   })
-  @ApiResponse({
-    status: 201,
-    description: 'Venta creada exitosamente.',
-    type: Sale,
+  @ApiHeader({
+    name: 'X-Store-ID',
+    required: true,
+    description: 'Tienda activa desde la que se emite la venta',
   })
-  @ApiResponse({
-    status: 400,
-    description: 'Stock insuficiente o datos inválidos.',
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description: 'Clave idempotente para evitar duplicados',
   })
-  @ApiResponse({ status: 404, description: 'Tienda o Producto no encontrado.' })
-  create(@Body() createSaleDto: CreateSaleDto) {
-    return this.salesService.create(createSaleDto);
+  @ApiBody({ type: CreateSaleDto })
+  @ApiResponse({ status: 201, type: SaleResponseDto })
+  create(
+    @GetStoreId() storeID: string,
+    @GetUser('userId') userId: string | undefined,
+    @GetUser('masterUserId') impersonatedBy: string | undefined,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() dto: CreateSaleDto,
+  ) {
+    return this.salesService.create(
+      storeID,
+      idempotencyKey,
+      dto,
+      userId,
+      impersonatedBy,
+    );
   }
 
   @Get()
+  @RequirePermission('sales:read')
   @ApiOperation({
-    summary: 'Obtener todas las ventas registradas',
+    summary: 'Listar ventas',
     description:
-      'Retorna un listado de todas las ventas realizadas, ordenadas por fecha de creación (más recientes primero).',
+      'Lista ventas de la tienda activa (header X-Store-ID) con filtros por tipo de venta, estado y rango de fechas, con paginación.',
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Lista de ventas.',
-    type: [Sale],
+  @ApiHeader({
+    name: 'X-Store-ID',
+    required: true,
+    description: 'Tienda activa desde la que se consultan las ventas',
   })
-  findAll() {
-    return this.salesService.findAll();
-  }
-
-  @Get(':id')
-  @ApiOperation({
-    summary: 'Obtener detalle de una venta específica',
-    description:
-      'Retorna la información completa de una venta incluyendo productos, cantidades, precios y estado.',
+  @ApiQuery({
+    name: 'saleType',
+    required: false,
+    enum: ['BOLETA', 'FACTURA', 'NOTA_VENTA'],
   })
-  @ApiParam({
-    name: 'id',
-    description: 'ID de la venta',
-    type: String,
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['EMITIDA', 'CONVERTIDA'],
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Venta encontrada.',
-    type: Sale,
-  })
-  @ApiResponse({ status: 404, description: 'Venta no encontrada.' })
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.salesService.findOne(id);
-  }
-
-  @Patch(':id/status')
-  @ApiOperation({
-    summary: 'Actualizar el estado de una venta',
-    description:
-      'Permite cambiar el estado de una venta entre Pendiente, Pagado o Anulado.',
-  })
-  @ApiParam({
-    name: 'id',
-    description: 'ID de la venta',
-    type: String,
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Estado actualizado exitosamente.',
-    type: Sale,
-  })
-  updateStatus(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() updateSaleStatusDto: UpdateSaleStatusDto,
+  @ApiQuery({ name: 'from', required: false })
+  @ApiQuery({ name: 'to', required: false })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiResponse({ status: 200, type: SaleListResponseDto })
+  findAll(
+    @GetStoreId() storeID: string,
+    @Query() query: ListSalesQueryDto,
+    @GetUser('userId') userId: string | undefined,
+    @GetAbility() ability: TenantAbility | undefined,
   ) {
-    return this.salesService.updateStatus(id, updateSaleStatusDto);
+    return this.salesService.findAll(storeID, query, userId, ability);
+  }
+
+  @Get(':saleID')
+  @RequirePermission('sales:read')
+  @ApiOperation({ summary: 'Obtener venta por ID' })
+  @ApiParam({ name: 'saleID', description: 'UUID de la venta' })
+  @ApiResponse({ status: 200, type: SaleResponseDto })
+  findOne(
+    @Param('saleID', ParseUUIDPipe) saleID: string,
+    @GetStoreId() storeID: string,
+    @GetUser('userId') userId: string | undefined,
+    @GetAbility() ability: TenantAbility | undefined,
+  ) {
+    return this.salesService.findOne(saleID, storeID, userId, ability);
+  }
+
+  @Post(':saleID/convert')
+  @RequirePermission('sales:convert')
+  @ApiOperation({
+    summary: 'Convertir nota de venta a boleta o factura electrónica',
+    description:
+      'Emite el DTE sin volver a descontar stock (ya salió con la nota) y reemplaza el ledger SALE_NOTE por DTE_DOCUMENT. Idempotente: si la venta ya está CONVERTIDA devuelve el DTE existente.',
+  })
+  @ApiParam({ name: 'saleID', description: 'UUID de la nota de venta' })
+  @ApiBody({ type: ConvertSaleDto, required: false })
+  @ApiResponse({ status: 200, type: SaleResponseDto })
+  convert(
+    @Param('saleID', ParseUUIDPipe) saleID: string,
+    @GetStoreId() storeID: string,
+    @Body() dto: ConvertSaleDto | undefined,
+    @GetUser('userId') userId: string | undefined,
+    @GetAbility() ability: TenantAbility | undefined,
+  ) {
+    return this.salesService.convert(saleID, storeID, dto, userId, ability);
   }
 }

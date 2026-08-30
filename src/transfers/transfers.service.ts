@@ -1,10 +1,5 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Injectable, Optional } from '@nestjs/common';
+import { DataSource, EntityManager } from 'typeorm';
 import {
   StoreTransfer,
   TransferStatus,
@@ -13,96 +8,84 @@ import { StoreTransferItem } from './entities/store-transfer-item.entity';
 import { CreateStoreTransferDto } from './dto/create-store-transfer.dto';
 import { AddTransferItemDto } from './dto/add-transfer-item.dto';
 import { ListTransfersFilterDto } from './dto/list-transfers-filter.dto';
-import { InventoryService } from '../inventory/inventory.service';
-import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
+import { TenantContextService } from '../multitenant/tenant-context.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import {
+  applyTransferMovements,
+  createTransferEntity,
+  createTransferItemEntity,
+  findTransferForUpdate,
+  findTransferItems,
+} from './transfers-repository.helpers';
+import {
+  buildTransferCompletionPlan,
+  ensureDifferentStores,
+  ensureTransferModifiable,
+} from './transfers-engine';
 
 @Injectable()
 export class TransfersService {
   constructor(
-    @InjectRepository(StoreTransfer)
-    private readonly transfersRepository: Repository<StoreTransfer>,
-    @InjectRepository(StoreTransferItem)
-    private readonly transferItemsRepository: Repository<StoreTransferItem>,
-    private readonly inventoryService: InventoryService,
     private readonly dataSource: DataSource,
+    @Optional() private readonly tenantContext?: TenantContextService,
+    @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
+
+  private runInTransaction<T>(
+    callback: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    if (this.transactionRunner) {
+      return this.transactionRunner.run(callback);
+    }
+
+    return this.tenantContext
+      ? this.tenantContext.transaction(callback)
+      : this.dataSource.transaction(callback);
+  }
 
   async createTransfer(
     createDto: CreateStoreTransferDto,
   ): Promise<StoreTransfer> {
-    if (createDto.originStoreID === createDto.destinationStoreID) {
-      throw new BadRequestException(
-        'Origin and Destination stores must be different',
-      );
-    }
-    const transfer = this.transfersRepository.create({
-      originStore: { storeID: createDto.originStoreID },
-      destinationStore: { storeID: createDto.destinationStoreID },
-      status: TransferStatus.PENDING,
+    ensureDifferentStores(
+      createDto.originStoreID,
+      createDto.destinationStoreID,
+    );
+
+    return this.runInTransaction(async (manager) => {
+      const transfer = createTransferEntity(manager, {
+        originStoreID: createDto.originStoreID,
+        destinationStoreID: createDto.destinationStoreID,
+      });
+      return manager.save(transfer);
     });
-    return this.transfersRepository.save(transfer);
   }
 
   async addItem(
     transferID: string,
     addItemDto: AddTransferItemDto,
   ): Promise<StoreTransferItem> {
-    const transfer = await this.transfersRepository.findOne({
-      where: { transferID },
-    });
-    if (!transfer) throw new NotFoundException('Transfer not found');
-    if (transfer.status !== TransferStatus.PENDING) {
-      throw new BadRequestException(
-        'Cannot add items to a non-pending transfer',
-      );
-    }
+    return this.runInTransaction(async (manager) => {
+      const transfer = await findTransferForUpdate(manager, transferID);
+      ensureTransferModifiable(transfer.status);
 
-    const item = this.transferItemsRepository.create({
-      transfer: { transferID },
-      variation: { variationID: addItemDto.variationID },
-      quantity: addItemDto.quantity,
+      const item = createTransferItemEntity(manager, {
+        transferID,
+        variationID: addItemDto.variationID,
+        quantity: addItemDto.quantity,
+      });
+      return manager.save(item);
     });
-    return this.transferItemsRepository.save(item);
   }
 
   async completeTransfer(transferID: string): Promise<StoreTransfer> {
-    return this.dataSource.transaction(async (manager) => {
-      const transfer = await manager.findOne(StoreTransfer, {
-        where: { transferID },
-        relations: [
-          'items',
-          'originStore',
-          'destinationStore',
-          'items.variation',
-        ],
-      });
+    return this.runInTransaction(async (manager) => {
+      const transfer = await findTransferForUpdate(manager, transferID);
+      const items = await findTransferItems(manager, transferID);
+      const plan = buildTransferCompletionPlan({ transfer, items });
 
-      if (!transfer) throw new NotFoundException('Transfer not found');
-      if (transfer.status !== TransferStatus.PENDING) {
-        throw new BadRequestException('Transfer is not pending');
-      }
-      if (!transfer.items || transfer.items.length === 0) {
-        throw new BadRequestException('Transfer has no items');
-      }
+      await applyTransferMovements(manager, plan, this.tenantContext);
 
-      for (const item of transfer.items) {
-        await this.inventoryService.createMovement({
-          storeID: transfer.originStore.storeID,
-          variationID: item.variation.variationID,
-          quantity: item.quantity,
-          reason: InventoryMovementReason.TRANSFER_OUT,
-          referenceID: transfer.transferID,
-        });
-
-        await this.inventoryService.createMovement({
-          storeID: transfer.destinationStore.storeID,
-          variationID: item.variation.variationID,
-          quantity: item.quantity,
-          reason: InventoryMovementReason.TRANSFER_IN,
-          referenceID: transfer.transferID,
-        });
-      }
-
+      transfer.items = items;
       transfer.status = TransferStatus.COMPLETED;
       transfer.completedAt = new Date();
 
@@ -111,56 +94,63 @@ export class TransfersService {
   }
 
   async getTransfer(transferID: string) {
-    return this.transfersRepository.findOne({
-      where: { transferID },
-      relations: [
-        'items',
-        'items.variation',
-        'originStore',
-        'destinationStore',
-      ],
+    return this.runInTransaction(async (manager) => {
+      return manager.getRepository(StoreTransfer).findOne({
+        where: { transferID },
+        relations: [
+          'items',
+          'items.variation',
+          'originStore',
+          'destinationStore',
+        ],
+      });
     });
   }
 
   async findAll(filters: ListTransfersFilterDto) {
-    const {
-      originStoreID,
-      destinationStoreID,
-      status,
-      page = 1,
-      limit = 20,
-    } = filters;
-
-    const query = this.transfersRepository
-      .createQueryBuilder('transfer')
-      .leftJoinAndSelect('transfer.originStore', 'originStore')
-      .leftJoinAndSelect('transfer.destinationStore', 'destinationStore')
-      .leftJoinAndSelect('transfer.items', 'items')
-      .leftJoinAndSelect('items.variation', 'variation')
-      .orderBy('transfer.createdAt', 'DESC');
-
-    if (originStoreID) {
-      query.andWhere('originStore.storeID = :originStoreID', { originStoreID });
-    }
-    if (destinationStoreID) {
-      query.andWhere('destinationStore.storeID = :destinationStoreID', {
+    return this.runInTransaction(async (manager) => {
+      const {
+        originStoreID,
         destinationStoreID,
-      });
-    }
-    if (status) {
-      query.andWhere('transfer.status = :status', { status });
-    }
+        status,
+        page = 1,
+        limit = 20,
+      } = filters;
 
-    const [data, total] = await query
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getManyAndCount();
+      const query = manager
+        .getRepository(StoreTransfer)
+        .createQueryBuilder('transfer')
+        .leftJoinAndSelect('transfer.originStore', 'originStore')
+        .leftJoinAndSelect('transfer.destinationStore', 'destinationStore')
+        .leftJoinAndSelect('transfer.items', 'items')
+        .leftJoinAndSelect('items.variation', 'variation')
+        .orderBy('transfer.createdAt', 'DESC');
 
-    return {
-      data,
-      total,
-      page,
-      lastPage: Math.ceil(total / limit),
-    };
+      if (originStoreID) {
+        query.andWhere('originStore.storeID = :originStoreID', {
+          originStoreID,
+        });
+      }
+      if (destinationStoreID) {
+        query.andWhere('destinationStore.storeID = :destinationStoreID', {
+          destinationStoreID,
+        });
+      }
+      if (status) {
+        query.andWhere('transfer.status = :status', { status });
+      }
+
+      const [data, total] = await query
+        .skip((page - 1) * limit)
+        .take(limit)
+        .getManyAndCount();
+
+      return {
+        data,
+        total,
+        page,
+        lastPage: Math.ceil(total / limit),
+      };
+    });
   }
 }

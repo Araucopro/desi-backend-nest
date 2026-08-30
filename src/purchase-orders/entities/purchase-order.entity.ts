@@ -13,12 +13,26 @@ import { Store } from '../../stores/entities/store.entity';
 import { PurchaseOrderItem } from './purchase-order-item.entity';
 import { ColumnNumericTransformer } from '../../common/transformers/numeric.transformer';
 
-export type PurchaseOrderStatus = 'Pagado' | 'Pendiente' | 'Anulado';
+export enum PurchaseOrderPaymentStatus {
+  PAGADO = 'Pagado',
+  PENDIENTE = 'Pendiente',
+  ANULADO = 'Anulado',
+}
+
+export enum PurchaseOrderCommercialStatus {
+  PENDIENTE = 'Pendiente',
+  ENVIADO = 'Enviado',
+  ACEPTADO = 'Aceptado',
+  RECHAZADO = 'Rechazado',
+}
 
 @Entity({ name: 'PurchaseOrder' })
 export class PurchaseOrder {
   @PrimaryGeneratedColumn('uuid')
   purchaseOrderID!: string;
+
+  @Column({ type: 'uuid' })
+  tenantID!: string;
 
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 50, unique: true })
@@ -30,10 +44,17 @@ export class PurchaseOrder {
 
   @Column({
     type: 'enum',
-    enum: ['Pagado', 'Pendiente', 'Anulado'],
-    default: 'Pendiente',
+    enum: PurchaseOrderPaymentStatus,
+    default: PurchaseOrderPaymentStatus.PENDIENTE,
   })
-  paymentStatus!: PurchaseOrderStatus;
+  paymentStatus!: PurchaseOrderPaymentStatus;
+
+  @Column({
+    type: 'enum',
+    enum: PurchaseOrderCommercialStatus,
+    default: PurchaseOrderCommercialStatus.PENDIENTE,
+  })
+  status!: PurchaseOrderCommercialStatus;
 
   @Column({ type: 'boolean', default: false })
   isThirdParty!: boolean;
@@ -44,8 +65,8 @@ export class PurchaseOrder {
   @Column({ type: 'date', nullable: true })
   dueDate!: Date | null;
 
-  @Column({ type: 'varchar', length: 120, nullable: true })
-  dteNumber!: string | null;
+  @Column({ type: 'timestamptz', nullable: true })
+  paidAt!: Date | null;
 
   @Column('int', { default: 0 })
   totalProducts!: number;

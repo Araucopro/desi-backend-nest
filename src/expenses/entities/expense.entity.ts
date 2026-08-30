@@ -17,7 +17,7 @@ export enum ExpenseType {
   ADMINISTRATIVE = 'administrative',
 }
 
-@Entity({ name: 'Expense', schema: 'public' })
+@Entity({ name: 'Expense' })
 export class Expense {
   @ApiProperty({
     description: 'ID único del gasto',
@@ -25,6 +25,9 @@ export class Expense {
   })
   @PrimaryGeneratedColumn('uuid')
   id!: string;
+
+  @Column({ type: 'uuid' })
+  tenantID!: string;
 
   @ApiProperty({
     description: 'Nombre o descripción del gasto',
@@ -50,6 +53,31 @@ export class Expense {
     transformer: new ColumnNumericTransformer(),
   })
   amount!: number;
+
+  @Column('decimal', {
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: new ColumnNumericTransformer(),
+  })
+  netAmount!: number;
+
+  @Column('decimal', {
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: new ColumnNumericTransformer(),
+  })
+  taxAmount!: number;
+
+  @Column({ type: 'boolean', default: true })
+  acceptedForTax!: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  taxCredit!: boolean;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  supportDocument!: string | null;
 
   @ApiProperty({
     description: 'Categoría del gasto',

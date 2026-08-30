@@ -10,18 +10,18 @@ import {
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import type { PurchaseOrderStatus } from '../entities/purchase-order.entity';
+import { PurchaseOrderPaymentStatus } from '../entities/purchase-order.entity';
 import { PurchaseOrderItemDto } from './create-purchase-order.dto';
 
 export class UpdatePurchaseOrderDto {
   @ApiProperty({
     description: 'Estado del pago de la OC',
-    enum: ['Pagado', 'Pendiente', 'Anulado'],
+    enum: PurchaseOrderPaymentStatus,
     required: false,
   })
   @IsOptional()
-  @IsEnum(['Pagado', 'Pendiente', 'Anulado'])
-  paymentStatus?: PurchaseOrderStatus;
+  @IsEnum(PurchaseOrderPaymentStatus)
+  paymentStatus?: PurchaseOrderPaymentStatus;
 
   @ApiProperty({
     description: 'Fecha de vencimiento',
@@ -31,14 +31,6 @@ export class UpdatePurchaseOrderDto {
   @IsOptional()
   @IsDateString()
   dueDate?: string;
-
-  @ApiProperty({
-    description: 'Número de DTE',
-    example: '112233',
-    required: false,
-  })
-  @IsOptional()
-  dteNumber?: string;
 
   @ApiProperty({
     description: 'Descuento total en pesos',

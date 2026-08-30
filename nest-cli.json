@@ -13,6 +13,7 @@
           "skipAutoHttpCode": true
         }
       }
-    ]
+    ],
+    "assets": [{ "include": "common/data/**/*", "watchAssets": true }]
   }
 }

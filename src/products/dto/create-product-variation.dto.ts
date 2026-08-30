@@ -62,4 +62,24 @@ export class CreateProductVariationDto {
   @IsString()
   @IsOptional()
   size?: string;
+
+  @ApiProperty({
+    description:
+      'SKU asignado por el proveedor para órdenes de compra y recepciones',
+    example: 'PROV-SKU-9988',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  supplierSku?: string;
+
+  @ApiProperty({
+    description:
+      'Código de barras (EAN/UPC). Si no se envía, se usa el SKU o el supplierSku',
+    example: '7801234567890',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  barcode?: string;
 }

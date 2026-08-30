@@ -1,12 +1,19 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
-import { APP_GUARD } from '@nestjs/core';
 import { AuthGuard } from './guards/auth.guard';
 import { RolesGuard } from './guards/roles.guard';
+import { PermissionsGuard } from './guards/permissions.guard';
+import { AbilityFactory } from './ability/ability.factory';
+import { MultitenantModule } from '../multitenant/multitenant.module';
+import { Tenant } from '../multitenant/entities/tenant.entity';
+import { User } from '../users/entities/user.entity';
+import { Role } from '../roles/entities/role.entity';
+import { RolePermission } from '../roles/entities/role-permission.entity';
 type Unit =
   | 'Years'
   | 'Year'
@@ -53,6 +60,8 @@ type StringValue =
       isGlobal: false,
     }),
     UsersModule,
+    MultitenantModule,
+    TypeOrmModule.forFeature([Tenant, User, Role, RolePermission]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -73,15 +82,16 @@ type StringValue =
     AuthService,
     AuthGuard,
     RolesGuard,
-    {
-      provide: APP_GUARD,
-      useClass: AuthGuard,
-    },
-    {
-      provide: APP_GUARD,
-      useClass: RolesGuard,
-    },
+    PermissionsGuard,
+    AbilityFactory,
   ],
-  exports: [AuthService, AuthGuard, RolesGuard, JwtModule],
+  exports: [
+    AuthService,
+    AuthGuard,
+    RolesGuard,
+    PermissionsGuard,
+    AbilityFactory,
+    JwtModule,
+  ],
 })
 export class AuthModule {}

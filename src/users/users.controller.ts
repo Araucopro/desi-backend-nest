@@ -8,23 +8,26 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
+  Query,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UserListQueryDto } from './dto/user-list.query.dto';
+import { UserListResponseDto } from './dto/user-list-response.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { Store } from '../stores/entities/store.entity';
 import { CustomMessage } from '../common/decorators/response-message';
 import { User } from './entities/user.entity';
-import { Public } from '../auth/decorators/public.decorator';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 
 @ApiTags('Usuarios')
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Public()
   @Post()
+  @RequirePermission('users:manage')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Crear un nuevo usuario' })
   @ApiResponse({
@@ -38,20 +41,25 @@ export class UsersController {
     return this.usersService.create(createUserDto);
   }
 
-  @Public()
   @Get()
+  @RequirePermission('users:manage')
   @CustomMessage('Lista de usuarios obtenida exitosamente')
-  @ApiOperation({ summary: 'Obtener todos los usuarios' })
+  @ApiOperation({
+    summary: 'Obtener usuarios con paginación, búsqueda y filtros',
+    description:
+      'Filtra por nombre/correo (search), rol y estado, con paginación limit/offset y meta con el total.',
+  })
   @ApiResponse({
     status: 200,
-    description: 'Lista de todos los usuarios.',
-    type: [User],
+    description: 'Lista paginada de usuarios.',
+    type: UserListResponseDto,
   })
-  findAll() {
-    return this.usersService.findAll();
+  findAll(@Query() query: UserListQueryDto) {
+    return this.usersService.findAll(query);
   }
 
   @Get(':id/stores')
+  @RequirePermission('users:manage')
   @ApiOperation({ summary: 'Obtener todas las tiendas de un usuario' })
   @ApiParam({
     name: 'id',
@@ -69,6 +77,7 @@ export class UsersController {
   }
 
   @Get(':email')
+  @RequirePermission('users:manage')
   @CustomMessage('Usuario encontrado exitosamente')
   @ApiOperation({ summary: 'Buscar un usuario por su email' })
   @ApiParam({
@@ -83,6 +92,7 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @RequirePermission('users:manage')
   @ApiOperation({ summary: 'Actualizar un usuario por su ID' })
   @ApiParam({
     name: 'id',
@@ -100,6 +110,7 @@ export class UsersController {
   }
 
   @Delete(':id')
+  @RequirePermission('users:manage')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Eliminar un usuario por su ID' })
   @ApiParam({

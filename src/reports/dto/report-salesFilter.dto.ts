@@ -3,12 +3,13 @@ import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class ReportsSaleFilterDto {
+  @IsOptional()
   @IsString()
   @ApiPropertyOptional({
     description: 'ID de la tienda para filtrar el reporte',
     example: 'store-uuid',
   })
-  storeId!: string;
+  storeId?: string;
 
   @IsOptional()
   @IsISO8601()

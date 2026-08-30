@@ -4,17 +4,21 @@ import {
   ManyToOne,
   JoinColumn,
   CreateDateColumn,
+  Column,
   UpdateDateColumn,
 } from 'typeorm';
 import { User } from '../../../users/entities/user.entity';
 import { Store } from '../../../stores/entities/store.entity';
 
-@Entity({ name: 'UserStore', schema: 'public' })
+@Entity({ name: 'UserStore' })
 export class UserStore {
   @PrimaryGeneratedColumn('uuid', {
     name: 'userStoreID',
   })
   userStoreID!: string;
+
+  @Column({ type: 'uuid' })
+  tenantID!: string;
 
   @ManyToOne(() => User, (user) => user.userStores)
   @JoinColumn({ name: 'userID' })

@@ -1,13 +1,14 @@
 import { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { apiReference } from '@scalar/nestjs-api-reference';
 import { RawServerDefault } from 'fastify';
 
 export const swaggerConfig = (
   app: NestFastifyApplication<RawServerDefault>,
 ) => {
   const config = new DocumentBuilder()
-    .setTitle('D3SI API')
-    .setDescription('Backend API para la aplicación D3SI')
+    .setTitle('Sistema ERP')
+    .setDescription('Backend API creado con Typescript y NestJS')
     .setVersion('1.0')
     .addBearerAuth(
       {
@@ -27,7 +28,28 @@ export const swaggerConfig = (
   // Esto evita tener que poner @ApiBearerAuth() en cada controlador
   document.security = [{ 'access-token': [] }];
 
-  SwaggerModule.setup('docs', app, document, {
+  // UI tradicional de Swagger UI en /swagger
+  SwaggerModule.setup('swagger', app, document, {
     jsonDocumentUrl: 'docs-json',
   });
+
+  // UI moderna con Scalar Reference en /reference
+  app.use(
+    '/docs',
+    apiReference({
+      title: 'Documentación Backend',
+      theme: 'bluePlanet',
+      withFastify: true,
+      showDeveloperTools: 'never',
+      spec: {
+        content: document,
+      },
+      agent: {
+        disabled: true,
+      },
+      mcp: {
+        disabled: true,
+      },
+    }),
+  );
 };

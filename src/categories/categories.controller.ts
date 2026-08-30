@@ -9,8 +9,15 @@ import {
 } from '@nestjs/common';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
+import { CreateCategoriesBulkDto } from './dto/create-categories-bulk.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiBody,
+} from '@nestjs/swagger';
 import { Category } from './entities/category.entity';
 
 @ApiTags('Categorías')
@@ -31,6 +38,52 @@ export class CategoriesController {
   })
   create(@Body() createCategoryDto: CreateCategoryDto) {
     return this.categoriesService.create(createCategoryDto);
+  }
+
+  @Post('bulk')
+  @ApiOperation({
+    summary: 'Crear o actualizar categorías de forma masiva',
+    description:
+      'Recibe un arreglo de categorías y las crea o actualiza en una sola transacción. ' +
+      'Si un item incluye categoryID, se actualiza esa categoría existente. ' +
+      'Si no lo incluye, se busca una categoría existente por nombre (ignorando mayúsculas/minúsculas) y se actualiza; ' +
+      'si no existe, se crea. Si se omite parentID en una actualización, se conserva el padre actual. ' +
+      'Máximo 500 categorías por llamada.',
+  })
+  @ApiBody({
+    type: CreateCategoriesBulkDto,
+    examples: {
+      'Crear y actualizar': {
+        summary: 'Mezcla de categorías nuevas y existentes',
+        value: {
+          items: [
+            { name: 'Vestuario' },
+            {
+              name: 'Poleras',
+              parentID: '123e4567-e89b-12d3-a456-426614174000',
+            },
+            {
+              categoryID: '123e4567-e89b-12d3-a456-426614174000',
+              name: 'Calzado',
+            },
+          ],
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Categorías creadas y/o actualizadas, en el mismo orden del arreglo recibido.',
+    type: [Category],
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Validación fallida (nombres vacíos, duplicados, IDs inexistentes o categorías padre inválidas).',
+  })
+  bulkUpsert(@Body() createCategoriesBulkDto: CreateCategoriesBulkDto) {
+    return this.categoriesService.bulkUpsert(createCategoriesBulkDto);
   }
 
   @Get()

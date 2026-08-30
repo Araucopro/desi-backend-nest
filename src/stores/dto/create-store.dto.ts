@@ -104,4 +104,40 @@ export class CreateStoreDto {
   @IsOptional()
   @IsBoolean()
   readonly isCentralStore?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Giro comercial de la tienda para emisión de DTE',
+    example: 'VENTA AL POR MENOR DE PRENDAS DE VESTIR',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  readonly giro?: string;
+
+  @ApiPropertyOptional({
+    description: 'Código de actividad económica SII (Acteco)',
+    example: '477100',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  readonly acteco?: string;
+
+  @ApiPropertyOptional({
+    description: 'Código de sucursal entregado por el SII',
+    example: '0',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  readonly cdgSIISucur?: string;
+
+  @ApiPropertyOptional({
+    description: 'Razón social del emisor (si difiere del nombre comercial)',
+    example: 'COMERCIAL ARAUCO SPA',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  readonly businessName?: string;
 }

@@ -22,6 +22,9 @@ export class Product {
   @PrimaryGeneratedColumn('uuid')
   productID!: string;
 
+  @Column({ type: 'uuid' })
+  tenantID!: string;
+
   @Column({ type: 'varchar', length: 255, nullable: true })
   image?: string;
 

@@ -5,11 +5,9 @@ import {
   Param,
   ParseUUIDPipe,
   Patch,
-  Post,
   Query,
 } from '@nestjs/common';
 import { StoreProductService } from './storeproduct.service';
-import { TransferStockDto } from './dto/transfer-stock.dto';
 import { UpdateStoreProductDto } from './dto/update-store-product.dto';
 import {
   ApiOperation,
@@ -26,25 +24,6 @@ import { Product } from '../../products/entities/product.entity';
 export class StoreProductController {
   constructor(private readonly storeProductService: StoreProductService) {}
 
-  @Post('transfer')
-  @ApiOperation({
-    summary: 'Transferir stock de la central a una tienda',
-    description:
-      'Realiza una transferencia gratuita de productos desde el stock central hacia una tienda específica. Útil para movimientos internos sin transacción comercial.',
-  })
-  @ApiResponse({
-    status: 201,
-    description: 'Transferencia realizada exitosamente.',
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Stock insuficiente o datos inválidos.',
-  })
-  @ApiResponse({ status: 404, description: 'Tienda o Producto no encontrado.' })
-  transferStock(@Body() transferStockDto: TransferStockDto) {
-    return this.storeProductService.transferStock(transferStockDto);
-  }
-
   @Get('inventory')
   @ApiOperation({
     summary: 'Consultar inventario de una tienda',
@@ -56,13 +35,30 @@ export class StoreProductController {
     description: 'ID de la tienda para consultar inventario',
     type: String,
   })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description:
+      'Búsqueda parcial (sin distinguir mayúsculas) por nombre/marca/categoría del producto o SKU, supplierSku o código de barras de la variante',
+  })
+  @ApiQuery({
+    name: 'barcode',
+    required: false,
+    description:
+      'Código de barras exacto de la variante (EAN/UPC) para escaneo',
+    example: '7801234567890',
+  })
   @ApiResponse({
     status: 200,
     description: 'Inventario de la tienda.',
     type: [Product],
   })
-  getStoreInventory(@Query('storeID', ParseUUIDPipe) storeID: string) {
-    return this.storeProductService.getStoreInventory(storeID);
+  getStoreInventory(
+    @Query('storeID', ParseUUIDPipe) storeID: string,
+    @Query('search') search?: string,
+    @Query('barcode') barcode?: string,
+  ) {
+    return this.storeProductService.getStoreInventory(storeID, search, barcode);
   }
 
   @Patch(':id')

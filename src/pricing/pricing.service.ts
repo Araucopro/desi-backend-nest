@@ -1,23 +1,46 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
-  BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, SelectQueryBuilder } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { PriceHistory, PriceType } from './entities/price-history.entity';
 import { UpdatePriceDto } from './dto/update-price.dto';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
-import { DiscountType, DiscountScope } from './entities/special-offer.entity';
+import { DiscountType } from './entities/special-offer.entity';
 import {
-  AppliedDiscount,
+  BreakdownEntry,
+  CalculateCartInput,
+  CalculateCartResult,
+  CartItemInput,
+  CartPricingItem,
   PricingInput,
   PricingResult,
 } from './dto/pricing.dto';
-import { OfferService } from './offer.service';
+import { OfferCartContext, OfferCartItem, OfferService } from './offer.service';
 import { MarginValidator } from './validators/margin.validator';
 import { UserDiscountValidator } from './validators/user-discount.validator';
 import { PricingListQueryDto } from './dto/pricing-list.query.dto';
+import { TenantContextService } from '../multitenant/tenant-context.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import {
+  applyBundle,
+  applyBuyXGetY,
+  applyManualDiscount,
+  applyStandardOffer,
+  MutableCartLine,
+  recordManualIgnored,
+} from './discount-engine';
+import {
+  findCentralStoreProductsForVariations,
+  findPriceHistoryList,
+  findStoreProductByIdWithStore,
+  findStoreProductOrCreate,
+  findStoreProductsByStoreAndIDs,
+  recordPriceChange,
+} from './pricing-repository.helpers';
 
 @Injectable()
 export class PricingService {
@@ -28,54 +51,64 @@ export class PricingService {
     private readonly offerService: OfferService,
     private readonly marginValidator: MarginValidator,
     private readonly userDiscountValidator: UserDiscountValidator,
+    @Optional() private readonly tenantContext?: TenantContextService,
+    @Optional() private readonly transactionRunner?: TransactionRunnerService,
   ) {}
+
+  private runInTransaction<T>(
+    callback: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    if (this.transactionRunner) {
+      return this.transactionRunner.run(callback);
+    }
+
+    return this.tenantContext
+      ? this.tenantContext.transaction(callback)
+      : this.dataSource.transaction(callback);
+  }
 
   async updatePrice(updatePriceDto: UpdatePriceDto): Promise<PriceHistory> {
     const { storeID, variationID, priceType, newPrice, reason, changedBy } =
       updatePriceDto;
 
-    return this.dataSource.transaction(async (manager) => {
-      let storeProduct = await manager.findOne(StoreProduct, {
-        where: {
-          store: { storeID },
-          variation: { variationID },
-        },
-      });
-
-      if (!storeProduct) {
-        storeProduct = manager.create(StoreProduct, {
-          store: { storeID },
-          variation: { variationID },
-          stock: 0,
-          priceCost: 0,
-          priceList: 0,
-        });
-      }
+    return this.runInTransaction(async (manager) => {
+      const storeProduct = await findStoreProductOrCreate(
+        manager,
+        storeID,
+        variationID,
+      );
 
       const oldPrice =
         priceType === PriceType.COST
           ? storeProduct.priceCost
           : (storeProduct.priceList ?? 0);
 
-      const history = manager.create(PriceHistory, {
-        storeProduct,
+      return this.applyPriceChange(manager, storeProduct, {
         priceType,
         oldPrice,
         newPrice,
         reason,
         changedBy,
       });
-      const savedHistory = await manager.save(history);
-
-      if (priceType === PriceType.COST) {
-        storeProduct.priceCost = newPrice;
-      } else {
-        storeProduct.priceList = newPrice;
-      }
-      await manager.save(storeProduct);
-
-      return savedHistory;
     });
+  }
+
+  /**
+   * Registra el cambio de precio en PriceHistory y actualiza el StoreProduct
+   * usando el EntityManager de la transacción del llamador.
+   */
+  async applyPriceChange(
+    manager: EntityManager,
+    storeProduct: StoreProduct,
+    changes: {
+      priceType: PriceType;
+      oldPrice: number;
+      newPrice: number;
+      reason?: string;
+      changedBy?: string;
+    },
+  ): Promise<PriceHistory> {
+    return recordPriceChange(manager, storeProduct, changes);
   }
 
   async getPriceHistory(storeID: string, variationID: string) {
@@ -85,48 +118,350 @@ export class PricingService {
   async getPriceHistoryList(
     filters: PricingListQueryDto = {},
   ): Promise<PriceHistory[]> {
-    const query: SelectQueryBuilder<PriceHistory> = this.priceHistoryRepository
-      .createQueryBuilder('history')
-      .leftJoinAndSelect('history.storeProduct', 'storeProduct')
-      .leftJoinAndSelect('storeProduct.store', 'store')
-      .leftJoinAndSelect('storeProduct.variation', 'variation')
-      .leftJoinAndSelect('variation.product', 'product')
-      .orderBy('history.effectiveDate', 'DESC');
+    return findPriceHistoryList(this.priceHistoryRepository, filters);
+  }
 
-    if (filters.storeProductID) {
-      query.andWhere('storeProduct.storeProductID = :storeProductID', {
-        storeProductID: filters.storeProductID,
-      });
+  async calculateCart(input: CalculateCartInput): Promise<CalculateCartResult> {
+    const pricingDate = this.parsePricingDate(input.pricingDate ?? new Date());
+    this.validateManualDiscount(input.manualDiscount);
+    if (!input.items.length) {
+      return {
+        items: [],
+        totals: { subtotal: 0, discount: 0, total: 0 },
+        pricingContext: { pricingDate: pricingDate.toISOString() },
+      };
     }
 
-    if (filters.storeID) {
-      query.andWhere('store.storeID = :storeID', {
-        storeID: filters.storeID,
-      });
-    }
+    const groupedItems = this.groupCartItems(input.items);
+    const storeProductIDs = Array.from(groupedItems.keys());
 
-    if (filters.variationID) {
-      query.andWhere('variation.variationID = :variationID', {
-        variationID: filters.variationID,
-      });
-    }
+    return this.runInTransaction(async (manager) => {
+      let storeID = input.storeID;
+      if (!storeID) {
+        if (storeProductIDs.length !== 1) {
+          throw new BadRequestException(
+            'storeID es requerido cuando hay más de un ítem',
+          );
+        }
+        const single = await findStoreProductByIdWithStore(
+          manager,
+          storeProductIDs[0],
+        );
+        if (!single) {
+          throw new NotFoundException('Producto de tienda no encontrado');
+        }
+        storeID = single.store.storeID;
+      }
 
-    return query.getMany();
+      const storeProducts = await findStoreProductsByStoreAndIDs(
+        manager,
+        storeID,
+        storeProductIDs,
+      );
+      if (storeProducts.length !== storeProductIDs.length) {
+        throw new NotFoundException(
+          'Uno o más productos no pertenecen a la tienda',
+        );
+      }
+
+      const lines = await this.buildLines(manager, storeProducts, groupedItems);
+      const cartContext: OfferCartContext = {
+        storeID,
+        pricingDate,
+        items: lines.map((line) => this.toOfferCartItem(line)),
+      };
+
+      const offers = await this.offerService.getApplicableOffers(
+        cartContext,
+        pricingDate,
+      );
+      let exclusiveApplied = false;
+
+      for (const offer of offers) {
+        const applicableIDs =
+          await this.offerService.getApplicableStoreProductIDs(
+            offer,
+            cartContext,
+          );
+        const applicableLines = lines.filter((line) =>
+          applicableIDs.has(line.storeProductID),
+        );
+        if (!applicableLines.length) continue;
+
+        if (offer.discountType === DiscountType.BUY_X_GET_Y) {
+          applyBuyXGetY(applicableLines, offer);
+        } else if (offer.discountType === DiscountType.BUNDLE) {
+          applyBundle(applicableLines, offer);
+        } else {
+          for (const line of applicableLines) {
+            applyStandardOffer(line, offer);
+          }
+        }
+
+        if (offer.exclusive) {
+          exclusiveApplied = true;
+          break;
+        }
+      }
+
+      if (input.manualDiscount !== undefined && input.manualDiscount !== null) {
+        if (exclusiveApplied) {
+          for (const line of lines) {
+            recordManualIgnored(line, input.manualDiscount);
+          }
+        } else {
+          for (const line of lines) {
+            await this.userDiscountValidator.validate({
+              userID: input.userID ?? null,
+              manualDiscount: input.manualDiscount,
+              storeProduct: line.storeProduct,
+              baseUnitPrice: line.baseUnitPrice,
+              currentUnitPrice: line.currentTotal / line.quantity,
+              quantity: line.quantity,
+            });
+            applyManualDiscount(line, input.manualDiscount);
+          }
+        }
+      }
+
+      for (const line of lines) {
+        if (line.marginExempt) continue;
+        this.marginValidator.validate(
+          line.unitCost,
+          line.currentTotal / line.quantity,
+        );
+      }
+
+      const items: CartPricingItem[] = lines.map((line) => ({
+        storeProductID: line.storeProductID,
+        variationID: line.variationID,
+        productID: line.productID,
+        productName: line.productName,
+        sku: line.sku,
+        quantity: line.quantity,
+        baseUnitPrice: line.baseUnitPrice,
+        unitCost: line.unitCost,
+        basePrice: line.basePrice,
+        finalUnitPrice: this.toMoney(line.currentTotal / line.quantity),
+        lineTotal: line.currentTotal,
+        discountsApplied: line.discountsApplied,
+        breakdown: line.breakdown,
+      }));
+
+      const subtotal = this.toMoney(
+        lines.reduce((acc, line) => acc + line.basePrice, 0),
+      );
+      const total = this.toMoney(
+        lines.reduce((acc, line) => acc + line.currentTotal, 0),
+      );
+      const discount = this.toMoney(Math.max(subtotal - total, 0));
+      const firstStore = lines[0]?.storeProduct.store;
+
+      return {
+        items,
+        totals: { subtotal, discount, total },
+        pricingContext: {
+          pricingDate: pricingDate.toISOString(),
+          storeID,
+          storeType: firstStore?.type,
+        },
+      };
+    });
   }
 
   async calculatePrice(input: PricingInput): Promise<PricingResult> {
-    const {
-      storeProductID,
-      quantity = 1,
-      userID = null,
-      manualDiscount,
-      baseUnitPrice,
-      priceCost,
-    } = input;
-
+    const quantity = input.quantity ?? 1;
     if (!quantity || quantity <= 0) {
       throw new BadRequestException('Quantity must be greater than zero');
     }
+    this.validateManualDiscount(input.manualDiscount);
+    const pricingDate = this.parsePricingDate(input.pricingDate ?? new Date());
+
+    const cart = await this.calculateCart({
+      storeID: '',
+      items: [
+        {
+          storeProductID: input.storeProductID,
+          quantity,
+          baseUnitPrice: input.baseUnitPrice,
+          priceCost: input.priceCost,
+        },
+      ],
+      userID: input.userID,
+      manualDiscount: input.manualDiscount,
+      pricingDate,
+    });
+    const item = cart.items[0];
+    if (!item) {
+      throw new NotFoundException('Producto de tienda no encontrado');
+    }
+
+    const automatic = item.discountsApplied.find(
+      (discount) => discount.source === 'AUTO' && discount.applied,
+    );
+
+    return {
+      basePrice: item.basePrice,
+      finalPrice: item.lineTotal,
+      breakdown: item.breakdown,
+      discountApplied: item.discountsApplied.some(
+        (discount) => discount.applied,
+      ),
+      discountsApplied: item.discountsApplied,
+      discountDetails: automatic ?? null,
+      pricingContext: {
+        pricingDate: pricingDate.toISOString(),
+        storeID: cart.pricingContext.storeID,
+        productID: item.productID,
+        variationID: item.variationID,
+        storeType: cart.pricingContext.storeType,
+      },
+    };
+  }
+
+  private async buildLines(
+    manager: EntityManager,
+    storeProducts: StoreProduct[],
+    groupedItems: Map<
+      string,
+      { quantity: number; baseUnitPrice?: number; priceCost?: number }
+    >,
+  ): Promise<MutableCartLine[]> {
+    const baseRows = storeProducts.map((storeProduct) => {
+      const override = groupedItems.get(storeProduct.storeProductID);
+      return {
+        storeProduct,
+        baseUnitPrice:
+          override?.baseUnitPrice !== undefined
+            ? override.baseUnitPrice
+            : Number(storeProduct.priceList ?? 0),
+        unitCost:
+          override?.priceCost !== undefined
+            ? override.priceCost
+            : Number(storeProduct.priceCost ?? 0),
+      };
+    });
+
+    const needsFallback = baseRows.filter(
+      (row) => row.baseUnitPrice <= 0 || row.unitCost <= 0,
+    );
+    if (needsFallback.length) {
+      const variationIDs = Array.from(
+        new Set(
+          needsFallback.map((row) => row.storeProduct.variation?.variationID),
+        ).values(),
+      ).filter((id): id is string => Boolean(id));
+      if (variationIDs.length) {
+        const centralRows = await findCentralStoreProductsForVariations(
+          manager,
+          variationIDs,
+        );
+        const centralByVariation = new Map(
+          centralRows.map((row) => [row.variation?.variationID, row]),
+        );
+        for (const row of baseRows) {
+          const central = centralByVariation.get(
+            row.storeProduct.variation?.variationID,
+          );
+          if (!central) continue;
+          if (row.baseUnitPrice <= 0 && typeof central.priceList === 'number') {
+            row.baseUnitPrice = central.priceList;
+          }
+          if (row.unitCost <= 0 && typeof central.priceCost === 'number') {
+            row.unitCost = central.priceCost;
+          }
+        }
+      }
+    }
+
+    return baseRows.map((row) => {
+      const storeProduct = row.storeProduct;
+      const product = storeProduct.variation?.product;
+      const quantity =
+        groupedItems.get(storeProduct.storeProductID)?.quantity ?? 0;
+      const basePrice = this.toMoney(row.baseUnitPrice * quantity);
+      const breakdown: BreakdownEntry[] = [
+        {
+          step: 'basePrice',
+          previousPrice: basePrice,
+          newPrice: basePrice,
+          delta: 0,
+          scope: 'TOTAL',
+          details: { unitPrice: row.baseUnitPrice, quantity },
+        },
+      ];
+      return {
+        storeProductID: storeProduct.storeProductID,
+        storeID: storeProduct.store?.storeID,
+        storeType: storeProduct.store?.type,
+        variationID: storeProduct.variation?.variationID,
+        productID: product?.productID,
+        productName: product?.name ?? storeProduct.variation?.sku,
+        sku: storeProduct.variation?.sku,
+        categoryID: product?.category?.categoryID ?? product?.categoryID,
+        brand: product?.brand ?? null,
+        model: product?.name ?? null,
+        quantity,
+        baseUnitPrice: row.baseUnitPrice,
+        unitCost: row.unitCost,
+        basePrice,
+        currentTotal: basePrice,
+        discountsApplied: [],
+        breakdown,
+        marginExempt: false,
+        storeProduct,
+      };
+    });
+  }
+
+  private toOfferCartItem(line: MutableCartLine): OfferCartItem {
+    return {
+      storeProductID: line.storeProductID,
+      storeID: line.storeID,
+      productID: line.productID,
+      variationID: line.variationID,
+      categoryID: line.categoryID,
+      brand: line.brand,
+      model: line.model,
+      quantity: line.quantity,
+      unitPrice: line.baseUnitPrice,
+    };
+  }
+
+  private groupCartItems(
+    items: CartItemInput[],
+  ): Map<
+    string,
+    { quantity: number; baseUnitPrice?: number; priceCost?: number }
+  > {
+    const grouped = new Map<
+      string,
+      { quantity: number; baseUnitPrice?: number; priceCost?: number }
+    >();
+    for (const item of items) {
+      if (!item.quantity || item.quantity <= 0) {
+        throw new BadRequestException('Quantity must be greater than zero');
+      }
+      const current = grouped.get(item.storeProductID);
+      grouped.set(item.storeProductID, {
+        quantity: (current?.quantity ?? 0) + item.quantity,
+        baseUnitPrice: item.baseUnitPrice ?? current?.baseUnitPrice,
+        priceCost: item.priceCost ?? current?.priceCost,
+      });
+    }
+    return grouped;
+  }
+
+  private parsePricingDate(value: string | Date): Date {
+    const pricingDate =
+      value instanceof Date ? value : value ? new Date(value) : new Date();
+    if (Number.isNaN(pricingDate.getTime())) {
+      throw new BadRequestException('pricingDate must be a valid date');
+    }
+    return pricingDate;
+  }
+
+  private validateManualDiscount(manualDiscount?: number) {
     if (
       manualDiscount !== undefined &&
       (typeof manualDiscount !== 'number' ||
@@ -137,269 +472,9 @@ export class PricingService {
         'manualDiscount must be a number between 0 and 100',
       );
     }
-
-    const pricingDate =
-      input.pricingDate instanceof Date
-        ? input.pricingDate
-        : input.pricingDate
-          ? new Date(input.pricingDate)
-          : new Date();
-
-    if (Number.isNaN(pricingDate.getTime())) {
-      throw new BadRequestException('pricingDate must be a valid date');
-    }
-
-    let storeProduct: StoreProduct | null = null;
-    const shouldLoadStoreProduct =
-      baseUnitPrice === undefined ||
-      priceCost === undefined ||
-      manualDiscount !== undefined;
-
-    if (shouldLoadStoreProduct) {
-      storeProduct = await this.dataSource.manager.findOne(StoreProduct, {
-        where: { storeProductID },
-        relations: ['store', 'variation', 'variation.product'],
-      });
-      if (!storeProduct) {
-        throw new NotFoundException('Producto de tienda no encontrado');
-      }
-    }
-
-    const { unitPrice, unitCost } = await this.resolveBasePricing({
-      storeProduct,
-      baseUnitPrice,
-      priceCost,
-    });
-
-    const basePrice = unitPrice * quantity;
-    let price = basePrice;
-    const pricingContext: PricingResult['pricingContext'] = {
-      pricingDate: pricingDate.toISOString(),
-      storeID: storeProduct?.store?.storeID,
-      productID: storeProduct?.variation?.product?.productID,
-      variationID: storeProduct?.variation?.variationID,
-      storeType: storeProduct?.store?.type,
-    };
-
-    const breakdown: PricingResult['breakdown'] = [
-      {
-        step: 'basePrice',
-        previousPrice: basePrice,
-        newPrice: basePrice,
-        delta: 0,
-        scope: 'TOTAL',
-        details: { unitPrice, quantity },
-      },
-    ];
-
-    const discountsApplied: AppliedDiscount[] = [];
-    const activeOffer = await this.offerService.getBestOffer(
-      storeProductID,
-      unitPrice,
-      quantity,
-      pricingDate,
-    );
-    let discountApplied = false;
-    let discountDetails: AppliedDiscount | null = null;
-
-    if (activeOffer) {
-      const prev = price;
-      let next = price;
-      const scope: DiscountScope = activeOffer.scope ?? DiscountScope.UNIT;
-      const currentUnitPrice = price / quantity;
-
-      switch (activeOffer.discountType) {
-        case DiscountType.PERCENTAGE:
-          if (scope === DiscountScope.UNIT) {
-            const unitAfter = currentUnitPrice * (1 - activeOffer.value / 100);
-            next = unitAfter * quantity;
-          } else {
-            next = price * (1 - activeOffer.value / 100);
-          }
-          break;
-        case DiscountType.FIXED_AMOUNT:
-          if (scope === DiscountScope.UNIT) {
-            const unitAfter = Math.max(0, currentUnitPrice - activeOffer.value);
-            next = unitAfter * quantity;
-          } else {
-            next = Math.max(0, price - activeOffer.value);
-          }
-          break;
-        case DiscountType.FIXED_PRICE:
-          if (scope === DiscountScope.UNIT) {
-            next = activeOffer.value * quantity;
-          } else {
-            next = activeOffer.value;
-          }
-          break;
-      }
-
-      price = next;
-      discountApplied = true;
-      discountDetails = {
-        source: 'AUTO',
-        applied: true,
-        previousPrice: prev,
-        resultingPrice: next,
-        offerID: activeOffer.offerID,
-        description: activeOffer.description,
-        discountType: activeOffer.discountType,
-        value: activeOffer.value,
-        scope,
-        exclusive: !!activeOffer.exclusive,
-        priority: activeOffer.priority,
-      };
-      discountsApplied.push(discountDetails);
-
-      breakdown.push({
-        step: 'automaticOffer',
-        previousPrice: prev,
-        newPrice: next,
-        delta: next - prev,
-        scope,
-        details: {
-          offerID: activeOffer.offerID,
-          type: activeOffer.discountType,
-          value: activeOffer.value,
-          priority: activeOffer.priority,
-        },
-      });
-    }
-
-    if (manualDiscount !== undefined && manualDiscount !== null) {
-      if (discountDetails?.exclusive) {
-        // Offer is exclusive, manual discounts are ignored
-        discountsApplied.push({
-          source: 'MANUAL',
-          applied: false,
-          previousPrice: price,
-          resultingPrice: price,
-          scope: 'TOTAL',
-          manualDiscount,
-          reasonIgnored: 'exclusive_offer',
-        });
-        breakdown.push({
-          step: 'manualDiscount_ignored',
-          previousPrice: price,
-          newPrice: price,
-          delta: 0,
-          scope: 'TOTAL',
-          details: { reason: 'exclusive_offer' },
-        });
-      } else {
-        if (!storeProduct) {
-          throw new NotFoundException('Producto de tienda no encontrado');
-        }
-
-        await this.userDiscountValidator.validate({
-          userID,
-          manualDiscount,
-          storeProduct,
-          baseUnitPrice: unitPrice,
-          currentUnitPrice: price / quantity,
-          quantity,
-        });
-
-        const prev = price;
-        price = price * (1 - manualDiscount / 100);
-        discountsApplied.push({
-          source: 'MANUAL',
-          applied: true,
-          previousPrice: prev,
-          resultingPrice: price,
-          scope: 'TOTAL',
-          manualDiscount,
-        });
-        breakdown.push({
-          step: 'manualDiscount',
-          previousPrice: prev,
-          newPrice: price,
-          delta: price - prev,
-          scope: 'TOTAL',
-          details: { manualDiscount },
-        });
-        discountApplied = true;
-      }
-    }
-
-    const finalUnitPrice = price / quantity;
-    this.marginValidator.validate(unitCost, finalUnitPrice);
-
-    const finalPrice = Math.round(price * 100) / 100;
-
-    const roundedBreakdown = breakdown.map((b) => ({
-      ...b,
-      previousPrice: Math.round(b.previousPrice * 100) / 100,
-      newPrice: Math.round(b.newPrice * 100) / 100,
-      delta: Math.round(b.delta * 100) / 100,
-    }));
-
-    return {
-      basePrice,
-      finalPrice,
-      breakdown: roundedBreakdown,
-      discountApplied,
-      discountsApplied,
-      discountDetails,
-      pricingContext,
-    };
   }
 
-  private async resolveBasePricing({
-    storeProduct,
-    baseUnitPrice,
-    priceCost,
-  }: {
-    storeProduct: StoreProduct | null;
-    baseUnitPrice?: number;
-    priceCost?: number;
-  }): Promise<{ unitPrice: number; unitCost: number }> {
-    let unitPrice =
-      baseUnitPrice !== undefined
-        ? baseUnitPrice
-        : typeof storeProduct?.priceList === 'number'
-          ? storeProduct.priceList
-          : 0;
-
-    let unitCost =
-      priceCost !== undefined
-        ? priceCost
-        : typeof storeProduct?.priceCost === 'number'
-          ? storeProduct.priceCost
-          : 0;
-
-    const needsFallback =
-      storeProduct !== null &&
-      storeProduct.variation?.variationID &&
-      (unitPrice <= 0 || unitCost <= 0);
-
-    if (!needsFallback) {
-      return { unitPrice, unitCost };
-    }
-
-    const centralStoreProduct = await this.dataSource.manager.findOne(
-      StoreProduct,
-      {
-        where: {
-          store: { isCentralStore: true },
-          variation: { variationID: storeProduct.variation.variationID },
-        },
-        relations: ['store'],
-      },
-    );
-
-    if (!centralStoreProduct) {
-      return { unitPrice, unitCost };
-    }
-
-    if (unitPrice <= 0 && typeof centralStoreProduct.priceList === 'number') {
-      unitPrice = centralStoreProduct.priceList;
-    }
-
-    if (unitCost <= 0 && typeof centralStoreProduct.priceCost === 'number') {
-      unitCost = centralStoreProduct.priceCost;
-    }
-
-    return { unitPrice, unitCost };
+  private toMoney(value: number): number {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
   }
 }

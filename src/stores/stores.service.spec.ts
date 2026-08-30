@@ -3,11 +3,19 @@ import { StoresService } from './stores.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Store, StoreType } from './entities/store.entity';
 import { Repository } from 'typeorm';
-import { NotFoundException } from '@nestjs/common';
+import {
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
+
+import { ConfigService } from '@nestjs/config';
+import { EncryptionService } from '../common/services/encryption.service';
+import * as crypto from 'crypto';
 
 describe('StoresService', () => {
   let service: StoresService;
   let storeRepository: Repository<Store>;
+  const testEncryptionKey = crypto.randomBytes(32).toString('hex');
 
   const mockStoreRepository = {
     find: jest.fn(),
@@ -37,6 +45,16 @@ describe('StoresService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         StoresService,
+        EncryptionService,
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) => {
+              if (key === 'STORE_ENCRYPTION_KEY') return testEncryptionKey;
+              return null;
+            }),
+          },
+        },
         {
           provide: getRepositoryToken(Store),
           useValue: mockStoreRepository,
@@ -165,6 +183,73 @@ describe('StoresService', () => {
       await expect(service.remove('not-found')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('setOpenfacturaKey', () => {
+    it('should encrypt and save the openfactura key', async () => {
+      mockStoreRepository.findOne.mockResolvedValue({ ...mockStore });
+      mockStoreRepository.save.mockImplementation((s) => Promise.resolve(s));
+
+      const result = await service.setOpenfacturaKey(
+        'store-uuid-1',
+        'my-openfactura-key',
+      );
+
+      expect(result).toEqual({ hasOpenfacturaKey: true });
+      expect(mockStoreRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          hasOpenfacturaKey: true,
+          openfacturaKeyEncrypted: expect.any(String),
+        }),
+      );
+    });
+  });
+
+  describe('resolveOpenfacturaKey', () => {
+    it('should decrypt and return the store openfactura key if present', async () => {
+      const qb = {
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn(),
+      };
+      (mockStoreRepository as any).createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(qb);
+
+      // First set the key to get a real encrypted string
+      mockStoreRepository.findOne.mockResolvedValue({ ...mockStore });
+      let savedStore: any = null;
+      mockStoreRepository.save.mockImplementation((s) => {
+        savedStore = s;
+        return Promise.resolve(s);
+      });
+      await service.setOpenfacturaKey('store-uuid-1', 'secret-api-key-123');
+
+      qb.getOne.mockResolvedValue(savedStore);
+
+      const resolved = await service.resolveOpenfacturaKey('store-uuid-1');
+      expect(resolved).toBe('secret-api-key-123');
+    });
+
+    it('should throw InternalServerErrorException if store has no encrypted key', async () => {
+      const qb = {
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({
+          ...mockStore,
+          openfacturaKeyEncrypted: null,
+        }),
+      };
+      (mockStoreRepository as any).createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(qb);
+
+      await expect(
+        service.resolveOpenfacturaKey('store-uuid-1'),
+      ).rejects.toThrow(InternalServerErrorException);
     });
   });
 });

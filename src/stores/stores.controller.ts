@@ -10,10 +10,12 @@ import {
 import { StoresService } from './stores.service';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
+import { SetOpenfacturaKeyDto } from './dto/set-openfactura-key.dto';
 import { User } from '../users/entities/user.entity';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { Store } from './entities/store.entity';
 import { CustomMessage } from '../common/decorators/response-message';
+import { RequirePermission } from '../auth/decorators/require-permission.decorator';
 
 @ApiTags('Tiendas')
 @Controller('stores')
@@ -21,6 +23,7 @@ export class StoresController {
   constructor(private readonly storesService: StoresService) {}
 
   @Post()
+  @RequirePermission('stores:manage')
   @ApiOperation({
     summary: 'Crear una nueva tienda',
     description:
@@ -41,6 +44,7 @@ export class StoresController {
   }
 
   @Get()
+  @RequirePermission('stores:read')
   @ApiOperation({
     summary: 'Obtener todas las tiendas',
     description:
@@ -56,6 +60,7 @@ export class StoresController {
   }
 
   @Get(':id/users')
+  @RequirePermission('stores:read')
   @ApiOperation({ summary: 'Obtener todos los usuarios de una tienda' })
   @ApiParam({
     name: 'id',
@@ -73,6 +78,7 @@ export class StoresController {
   }
 
   @Get(':id')
+  @RequirePermission('stores:read')
   @ApiOperation({
     summary: 'Obtener una tienda por ID',
     description: 'Retorna la información detallada de una tienda específica.',
@@ -93,6 +99,7 @@ export class StoresController {
   }
 
   @Patch(':id')
+  @RequirePermission('stores:manage')
   @ApiOperation({
     summary: 'Actualizar información de una tienda',
     description:
@@ -113,7 +120,38 @@ export class StoresController {
     return this.storesService.update(id, updateStoreDto);
   }
 
+  @Patch(':id/openfactura-key')
+  @RequirePermission('stores:manage')
+  @ApiOperation({
+    summary: 'Configurar o actualizar la API key de Openfactura de una tienda',
+    description:
+      'Almacena de forma segura y cifrada la API key de Openfactura correspondiente a la tienda especificada.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID de la tienda',
+    type: String,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'API key configurada exitosamente.',
+    schema: {
+      properties: {
+        hasOpenfacturaKey: { type: 'boolean', example: true },
+      },
+    },
+  })
+  @ApiResponse({ status: 404, description: 'Tienda no encontrada.' })
+  @CustomMessage('API key de Openfactura configurada exitosamente')
+  setOpenfacturaKey(
+    @Param('id') id: string,
+    @Body() dto: SetOpenfacturaKeyDto,
+  ) {
+    return this.storesService.setOpenfacturaKey(id, dto.apiKey);
+  }
+
   @Delete(':id')
+  @RequirePermission('stores:manage')
   @ApiOperation({
     summary: 'Eliminar una tienda',
     description: 'Elimina permanentemente una tienda del sistema.',

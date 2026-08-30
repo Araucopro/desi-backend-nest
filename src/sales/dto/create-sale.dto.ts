@@ -1,74 +1,161 @@
+import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsDateString,
+  IsEmail,
   IsEnum,
   IsInt,
   IsNotEmpty,
   IsNumber,
-  IsPositive,
+  IsOptional,
+  IsString,
   IsUUID,
+  Max,
+  Min,
   ValidateNested,
+  ArrayUnique,
 } from 'class-validator';
-import { Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { SalePaymentType, SaleType } from '../entities/sale.entity';
+import { IsRut } from '../../common/validators/rut.validator';
 
-class SaleProductItemDto {
+export class CreateSaleReceiverDto {
+  @ApiPropertyOptional({
+    description: 'RUT del receptor (obligatorio para factura)',
+    example: '66666666-6',
+  })
+  @IsOptional()
+  @IsString()
+  @IsRut()
+  rut?: string;
+
+  @ApiPropertyOptional({
+    description: 'Nombre o razón social del receptor',
+    example: 'Cliente Ejemplo SpA',
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  name?: string;
+
+  @ApiPropertyOptional({
+    description: 'Correo del receptor',
+    example: 'cliente@correo.cl',
+  })
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @ApiPropertyOptional({
+    description: 'Dirección del receptor',
+    example: 'Av. Providencia 1234',
+  })
+  @IsOptional()
+  @IsString()
+  address?: string;
+
+  @ApiPropertyOptional({
+    description: 'Comuna o ciudad del receptor',
+    example: 'Providencia',
+  })
+  @IsOptional()
+  @IsString()
+  city?: string;
+
+  @ApiPropertyOptional({
+    description: 'Giro del receptor',
+    example: 'VENTA AL POR MENOR',
+  })
+  @IsOptional()
+  @IsString()
+  giro?: string;
+}
+
+export class CreateSaleItemDto {
   @ApiProperty({
-    description: 'ID de la variación del producto a vender',
-    example: '123e4567-e89b-12d3-a456-426614174000',
+    description: 'ID del producto en tienda (StoreProduct)',
+    example: '550e8400-e29b-41d4-a716-446655440000',
   })
   @IsUUID()
-  @IsNotEmpty()
-  variationID: string;
+  storeProductID!: string;
 
   @ApiProperty({
-    description: 'Cantidad de unidades a vender',
-    example: 10,
+    description: 'Cantidad de unidades',
+    example: 1,
     minimum: 1,
   })
+  @Type(() => Number)
   @IsInt()
-  @IsPositive()
-  quantity: number;
-
-  @ApiProperty({
-    description: 'Precio unitario de venta',
-    example: 15000,
-    minimum: 0,
-  })
-  @IsNumber()
-  @IsPositive()
-  unitPrice: number;
+  @Min(1)
+  quantity!: number;
 }
 
 export class CreateSaleDto {
   @ApiProperty({
-    description: 'ID de la tienda que realiza la compra',
-    example: '123e4567-e89b-12d3-a456-426614174001',
+    description: 'Tipo de venta',
+    enum: SaleType,
+    example: SaleType.NOTA_VENTA,
   })
-  @IsUUID()
-  @IsNotEmpty()
-  storeID: string;
+  @IsEnum(SaleType)
+  saleType!: SaleType;
 
   @ApiProperty({
-    enum: ['Efectivo', 'Debito', 'Credito'],
-    description: 'Método de pago utilizado para la transacción',
-    example: 'Credito',
+    description: 'Forma de pago',
+    enum: SalePaymentType,
+    example: SalePaymentType.CASH,
   })
-  @IsEnum(['Efectivo', 'Debito', 'Credito'])
-  paymentType: 'Efectivo' | 'Debito' | 'Credito';
+  @IsEnum(SalePaymentType)
+  paymentType!: SalePaymentType;
+
+  @ApiPropertyOptional({
+    description: 'Fecha de emisión (ISO). Default: hoy',
+    example: '2026-08-06',
+  })
+  @IsOptional()
+  @IsDateString()
+  issueDate?: string;
+
+  @ApiPropertyOptional({
+    description: 'Datos del receptor (obligatorio para factura)',
+    type: CreateSaleReceiverDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateSaleReceiverDto)
+  receiver?: CreateSaleReceiverDto;
 
   @ApiProperty({
-    type: [SaleProductItemDto],
-    description: 'Lista de productos y cantidades a vender',
-    example: [
-      {
-        variationID: '123e4567-e89b-12d3-a456-426614174000',
-        quantity: 10,
-        unitPrice: 15000,
-      },
-    ],
+    description: 'Ítems de la venta',
+    type: [CreateSaleItemDto],
   })
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => SaleProductItemDto)
-  items: SaleProductItemDto[];
+  @Type(() => CreateSaleItemDto)
+  items!: CreateSaleItemDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Descuento manual porcentual (0-100). Se valida contra el rol del usuario, su pertenencia a la tienda y el margen mínimo',
+    example: 10,
+    minimum: 0,
+    maximum: 100,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  manualDiscount?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'IDs de guías de despacho (DTE 52) EMITIDA que respaldan el traslado. La factura/boleta las referencia sin volver a reservar stock',
+    type: [String],
+    example: ['550e8400-e29b-41d4-a716-446655440000'],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  dispatchGuideIDs?: string[];
 }

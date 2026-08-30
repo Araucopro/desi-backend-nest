@@ -9,6 +9,9 @@ describe('CategoriesService', () => {
   let categoryRepository: Repository<Category>;
 
   const mockCategoryRepository = {
+    manager: {
+      transaction: jest.fn(),
+    },
     find: jest.fn(),
     findOne: jest.fn(),
     create: jest.fn(),
@@ -27,6 +30,9 @@ describe('CategoriesService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockCategoryRepository.manager.transaction.mockImplementation((callback) =>
+      callback({ getRepository: () => mockCategoryRepository }),
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -63,6 +69,119 @@ describe('CategoriesService', () => {
       expect(mockCategoryRepository.create).toHaveBeenCalledWith(createDto);
       expect(mockCategoryRepository.save).toHaveBeenCalled();
       expect(result.categoryID).toBe('new-uuid');
+    });
+  });
+
+  describe('bulkUpsert', () => {
+    it('creates all categories when none exist, using a single save', async () => {
+      mockCategoryRepository.find.mockResolvedValue([]);
+      const created = [
+        { categoryID: 'new-1', name: 'Vestuario', parentID: null },
+        { categoryID: 'new-2', name: 'Calzado', parentID: null },
+      ];
+      mockCategoryRepository.create.mockImplementation((data) => data);
+      mockCategoryRepository.save.mockResolvedValue(created);
+
+      const result = await service.bulkUpsert({
+        items: [{ name: '  Vestuario  ' }, { name: 'Calzado' }],
+      });
+
+      expect(mockCategoryRepository.find).toHaveBeenCalledTimes(1);
+      expect(mockCategoryRepository.save).toHaveBeenCalledTimes(1);
+      expect(result).toEqual(created);
+    });
+
+    it('updates existing categories by name and creates the rest', async () => {
+      mockCategoryRepository.find.mockResolvedValue([
+        {
+          categoryID: 'existing-1',
+          tenantID: 'tenant-1',
+          name: 'Vestuario',
+          parentID: null,
+        },
+        {
+          categoryID: 'parent-1',
+          tenantID: 'tenant-1',
+          name: 'Accesorios',
+          parentID: null,
+        },
+      ]);
+      mockCategoryRepository.create.mockImplementation((data) => ({
+        categoryID: 'new-1',
+        ...data,
+      }));
+      mockCategoryRepository.save.mockImplementation((entities) =>
+        Promise.resolve(entities),
+      );
+
+      const result = await service.bulkUpsert({
+        items: [
+          { name: 'Vestuario', parentID: 'parent-1' },
+          { name: 'Calzado' },
+        ],
+      });
+
+      expect(result).toHaveLength(2);
+      expect(result[0]).toMatchObject({
+        categoryID: 'existing-1',
+        name: 'Vestuario',
+        parentID: 'parent-1',
+      });
+      expect(result[1]).toMatchObject({
+        categoryID: 'new-1',
+        name: 'Calzado',
+      });
+      expect(mockCategoryRepository.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the current parent when parentID is omitted for an existing category', async () => {
+      mockCategoryRepository.find.mockResolvedValue([
+        {
+          categoryID: 'existing-1',
+          tenantID: 'tenant-1',
+          name: 'Vestuario',
+          parentID: 'parent-1',
+        },
+      ]);
+      mockCategoryRepository.save.mockImplementation((entities) =>
+        Promise.resolve(entities),
+      );
+
+      const result = await service.bulkUpsert({
+        items: [{ name: 'Vestuario' }],
+      });
+
+      expect(result[0].parentID).toBe('parent-1');
+    });
+
+    it('rejects duplicate names in the payload before querying', async () => {
+      await expect(
+        service.bulkUpsert({
+          items: [{ name: 'Vestuario' }, { name: ' vestuario ' }],
+        }),
+      ).rejects.toThrow('duplicada');
+
+      expect(mockCategoryRepository.find).not.toHaveBeenCalled();
+    });
+
+    it('rejects a categoryID that does not exist', async () => {
+      mockCategoryRepository.find.mockResolvedValue([]);
+
+      await expect(
+        service.bulkUpsert({
+          items: [{ categoryID: 'missing-id', name: 'Calzado' }],
+        }),
+      ).rejects.toThrow('No se encontró la categoría con ID missing-id');
+    });
+
+    it('rejects parentID references that do not exist', async () => {
+      mockCategoryRepository.find.mockResolvedValue([]);
+
+      await expect(
+        service.bulkUpsert({
+          items: [{ name: 'Poleras', parentID: 'missing-parent' }],
+        }),
+      ).rejects.toThrow('no existen');
     });
   });
 

@@ -4,12 +4,13 @@ Claude debe leer y seguir estas reglas al trabajar en este repositorio. La idea 
 
 ## Contexto rapido
 
-Backend NestJS 11 con Fastify, TypeORM/PostgreSQL, JWT, Swagger, DTOs con `class-validator`, interceptor global de respuesta y filtro global de errores.
+Backend NestJS 11 con Fastify, TypeORM/PostgreSQL con Row-Level Security (RLS), `synchronize: false` (migraciones versionadas), JWT, Swagger, DTOs con `class-validator`, interceptor global de respuesta, interceptor de contexto multitenant y filtro global de errores.
 
 Dominios principales:
 
-- Auth/JWT.
-- Usuarios, roles y tiendas.
+- Multitenant (`src/multitenant`): RLS, contexto `AsyncLocalStorage`, entidades master (`Tenant`, `MasterUser`, `AuditEvent`), guards/interceptors tenant y API master.
+- Auth/JWT (Tenant y Master).
+- Usuarios, roles y tiendas (con limites por tenant: 5 usuarios, 5 tiendas).
 - Productos, variaciones y stock por tienda.
 - Inventario por movimientos.
 - Precios, historial y ofertas.
@@ -90,9 +91,24 @@ Seguir este patron:
 - `src/<dominio>/<dominio>.module.ts`
 - `src/<dominio>/<dominio>.controller.ts`
 - `src/<dominio>/<dominio>.service.ts`
+- `src/<dominio>/<dominio>-engine.ts` (reglas puras de negocio)
+- `src/<dominio>/<dominio>-repository.helpers.ts` (acceso a datos)
+- `src/<dominio>/<dominio>.types.ts` (tipos compartidos del dominio)
 - `src/<dominio>/dto/*.dto.ts`
 - `src/<dominio>/entities/*.entity.ts`
 - tests `*.spec.ts` si la logica tiene riesgo.
+
+### Patron engine / repository-helpers / types
+
+Para dominios con logica sensible (ventas, precios/ofertas, inventario, ordenes de compra, transferencias, DTE) separar la implementacion en tres capas:
+
+- **`<dominio>-engine.ts`**: logica pura en funciones sin repositorios: calculos, validaciones, construccion de estados o entidades preparadas. Recibe datos ya cargados y no toca TypeORM. Ejemplos: `sales-engine.ts`, `offer-engine.ts`, `discount-engine.ts`, `inventory-engine.ts`, `purchase-orders-engine.ts`, `transfers-engine.ts`.
+- **`<dominio>-repository.helpers.ts`**: funciones que reciben `EntityManager` y encapsulan queries: `findOne` con `relations`/`lock`, query builders, upserts, conteos y validaciones de existencia. Lanzan `NotFoundException`/`BadRequestException` cuando el recurso no existe o la operacion no es valida. Ejemplos: `sales-repository.helpers.ts`, `products-repository.helpers.ts`, `inventory-repository.helpers.ts`, `purchase-orders-repository.helpers.ts`, `transfers-repository.helpers.ts`.
+- **`<dominio>.types.ts`**: tipos compartidos entre engine, helpers, service y DTOs (por ejemplo `PreparedSale`, `OfferCartItem`, `OfferCartContext`, `StockReservationItem`). Evita duplicar shapes y rompe imports circulares.
+
+Los services quedan como orquestadores: validan con DTOs, abren la transaccion, llaman helpers para leer/escribir y engines para calcular/aplicar reglas. Los controllers no contienen query builders ni reglas de negocio.
+
+Ejemplo en pricing/ofertas: `offer-engine.ts` valida la configuracion y la aplicabilidad de ofertas; `discount-engine.ts` aplica descuentos del carrito (incluye `applyBundle` por `storeProductID`, 2x1/3x2/6x5 y descuentos estandar); `offer.types.ts` define los contratos entre carrito, validacion y motor; `OfferService`/`PricingService` orquestan con TypeORM.
 
 Controllers:
 
@@ -115,15 +131,21 @@ Modules:
 
 Auth actual:
 
-- `POST /auth/login` publico.
+- `POST /auth/login` publico para usuarios de tenant.
+- `POST /master/login` publico para usuarios de plataforma (MASTER).
 - `GET /auth/check-status` con `AuthGuard`.
-- JWT payload: `{ id, email, role }`.
+- JWT payload Tenant: `{ id, email, role, tenantID }`.
+- JWT payload Master: `{ id, email, isMasterAdmin: true }`.
+- El `tenantID` se obtiene del JWT: `tenantId` en tokens tenant y `impersonatingTenantId` en tokens master con impersonación. No se usa el header `X-Tenant-ID`.
 - Decorators:
   - `@Public()`
   - `@Roles(...)`
   - `@GetUser()`
+  - `@MasterRoute()`
 - Guards:
   - `AuthGuard`
+  - `TenantContextGuard` (valida `tenantId`/`impersonatingTenantId` del token y estado del tenant)
+  - `MasterAuthGuard`
   - `RolesGuard`
 
 Roles:
@@ -133,38 +155,56 @@ Roles:
 - `consignado`
 - `tercero`
 
-Para endpoints sensibles:
+Para endpoints sensibles de tenant:
 
 ```ts
 @UseGuards(AuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
 ```
 
+Para endpoints de plataforma/master (o seed):
+
+```ts
+@UseGuards(MasterAuthGuard)
+@MasterRoute()
+```
+
 Swagger con bearer global no protege rutas por si solo. La proteccion real debe estar en guards.
 
 ## Persistencia TypeORM
 
-Base de datos PostgreSQL. TypeORM esta con `synchronize: true`, asi que los cambios de entidades pueden tocar la DB automaticamente.
+Base de datos PostgreSQL. TypeORM esta con `synchronize: false`. **Queda prohibido usar `synchronize: true`**. Todos los cambios de entidad deben crearse via migraciones TypeORM en `src/datasource/migrations/`.
 
 Reglas:
 
+- Todas las entidades de negocio deben incluir `tenantID!: string;`.
 - No renombrar columnas/tablas sin plan.
-- Mantener IDs existentes con sufijo `ID`.
+- Mantener IDs existentes con sufijo `ID` y `tenantID`.
 - Usar `ColumnNumericTransformer` para `decimal` que deba llegar como `number`.
-- Usar relaciones e indices como en entidades cercanas.
-- Usar transacciones para mutaciones de varias tablas.
+- Usar relaciones e indices compuestos `(tenantID, pk)` como en entidades cercanas.
+- Usar transacciones envueltas en `TenantContextService` para mutaciones de negocio.
 
 Entidades clave:
 
-- `User` con `UserRole`.
-- `Store` con `StoreType` e `isCentralStore`.
-- `Product` y `ProductVariation`.
-- `StoreProduct`: tienda + variacion, stock/cache y precios.
-- `InventoryMovement`: historial logico de movimientos.
-- `SpecialOffer` y `PriceHistory`.
-- `PurchaseOrder` y `PurchaseOrderItem`.
-- `StoreTransfer` y `StoreTransferItem`.
-- `DteDocument`.
+- `Tenant` (master), `MasterUser` (master), `AuditEvent` (master).
+- `User` con `UserRole` y `tenantID`.
+- `Store` con `StoreType`, `isCentralStore` y `tenantID`.
+- `Product` y `ProductVariation` con `tenantID`.
+- `StoreProduct`: tienda + variacion, stock/cache, precios y `tenantID`.
+- `InventoryMovement`: historial logico de movimientos y `tenantID`.
+- `SpecialOffer` y `PriceHistory` con `tenantID`.
+- `PurchaseOrder` y `PurchaseOrderItem` con `tenantID`.
+- `StoreTransfer` y `StoreTransferItem` con `tenantID`.
+- `DteDocument` con `tenantID`.
+
+## Multitenant y Row-Level Security (RLS)
+
+El aislamiento entre organizaciones se realiza via PostgreSQL RLS con la variable de sesion `app.tenant_id`:
+
+- `TenantContextService.transaction(callback)` ejecuta `SELECT set_config('app.tenant_id', tenantId, true)` dentro de la conexion transaccional.
+- `TenantSubscriber` auto-asigna `tenantID` en operaciones `save` si existe contexto de tenant.
+- En la creacion de tiendas y usuarios, se aplican limites por tenant (`maxStores`: 5, `maxUsers`: 5) mediante transacciones con bloqueo pesimista en la entidad `Tenant`.
+- Nunca ejecutar queries directas a `DataSource.manager` sin pasar por el contexto tenant.
 
 ## Inventario
 
@@ -277,15 +317,17 @@ No loggear secretos completos. Mantener idempotencia en flujos reintentables.
 ## Checklist de implementacion
 
 - Lei modulo/servicio/DTO/entidad cercanos.
+- Inclui `tenantID!: string;` en las entidades de negocio.
+- Inyecte `@Optional() private readonly tenantContext?: TenantContextService` en el servicio y use `tenantContext.transaction(...)`.
+- Valide limites por tenant (`maxStores`, `maxUsers`) en creaciones si aplica.
 - Defini DTOs estrictos y Swagger.
-- Use guards/roles si no es publico.
+- Use guards/roles correspondientes (`AuthGuard`, `TenantContextGuard`, o `MasterAuthGuard` + `@MasterRoute()`).
 - Use service para reglas de negocio.
-- Use TypeORM repositories y transacciones donde corresponde.
 - Use `InventoryService` para movimientos de stock.
 - Use `PricingService` para precios/descuentos.
 - Lance excepciones Nest.
 - Respete wrapper global de respuesta.
 - Mantengo contratos compatibles con frontend.
+- Separe reglas puras en `<dominio>-engine.ts`, acceso a datos en `<dominio>-repository.helpers.ts` y tipos compartidos en `<dominio>.types.ts` cuando el dominio tenga logica sensible.
+- Verifique la compilacion sin errores con `pnpm exec tsc --noEmit`.
 - Agregue tests para logica sensible.
-- Corri build/test aplicable o explique por que no.
-

@@ -1,26 +1,49 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { SalesService } from './sales.service';
 import { SalesController } from './sales.controller';
+import { SalesService } from './sales.service';
+import { DteMapperService } from './dte-mapper.service';
 import { Sale } from './entities/sale.entity';
-import { SaleProduct } from './entities/sale-product.entity';
-import { ProductVariation } from '../products/entities/product-variation.entity';
+import { SaleItem } from './entities/sale-item.entity';
+import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
 import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import { ProductVariation } from '../products/entities/product-variation.entity';
 import { InventoryMovement } from '../inventory/entities/inventory-movement.entity';
+import { DispatchGuide } from '../dispatch-guides/entities/dispatch-guide.entity';
+import { DispatchGuideReference } from '../dispatch-guides/entities/dispatch-guide-reference.entity';
+import { DispatchGuideReferenceItem } from '../dispatch-guides/entities/dispatch-guide-reference-item.entity';
+import { InventoryModule } from '../inventory/inventory.module';
+import { MultitenantModule } from '../multitenant/multitenant.module';
+import { PricingModule } from '../pricing/pricing.module';
+import { FinancialMovementsModule } from '../financial-movements/financial-movements.module';
+import { DteModule } from '../dte/dte.module';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
       Sale,
-      SaleProduct,
-      ProductVariation,
+      SaleItem,
+      SaleFolioCounter,
       Store,
       StoreProduct,
+      ProductVariation,
       InventoryMovement,
+      DispatchGuide,
+      DispatchGuideReference,
+      DispatchGuideReferenceItem,
     ]),
+    MultitenantModule,
+    PricingModule,
+    FinancialMovementsModule,
+    DteModule,
+    InventoryModule,
+    AuthModule,
   ],
   controllers: [SalesController],
-  providers: [SalesService],
+  providers: [SalesService, DteMapperService, TransactionRunnerService],
+  exports: [SalesService],
 })
 export class SalesModule {}

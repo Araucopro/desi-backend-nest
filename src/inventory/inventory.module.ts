@@ -1,13 +1,19 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { InventoryMovement } from './entities/inventory-movement.entity';
+import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { InventoryService } from './inventory.service';
 import { InventoryController } from './inventory.controller';
+import { MultitenantModule } from '../multitenant/multitenant.module';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([InventoryMovement])],
+  imports: [
+    MultitenantModule,
+    TypeOrmModule.forFeature([InventoryMovement, StoreProduct]),
+  ],
   controllers: [InventoryController],
-  providers: [InventoryService],
+  providers: [InventoryService, TransactionRunnerService],
   exports: [TypeOrmModule, InventoryService],
 })
 export class InventoryModule {}

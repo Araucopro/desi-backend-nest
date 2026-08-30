@@ -8,6 +8,7 @@ import {
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { InventoryMovementReason } from '../entities/inventory-movement.entity';
+import { ReturnItemCondition } from '../../returns/entities/return-item.entity';
 
 export class CreateInventoryMovementDto {
   @ApiProperty({
@@ -62,4 +63,15 @@ export class CreateInventoryMovementDto {
   @IsString()
   @IsOptional()
   referenceID?: string;
+
+  @ApiProperty({
+    description:
+      'Condición del stock afectado: SELLABLE o DEFECTIVE. Al usar DEFECTIVE con RETURN, el reingreso se aplica a stockDefective',
+    enum: ReturnItemCondition,
+    example: ReturnItemCondition.SELLABLE,
+    required: false,
+  })
+  @IsEnum(ReturnItemCondition)
+  @IsOptional()
+  condition?: ReturnItemCondition;
 }

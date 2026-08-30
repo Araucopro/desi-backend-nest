@@ -17,6 +17,9 @@ export class ProductVariation {
   @PrimaryGeneratedColumn('uuid')
   variationID!: string;
 
+  @Column({ type: 'uuid' })
+  tenantID!: string;
+
   @ManyToOne(() => Product, (product) => product.variations, {
     onDelete: 'CASCADE',
   })
@@ -35,6 +38,13 @@ export class ProductVariation {
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   size?: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  supplierSku?: string | null;
+
+  @Index(['tenantID', 'barcode'])
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  barcode?: string | null;
 
   @CreateDateColumn()
   createdAt!: Date;

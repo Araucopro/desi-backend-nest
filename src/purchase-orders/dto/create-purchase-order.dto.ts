@@ -64,14 +64,6 @@ export class CreatePurchaseOrderDto {
   dueDate?: string;
 
   @ApiProperty({
-    description: 'Número de DTE asociado',
-    example: '123456789',
-    required: false,
-  })
-  @IsOptional()
-  dteNumber?: string;
-
-  @ApiProperty({
     description: 'Descuento total en pesos',
     example: 0,
     default: 0,

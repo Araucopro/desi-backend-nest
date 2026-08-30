@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UsersService } from './users.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { User, UserRole } from './entities/user.entity';
+import { User, UserRole, UserStatus } from './entities/user.entity';
 import { DataSource, Repository } from 'typeorm';
 import { NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
@@ -20,6 +20,7 @@ describe('UsersService', () => {
     create: jest.fn(),
     save: jest.fn(),
     remove: jest.fn(),
+    createQueryBuilder: jest.fn(),
   };
 
   const mockUserTxRepository = {
@@ -55,8 +56,14 @@ describe('UsersService', () => {
     email: 'test@example.com',
     name: 'Test User',
     role: UserRole.STORE_MANAGER,
+    roleID: 'role-1',
+    isSystem: false,
+    sessionVersion: 1,
+    status: UserStatus.ACTIVE,
     password: 'hashedPassword',
     userStores: [],
+    createdAt: new Date('2026-08-18T12:00:00.000Z'),
+    updatedAt: new Date('2026-08-18T12:00:00.000Z'),
   };
 
   beforeEach(async () => {
@@ -124,6 +131,9 @@ describe('UsersService', () => {
       expect(mockQueryBuilder.getExists).toHaveBeenCalled();
       expect(mockUserTxRepository.create).toHaveBeenCalledWith({
         ...createDto,
+        roleID: undefined,
+        tenantID: undefined,
+        status: UserStatus.ACTIVE,
         password: 'hashedPassword',
       });
       expect(mockStoreTxRepository.create).not.toHaveBeenCalled();
@@ -182,6 +192,11 @@ describe('UsersService', () => {
         name: 'Tienda de Central User',
         type: StoreType.CENTRAL,
         isCentralStore: true,
+        tenantID: undefined,
+        giro: 'VENTA AL POR MENOR GENERAL',
+        acteco: '479100',
+        cdgSIISucur: '0',
+        businessName: 'COMERCIAL CENTRAL USER SPA',
       });
       expect(mockUserStoreTxRepository.create).toHaveBeenCalledWith({
         user: savedUser,
@@ -193,13 +208,58 @@ describe('UsersService', () => {
   });
 
   describe('findAll', () => {
-    it('should return an array of users', async () => {
-      mockUserRepository.find.mockResolvedValue([mockUser]);
+    it('returns a paginated list of users without passwords', async () => {
+      const queryBuilderMock: any = {
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[mockUser], 1]),
+      };
+      mockUserRepository.createQueryBuilder.mockReturnValue(queryBuilderMock);
 
-      const result = await service.findAll();
+      const result = await service.findAll({ limit: 10, offset: 0 });
 
-      expect(result).toEqual([mockUser]);
-      expect(mockUserRepository.find).toHaveBeenCalled();
+      expect(result.meta).toEqual({ page: 1, limit: 10, total: 1 });
+      expect(result.users[0]).toEqual(
+        expect.objectContaining({
+          userID: 'uuid-1',
+          email: 'test@example.com',
+          status: UserStatus.ACTIVE,
+        }),
+      );
+      expect(result.users[0]).not.toHaveProperty('password');
+      expect(queryBuilderMock.getManyAndCount).toHaveBeenCalled();
+    });
+
+    it('applies search, role and status filters', async () => {
+      const queryBuilderMock: any = {
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      mockUserRepository.createQueryBuilder.mockReturnValue(queryBuilderMock);
+
+      await service.findAll({
+        search: 'juan',
+        role: UserRole.ADMIN,
+        status: UserStatus.ACTIVE,
+      });
+
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('user.name ILIKE :term'),
+        { term: '%juan%' },
+      );
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        'user.role = :role',
+        { role: UserRole.ADMIN },
+      );
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        'user.status = :status',
+        { status: UserStatus.ACTIVE },
+      );
     });
   });
 
@@ -294,13 +354,14 @@ describe('UsersService', () => {
   });
 
   describe('remove', () => {
-    it('should remove a user', async () => {
+    it('should deactivate a user instead of deleting it', async () => {
       mockUserRepository.findOne.mockResolvedValue(mockUser);
-      mockUserRepository.remove.mockResolvedValue(mockUser);
+      mockUserRepository.save.mockResolvedValue(mockUser);
 
       await service.remove('uuid-1');
 
-      expect(mockUserRepository.remove).toHaveBeenCalledWith(mockUser);
+      expect(mockUser.status).toBe(UserStatus.INACTIVE);
+      expect(mockUserRepository.save).toHaveBeenCalledWith(mockUser);
     });
 
     it('should throw NotFoundException if user not found', async () => {

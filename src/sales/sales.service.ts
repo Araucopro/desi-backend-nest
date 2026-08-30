@@ -1,159 +1,652 @@
 import {
+  BadGatewayException,
   BadRequestException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
-import { Sale } from './entities/sale.entity';
-import { SaleProduct } from './entities/sale-product.entity';
-import { CreateSaleDto } from './dto/create-sale.dto';
-import { UpdateSaleStatusDto } from './dto/update-sale-status.dto';
-import { ProductVariation } from '../products/entities/product-variation.entity';
-import { Store } from '../stores/entities/store.entity';
-import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import { PricingService } from '../pricing/pricing.service';
+import { DteService } from '../dte/dte.service';
+import { DteMapperService } from './dte-mapper.service';
+import { DteDocumentStatus } from '../dte/entities/dte-document.entity';
+import { DteDocumentResponseDto } from '../dte/dto/dte-document-response.dto';
+import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
+import { TenantContextService } from '../multitenant/tenant-context.service';
+import { TransactionRunnerService } from '../common/services/transaction-runner.service';
+import { isUniqueViolation } from '../common/utils/db-errors.util';
+import { InventoryService } from '../inventory/inventory.service';
+import { DispatchGuide } from '../dispatch-guides/entities/dispatch-guide.entity';
+import { DispatchGuideReference } from '../dispatch-guides/entities/dispatch-guide-reference.entity';
+import { DispatchGuideReferenceItem } from '../dispatch-guides/entities/dispatch-guide-reference-item.entity';
 import {
-  InventoryMovement,
-  InventoryMovementReason,
-} from '../inventory/entities/inventory-movement.entity';
+  findDispatchGuideReferenceItems,
+  findEmittedDispatchGuidesForUpdate,
+} from '../dispatch-guides/dispatch-guides-repository.helpers';
+import {
+  assertCanReference,
+  DispatchGuideConsumptionItem,
+  planConsumption,
+} from '../dispatch-guides/dispatch-guides-engine';
+import { Sale, SaleStatus, SaleType } from './entities/sale.entity';
+import { SaleItem } from './entities/sale-item.entity';
+import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
+import { CreateSaleDto } from './dto/create-sale.dto';
+import { ListSalesQueryDto } from './dto/list-sales.query.dto';
+import { ConvertSaleDto } from './dto/convert-sale.dto';
+import {
+  buildPreparedSale,
+  createSaleId,
+  resolveConversionDocumentType,
+  toDateOnly,
+  toDtePaymentType,
+  validateFacturaReceiver,
+  validateStoreDteCapability,
+} from './sales-engine';
+import {
+  createSaleEntity,
+  createSaleItems,
+  findSaleByIdempotencyKey,
+  findSaleForConversion,
+  findStoreById,
+  listSales,
+  loadSale,
+  nextSaleFolio,
+} from './sales-repository.helpers';
+import { toSaleView } from './sales-view.mapper';
+import { PreparedSale } from './sales.types';
+import { TenantAbility } from '../auth/ability/ability.factory';
+import { PermissionScope } from '../roles/entities/role-permission.entity';
+import { AbilityFactory } from '../auth/ability/ability.factory';
 
 @Injectable()
 export class SalesService {
   constructor(
     @InjectRepository(Sale)
     private readonly saleRepository: Repository<Sale>,
-    @InjectRepository(SaleProduct)
-    private readonly saleProductRepository: Repository<SaleProduct>,
+    @InjectRepository(SaleItem)
+    private readonly saleItemRepository: Repository<SaleItem>,
+    @InjectRepository(SaleFolioCounter)
+    private readonly saleFolioCounterRepository: Repository<SaleFolioCounter>,
     private readonly dataSource: DataSource,
+    private readonly pricingService: PricingService,
+    private readonly dteService: DteService,
+    private readonly dteMapperService: DteMapperService,
+    private readonly financialMovementsService: FinancialMovementsService,
+    private readonly inventoryService: InventoryService,
+    @Optional() private readonly tenantContext?: TenantContextService,
+    @Optional() private readonly transactionRunner?: TransactionRunnerService,
+    @Optional() private readonly abilityFactory?: AbilityFactory,
   ) {}
 
-  private async findOneInTransaction(
+  private runInTransaction<T>(
+    callback: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    if (this.transactionRunner) {
+      return this.transactionRunner.run(callback);
+    }
+
+    return this.tenantContext
+      ? this.tenantContext.transaction(callback)
+      : this.dataSource.transaction(callback);
+  }
+
+  private async prepareSale(
     manager: EntityManager,
-    id: string,
-  ): Promise<Sale> {
-    const sale = await manager.findOne(Sale, {
-      where: { saleID: id },
-      relations: ['store', 'saleProducts', 'saleProducts.variation'],
+    storeID: string,
+    dto: CreateSaleDto,
+    userId?: string,
+  ) {
+    const store = await findStoreById(manager, storeID);
+    validateStoreDteCapability(store, dto.saleType);
+    validateFacturaReceiver(dto.saleType, dto.receiver);
+
+    const pricing = await this.pricingService.calculateCart({
+      storeID,
+      items: dto.items.map((item) => ({
+        storeProductID: item.storeProductID,
+        quantity: item.quantity,
+      })),
+      userID: userId ?? null,
+      ...(dto.manualDiscount !== undefined && dto.manualDiscount > 0
+        ? { manualDiscount: dto.manualDiscount }
+        : {}),
+      pricingDate: toDateOnly(dto.issueDate ?? new Date()),
     });
 
-    if (!sale) {
-      throw new NotFoundException(`Venta con ID ${id} no encontrada`);
-    }
-
-    return sale;
+    return buildPreparedSale(dto, pricing);
   }
 
-  async create(createSaleDto: CreateSaleDto): Promise<Sale> {
-    const { storeID, paymentType, items } = createSaleDto;
+  async create(
+    storeID: string,
+    idempotencyKey: string | undefined,
+    dto: CreateSaleDto,
+    userId?: string,
+    impersonatedBy?: string,
+  ) {
+    const ownerId =
+      userId ??
+      (this.abilityFactory
+        ? await this.abilityFactory.getSystemUserId()
+        : undefined);
+    if (dto.saleType === SaleType.NOTA_VENTA && dto.dispatchGuideIDs?.length) {
+      throw new BadRequestException(
+        'Las guías de despacho solo pueden referenciarse en boletas o facturas electrónicas',
+      );
+    }
+    if (dto.saleType === SaleType.NOTA_VENTA) {
+      return this.createNotaVenta(
+        storeID,
+        idempotencyKey,
+        dto,
+        ownerId,
+        impersonatedBy,
+      );
+    }
+    return this.createElectronicSale(
+      storeID,
+      idempotencyKey,
+      dto,
+      ownerId,
+      impersonatedBy,
+    );
+  }
 
-    return this.dataSource.transaction(async (manager) => {
-      // 1. Verificar tienda destino
-      const targetStore = await manager.findOne(Store, {
-        where: { storeID },
-      });
-      if (!targetStore) {
-        throw new NotFoundException(`Tienda con ID ${storeID} no encontrada`);
+  private async createNotaVenta(
+    storeID: string,
+    idempotencyKey: string | undefined,
+    dto: CreateSaleDto,
+    userId: string | undefined,
+    impersonatedBy?: string,
+  ) {
+    return this.runInTransaction(async (manager) => {
+      if (idempotencyKey) {
+        const existing = await findSaleByIdempotencyKey(
+          manager,
+          idempotencyKey,
+        );
+        if (existing) {
+          if (existing.storeID !== storeID) {
+            throw new BadRequestException(
+              'La Idempotency-Key ya fue utilizada en otra tienda',
+            );
+          }
+          return toSaleView(await loadSale(manager, existing.saleID));
+        }
       }
 
-      const sale = manager.create(Sale, {
-        store: { storeID },
-        paymentType,
-        status: 'Pendiente',
-        total: 0,
+      const prepared = await this.prepareSale(manager, storeID, dto, userId);
+      const tenantID = this.tenantContext?.getTenantId();
+      const saleID = createSaleId();
+      const folio = await nextSaleFolio(manager, storeID, tenantID);
+
+      const sale = createSaleEntity(manager, {
+        saleID,
+        tenantID,
+        storeID,
+        userID: userId!,
+        impersonatedBy: impersonatedBy ?? null,
+        saleType: SaleType.NOTA_VENTA,
+        status: SaleStatus.EMITIDA,
+        paymentType: prepared.paymentType,
+        folio,
+        issueDate: prepared.issueDate,
+        receiver: prepared.receiver,
+        subtotal: prepared.subtotal,
+        discount: prepared.discount,
+        netTotal: prepared.netTotal,
+        taxTotal: prepared.taxTotal,
+        total: prepared.total,
+        cogsTotal: prepared.cogsTotal,
+        idempotencyKey: idempotencyKey ?? null,
       });
-      const savedSale = await manager.save(sale);
 
-      let total = 0;
+      await manager.save(sale);
 
-      for (const item of items) {
-        const { variationID, quantity, unitPrice } = item;
-        const variation = await manager.findOne(ProductVariation, {
-          where: { variationID },
-        });
+      await this.inventoryService.reserveStock(
+        manager,
+        storeID,
+        prepared.items.map((item) => ({
+          variationID: item.variationID,
+          QtyItem: item.quantity,
+        })),
+        saleID,
+        tenantID,
+      );
 
-        if (!variation) {
-          throw new NotFoundException(
-            `Variación con ID ${variationID} no encontrada`,
-          );
-        }
+      await manager.save(
+        createSaleItems(manager, tenantID, saleID, prepared.items),
+      );
 
-        const subtotal = unitPrice * quantity;
-        total += subtotal;
-        const saleProduct = manager.create(SaleProduct, {
-          sale: { saleID: savedSale.saleID },
-          variation: { variationID: variation.variationID },
-          unitPrice,
-          subtotal,
-          quantitySold: quantity,
-        });
-        await manager.save(saleProduct);
+      await this.financialMovementsService.recordSaleNote(manager, {
+        saleID,
+        tenantID: tenantID ?? sale.tenantID,
+        storeID,
+        issueDate: sale.issueDate,
+        netTotal: sale.netTotal,
+        taxTotal: sale.taxTotal,
+        cogsTotal: sale.cogsTotal,
+      });
 
-        const storeStock = await manager.findOne(StoreProduct, {
-          where: {
-            store: { storeID },
-            variation: { variationID },
-          },
-          lock: { mode: 'pessimistic_write' },
-        });
+      return toSaleView(await loadSale(manager, saleID));
+    });
+  }
 
-        if (!storeStock) {
+  private async createElectronicSale(
+    storeID: string,
+    idempotencyKey: string | undefined,
+    dto: CreateSaleDto,
+    userId: string | undefined,
+    impersonatedBy?: string,
+  ) {
+    if (idempotencyKey) {
+      const existing = await this.runInTransaction((manager) =>
+        findSaleByIdempotencyKey(manager, idempotencyKey),
+      );
+      if (existing) {
+        if (existing.storeID !== storeID) {
           throw new BadRequestException(
-            `El producto no está asociado a la tienda (VariationID: ${variationID})`,
+            'La Idempotency-Key ya fue utilizada en otra tienda',
           );
         }
+        const loaded = await this.runInTransaction((manager) =>
+          loadSale(manager, existing.saleID),
+        );
+        return toSaleView(loaded);
+      }
+    }
 
-        if (storeStock.stock < quantity) {
-          throw new BadRequestException(
-            `Stock insuficiente en tienda para VariationID: ${variationID}. Solicitado: ${quantity}, Disponible: ${storeStock.stock}`,
-          );
+    const prepared = await this.runInTransaction((manager) =>
+      this.prepareSale(manager, storeID, dto, userId),
+    );
+    const documentType = dto.saleType === SaleType.FACTURA ? 33 : 39;
+    const store = await this.runInTransaction((manager) =>
+      findStoreById(manager, storeID),
+    );
+
+    let dispatchGuides: DispatchGuide[] = [];
+    if (dto.dispatchGuideIDs?.length) {
+      dispatchGuides = await this.runInTransaction((manager) =>
+        this.loadDispatchGuidesForSale(
+          manager,
+          storeID,
+          dto.dispatchGuideIDs!,
+          prepared.items,
+        ),
+      );
+    }
+
+    const references = dispatchGuides.map((guide, index) => ({
+      NroLinRef: index + 1,
+      TpoDocRef: 52 as const,
+      FolioRef: guide.folio ?? 0,
+      FchRef: new Date(guide.issueDate).toISOString().slice(0, 10),
+      RazonRef: 'Guía de despacho',
+    }));
+
+    const dteDto = this.dteMapperService.mapSaleToDte(
+      {
+        saleType: prepared.saleType,
+        paymentType: prepared.paymentType,
+        issueDate: prepared.issueDate,
+        receiver: prepared.receiver,
+        items: prepared.items,
+        total: prepared.total,
+        netTotal: prepared.netTotal,
+        taxTotal: prepared.taxTotal,
+        store,
+      },
+      {
+        documentType,
+        ...(references.length ? { references } : {}),
+      },
+    );
+
+    const dteResponse = await this.dteService.create(
+      storeID,
+      idempotencyKey,
+      dteDto,
+      {
+        reserveStock: dto.dispatchGuideIDs?.length ? false : true,
+        ...(dto.dispatchGuideIDs?.length
+          ? { cogsTotalOverride: prepared.cogsTotal }
+          : {}),
+        paymentType: toDtePaymentType(prepared.paymentType),
+      },
+    );
+
+    const sale = await this.persistElectronicSale(
+      storeID,
+      idempotencyKey,
+      dto,
+      prepared,
+      dteResponse,
+      userId,
+      impersonatedBy,
+    );
+
+    return toSaleView(sale, dteResponse);
+  }
+
+  private async persistElectronicSale(
+    storeID: string,
+    idempotencyKey: string | undefined,
+    dto: CreateSaleDto,
+    prepared: PreparedSale,
+    dteResponse: DteDocumentResponseDto,
+    userId: string | undefined,
+    impersonatedBy?: string,
+  ): Promise<Sale> {
+    return this.runInTransaction(async (manager) => {
+      if (idempotencyKey) {
+        const existing = await findSaleByIdempotencyKey(
+          manager,
+          idempotencyKey,
+        );
+        if (existing) {
+          if (existing.storeID !== storeID) {
+            throw new BadRequestException(
+              'La Idempotency-Key ya fue utilizada en otra tienda',
+            );
+          }
+          return loadSale(manager, existing.saleID);
         }
-
-        const movement = manager.create(InventoryMovement, {
-          store: { storeID },
-          variation: { variationID: variation.variationID },
-          delta: -quantity,
-          reason: InventoryMovementReason.SALE,
-          referenceID: savedSale.saleID,
-        });
-        await manager.save(movement);
-
-        // StoreProduct remains a cache/read model; InventoryMovements is the source of truth.
-        storeStock.stock -= quantity;
-        await manager.save(storeStock);
       }
 
-      savedSale.total = total;
-      await manager.save(savedSale);
+      const tenantID = this.tenantContext?.getTenantId();
+      const saleID = createSaleId();
+      const sale = createSaleEntity(manager, {
+        saleID,
+        tenantID,
+        storeID,
+        userID: userId!,
+        impersonatedBy: impersonatedBy ?? null,
+        saleType: dto.saleType,
+        status: SaleStatus.EMITIDA,
+        paymentType: prepared.paymentType,
+        folio: dteResponse.FOLIO ?? null,
+        issueDate: prepared.issueDate,
+        receiver: prepared.receiver,
+        subtotal: prepared.subtotal,
+        discount: prepared.discount,
+        netTotal: prepared.netTotal,
+        taxTotal: prepared.taxTotal,
+        total: prepared.total,
+        cogsTotal: prepared.cogsTotal,
+        dteDocumentID: dteResponse.dteDocumentID,
+        idempotencyKey: idempotencyKey ?? null,
+      });
 
-      return this.findOneInTransaction(manager, savedSale.saleID);
+      try {
+        await manager.save(sale);
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+        if (!idempotencyKey) throw error;
+        const concurrent = await findSaleByIdempotencyKey(
+          manager,
+          idempotencyKey,
+        );
+        if (!concurrent) throw error;
+        if (concurrent.storeID !== storeID) {
+          throw new BadRequestException(
+            'La Idempotency-Key ya fue utilizada en otra tienda',
+          );
+        }
+        return loadSale(manager, concurrent.saleID);
+      }
+
+      await manager.save(
+        createSaleItems(manager, tenantID, saleID, prepared.items),
+      );
+
+      if (dto.dispatchGuideIDs?.length) {
+        const consumptionPlan = await this.planConsumptionForGuides(
+          manager,
+          storeID,
+          dto.dispatchGuideIDs,
+          prepared.items,
+        );
+        const savedReferences = await manager.save(
+          dto.dispatchGuideIDs.map((dispatchGuideID) =>
+            manager.create(DispatchGuideReference, {
+              tenantID,
+              dispatchGuideID,
+              dteDocumentID: dteResponse.dteDocumentID,
+              saleID,
+            }),
+          ),
+        );
+        const referenceIDByGuide = new Map(
+          savedReferences.map((reference) => [
+            reference.dispatchGuideID,
+            reference.dispatchGuideReferenceID,
+          ]),
+        );
+        await manager.save(
+          consumptionPlan.map((allocation) =>
+            manager.create(DispatchGuideReferenceItem, {
+              tenantID,
+              dispatchGuideReferenceID: referenceIDByGuide.get(
+                allocation.dispatchGuideID,
+              )!,
+              dispatchGuideID: allocation.dispatchGuideID,
+              variationID: allocation.variationID,
+              quantity: allocation.quantity,
+            }),
+          ),
+        );
+      }
+
+      return loadSale(manager, saleID);
     });
   }
 
-  findAll(): Promise<Sale[]> {
-    return this.saleRepository.find({
-      relations: ['store', 'saleProducts', 'saleProducts.variation'],
-      order: { createdAt: 'DESC' },
-    });
-  }
-
-  async findOne(id: string): Promise<Sale> {
-    const sale = await this.saleRepository.findOne({
-      where: { saleID: id },
-      relations: ['store', 'saleProducts', 'saleProducts.variation'],
-    });
-    if (!sale) {
-      throw new NotFoundException(`Venta con ID ${id} no encontrada`);
+  private async loadDispatchGuidesForSale(
+    manager: EntityManager,
+    storeID: string,
+    dispatchGuideIDs: string[],
+    saleItems?: PreparedSale['items'],
+  ): Promise<DispatchGuide[]> {
+    const guides = await findEmittedDispatchGuidesForUpdate(
+      manager,
+      storeID,
+      dispatchGuideIDs,
+    );
+    if (guides.length !== dispatchGuideIDs.length) {
+      throw new BadRequestException(
+        'Una o más guías de despacho no existen, no pertenecen a la tienda o no están EMITIDA',
+      );
     }
-    return sale;
+    for (const guide of guides) {
+      assertCanReference(guide);
+    }
+    if (saleItems) {
+      const consumedItems = await findDispatchGuideReferenceItems(
+        manager,
+        dispatchGuideIDs,
+      );
+      planConsumption(guides, consumedItems, saleItems);
+    }
+    return guides;
   }
 
-  async updateStatus(
-    id: string,
-    updateSaleStatusDto: UpdateSaleStatusDto,
-  ): Promise<Sale> {
-    const sale = await this.findOne(id);
-    sale.status = updateSaleStatusDto.status;
-    await this.saleRepository.save(sale);
-    return this.findOne(id);
+  private async planConsumptionForGuides(
+    manager: EntityManager,
+    storeID: string,
+    dispatchGuideIDs: string[],
+    saleItems: PreparedSale['items'],
+  ): Promise<DispatchGuideConsumptionItem[]> {
+    const guides = await this.loadDispatchGuidesForSale(
+      manager,
+      storeID,
+      dispatchGuideIDs,
+    );
+    const consumedItems = await findDispatchGuideReferenceItems(
+      manager,
+      dispatchGuideIDs,
+    );
+    return planConsumption(guides, consumedItems, saleItems);
+  }
+
+  async findAll(
+    storeID: string,
+    query: ListSalesQueryDto,
+    userId?: string,
+    ability?: TenantAbility,
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 50;
+
+    const { sales, total } = await this.runInTransaction((manager) =>
+      listSales(
+        manager,
+        storeID,
+        query,
+        userId && ability
+          ? {
+              scope: ability.scopeFor('sales:read') ?? PermissionScope.ALL,
+              ownerId: userId,
+            }
+          : undefined,
+      ),
+    );
+
+    return {
+      sales: sales.map((sale) => toSaleView(sale)),
+      meta: { page, limit, total },
+    };
+  }
+
+  async findOne(
+    saleID: string,
+    storeID: string,
+    userId?: string,
+    ability?: TenantAbility,
+  ) {
+    return this.runInTransaction(async (manager) => {
+      const ownership =
+        userId && ability
+          ? {
+              scope: ability.scopeFor('sales:read') ?? PermissionScope.ALL,
+              ownerId: userId,
+            }
+          : undefined;
+      const sale = await loadSale(manager, saleID, storeID, ownership);
+      return toSaleView(sale);
+    });
+  }
+
+  async convert(
+    saleID: string,
+    storeID: string,
+    dto?: ConvertSaleDto,
+    userId?: string,
+    ability?: TenantAbility,
+  ) {
+    const sale = await this.runInTransaction((manager) =>
+      loadSale(manager, saleID, storeID),
+    );
+    if (
+      userId &&
+      ability &&
+      !ability.can('sales:convert', sale.userID, userId)
+    ) {
+      throw new NotFoundException(`Venta con ID ${saleID} no encontrada`);
+    }
+
+    if (sale.saleType !== SaleType.NOTA_VENTA) {
+      throw new BadRequestException(
+        'Solo las notas de venta pueden convertirse a DTE',
+      );
+    }
+    if (sale.status === SaleStatus.CONVERTIDA) {
+      return toSaleView(sale);
+    }
+    if (sale.status !== SaleStatus.EMITIDA) {
+      throw new BadRequestException(
+        `Venta en estado ${String(sale.status)} no puede convertirse`,
+      );
+    }
+    if (sale.dteDocument?.status === DteDocumentStatus.EMITIDO) {
+      return this.finishConversion(saleID, storeID);
+    }
+
+    const store = await this.runInTransaction((manager) =>
+      findStoreById(manager, storeID),
+    );
+    if (!store.hasOpenfacturaKey) {
+      throw new BadRequestException(
+        'La tienda no tiene configurada la API key de Openfactura. No es posible convertir notas de venta a DTE.',
+      );
+    }
+
+    const documentType = resolveConversionDocumentType(sale, dto);
+
+    const dteDto = this.dteMapperService.mapSaleToDte(sale, { documentType });
+    const dteResponse = await this.dteService.create(storeID, saleID, dteDto, {
+      reserveStock: false,
+      saleID,
+      paymentType: toDtePaymentType(sale.paymentType),
+    });
+
+    if (dteResponse.STATUS === 'PENDIENTE') {
+      const reconciled = await this.dteService.reconcile(
+        dteResponse.dteDocumentID,
+        storeID,
+      );
+      if (reconciled.STATUS !== 'EMITIDO') {
+        throw new BadGatewayException(
+          `La conversión no quedó EMITIDA: ${reconciled.STATUS}`,
+        );
+      }
+      return this.finishConversion(saleID, storeID, reconciled);
+    }
+
+    if (dteResponse.STATUS !== 'EMITIDO') {
+      throw new BadGatewayException(
+        `La conversión no quedó EMITIDA: ${String(dteResponse.STATUS)}`,
+      );
+    }
+
+    return this.finishConversion(saleID, storeID, dteResponse);
+  }
+
+  private async finishConversion(
+    saleID: string,
+    storeID: string,
+    dteResponse?: DteDocumentResponseDto,
+  ) {
+    return this.runInTransaction(async (manager) => {
+      const sale = await findSaleForConversion(manager, saleID, storeID);
+      if (!sale) {
+        throw new NotFoundException(`Venta con ID ${saleID} no encontrada`);
+      }
+      if (sale.status === SaleStatus.CONVERTIDA) {
+        return toSaleView(await loadSale(manager, saleID, storeID));
+      }
+      if (sale.status !== SaleStatus.EMITIDA) {
+        throw new BadRequestException(
+          `Venta en estado ${String(sale.status)} no puede convertirse`,
+        );
+      }
+
+      const dteDocumentID = dteResponse?.dteDocumentID ?? sale.dteDocumentID;
+      if (!dteDocumentID) {
+        throw new InternalServerErrorException(
+          'No se pudo asociar el DTE a la venta',
+        );
+      }
+
+      sale.dteDocumentID = dteDocumentID;
+      sale.status = SaleStatus.CONVERTIDA;
+      if (dteResponse?.FOLIO) sale.folio = Number(dteResponse.FOLIO);
+      await manager.save(sale);
+      await this.financialMovementsService.removeSaleNote(manager, saleID);
+
+      const updated = await loadSale(manager, saleID, storeID);
+      return toSaleView(updated, dteResponse);
+    });
   }
 }

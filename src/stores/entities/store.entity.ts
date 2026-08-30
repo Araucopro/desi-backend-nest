@@ -17,12 +17,15 @@ export enum StoreType {
   THIRD_PARTY = 'third_party',
 }
 
-@Entity({ name: 'Store', schema: 'public' })
+@Entity({ name: 'Store' })
 export class Store {
   @PrimaryGeneratedColumn('uuid', {
     name: 'storeID',
   })
   storeID!: string;
+
+  @Column({ type: 'uuid' })
+  tenantID!: string;
 
   @Column({ type: 'varchar', length: 255 })
   location!: string;
@@ -71,6 +74,49 @@ export class Store {
     default: false,
   })
   isCentralStore!: boolean;
+
+  @Column({
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  giro?: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  acteco?: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
+  cdgSIISucur?: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  businessName?: string | null;
+
+  @Column({
+    type: 'text',
+    nullable: true,
+    select: false,
+    name: 'openfacturaKeyEncrypted',
+  })
+  openfacturaKeyEncrypted?: string | null;
+
+  @Column({
+    type: 'boolean',
+    default: false,
+    name: 'hasOpenfacturaKey',
+  })
+  hasOpenfacturaKey!: boolean;
 
   @OneToMany('UserStore', 'store')
   userStores!: UserStore[];

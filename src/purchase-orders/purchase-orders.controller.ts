@@ -78,7 +78,9 @@ export class PurchaseOrdersController {
   }
 
   @Patch(':id/status')
-  @ApiOperation({ summary: 'Actualizar el estado/pago de la orden de compra' })
+  @ApiOperation({
+    summary: 'Actualizar el estado comercial de la orden de compra',
+  })
   @ApiParam({
     name: 'id',
     description: 'ID de la orden de compra',
@@ -86,7 +88,7 @@ export class PurchaseOrdersController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Estado de orden de compra actualizado.',
+    description: 'Estado comercial de la orden de compra actualizado.',
     type: PurchaseOrder,
   })
   updateStatus(

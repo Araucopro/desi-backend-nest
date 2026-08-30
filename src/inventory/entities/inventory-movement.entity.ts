@@ -9,6 +9,7 @@ import {
 import { ApiProperty } from '@nestjs/swagger';
 import { Store } from '../../stores/entities/store.entity';
 import { ProductVariation } from '../../products/entities/product-variation.entity';
+import { ReturnItemCondition } from '../../returns/entities/return-item.entity';
 
 export enum InventoryMovementReason {
   SALE = 'SALE',
@@ -16,6 +17,8 @@ export enum InventoryMovementReason {
   ADJUSTMENT = 'ADJUSTMENT',
   TRANSFER_IN = 'TRANSFER_IN',
   TRANSFER_OUT = 'TRANSFER_OUT',
+  RETURN = 'RETURN',
+  DISPATCH_GUIDE = 'DISPATCH_GUIDE',
 }
 
 @Entity({ name: 'InventoryMovements' })
@@ -26,6 +29,9 @@ export class InventoryMovement {
   })
   @PrimaryGeneratedColumn('uuid')
   movementID!: string;
+
+  @Column({ type: 'uuid' })
+  tenantID!: string;
 
   @ManyToOne(() => Store, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'storeID' })
@@ -62,6 +68,21 @@ export class InventoryMovement {
   })
   @Column({ type: 'varchar', nullable: true })
   referenceID?: string;
+
+  @ApiProperty({
+    description:
+      'Condición del stock afectado: SELLABLE o DEFECTIVE. Null en movimientos que no distinguen condición',
+    enum: ReturnItemCondition,
+    example: ReturnItemCondition.SELLABLE,
+    required: false,
+    nullable: true,
+  })
+  @Column({
+    type: 'enum',
+    enum: ReturnItemCondition,
+    nullable: true,
+  })
+  condition!: ReturnItemCondition | null;
 
   @ApiProperty({
     description: 'Fecha y hora del movimiento',

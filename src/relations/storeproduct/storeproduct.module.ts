@@ -6,14 +6,24 @@ import { StoreProduct } from './entities/storeproduct.entity';
 import { ProductVariation } from '../../products/entities/product-variation.entity';
 import { Store } from '../../stores/entities/store.entity';
 import { Product } from '../../products/entities/product.entity';
+import { InventoryMovement } from '../../inventory/entities/inventory-movement.entity';
 import { PricingModule } from '../../pricing/pricing.module';
+import { MultitenantModule } from '../../multitenant/multitenant.module';
+import { TransactionRunnerService } from '../../common/services/transaction-runner.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([StoreProduct, ProductVariation, Store, Product]),
+    MultitenantModule,
+    TypeOrmModule.forFeature([
+      StoreProduct,
+      ProductVariation,
+      Store,
+      Product,
+      InventoryMovement,
+    ]),
     PricingModule,
   ],
   controllers: [StoreProductController],
-  providers: [StoreProductService],
+  providers: [StoreProductService, TransactionRunnerService],
 })
 export class StoreProductModule {}
