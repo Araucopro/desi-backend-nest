@@ -86,7 +86,9 @@ export class ReturnDteMapperService {
     const receptor = isBoletaOriginal
       ? {
           RUTRecep: '66666666-6',
-          RznSocRecep: 'Anonimo',
+          RznSocRecep: 'Público General',
+          ...(store.address ? { DirRecep: store.address } : {}),
+          CmnaRecep: store.city || 'Santiago',
         }
       : {
           RUTRecep: sale.receiver!.rut!,
@@ -108,17 +110,28 @@ export class ReturnDteMapperService {
           },
           Emisor: {
             RUTEmisor: store.rut,
-            RznSocEmisor: store.businessName || store.name,
-            ...(store.giro ? { GiroEmisor: store.giro } : {}),
+            RznSoc: store.businessName || store.name,
+            ...(store.giro ? { GiroEmis: store.giro } : {}),
+            ...(store.acteco
+              ? {
+                  Acteco: store.acteco
+                    .split(',')
+                    .map((code) => code.trim())
+                    .filter(Boolean),
+                }
+              : {}),
             ...(store.address ? { DirOrigen: store.address } : {}),
             ...(store.city ? { CmnaOrigen: store.city } : {}),
+            ...(store.phone ? { Telefono: store.phone } : {}),
             ...(store.cdgSIISucur ? { CdgSIISucur: store.cdgSIISucur } : {}),
           },
           Receptor: receptor,
           Totales: {
             MntNeto: mntNeto,
+            TasaIVA: '19',
             IVA: iva,
             MntTotal: mntTotal,
+            MontoPeriodo: mntTotal,
             VlrPagar: mntTotal,
           },
         }

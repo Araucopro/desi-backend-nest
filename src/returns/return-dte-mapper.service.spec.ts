@@ -109,13 +109,18 @@ describe('ReturnDteMapperService', () => {
       IndServicio: '3',
     });
     expect(dto.dte.Encabezado.Emisor).toMatchObject({
-      RznSocEmisor: 'Tienda Demo SpA',
-      GiroEmisor: 'VENTA AL POR MENOR',
+      RznSoc: 'Tienda Demo SpA',
+      GiroEmis: 'VENTA AL POR MENOR',
+      Acteco: ['479100'],
+      Telefono: '+56 2 1234 5678',
     });
-    expect(dto.dte.Encabezado.Emisor).not.toHaveProperty('RznSoc');
+    expect(dto.dte.Encabezado.Emisor).not.toHaveProperty('RznSocEmisor');
+    expect(dto.dte.Encabezado.Emisor).not.toHaveProperty('GiroEmisor');
     expect(dto.dte.Encabezado.Receptor).toEqual({
       RUTRecep: '66666666-6',
-      RznSocRecep: 'Anonimo',
+      RznSocRecep: 'Público General',
+      DirRecep: 'Av. Siempre Viva 123',
+      CmnaRecep: 'Santiago',
     });
     expect(dto.dte.Detalle[0]).toMatchObject({
       QtyItem: 1,
@@ -125,8 +130,10 @@ describe('ReturnDteMapperService', () => {
     });
     expect(dto.dte.Encabezado.Totales).toMatchObject({
       MntNeto: 1000,
+      TasaIVA: '19',
       IVA: 190,
       MntTotal: 1190,
+      MontoPeriodo: 1190,
       VlrPagar: 1190,
     });
     expect(dto.dte.Referencia).toMatchObject([

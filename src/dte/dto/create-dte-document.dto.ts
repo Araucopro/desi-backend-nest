@@ -740,13 +740,13 @@ export class DteReferenciaDto {
 
   @ApiProperty({
     description:
-      'Tipo de documento referenciado (33 factura, 39 boleta, 52 guía de despacho)',
+      'Tipo de documento referenciado (33 factura, 39 boleta afecta, 41 boleta exenta, 52 guía de despacho)',
     example: 39,
   })
   @Type(() => Number)
   @IsInt()
-  @IsIn([33, 39, 52])
-  TpoDocRef!: 33 | 39 | 52;
+  @IsIn([33, 39, 41, 52])
+  TpoDocRef!: 33 | 39 | 41 | 52;
 
   @ApiProperty({
     description: 'Folio del documento referenciado',

@@ -189,38 +189,34 @@ export async function mapToDocumentPayload(
     }
   }
 
+  const encabezado = dto.dte.Encabezado;
+
+  // La Nota de Crédito (61) debe "amarrarse" al documento original mediante
+  // al menos una Referencia; Openfactura/SII lo exige.
+  if (isNotaCreditoEncabezado(encabezado) && !dto.dte.Referencia?.length) {
+    throw new BadRequestException(
+      'La Nota de Crédito (61) debe incluir al menos una Referencia al documento original',
+    );
+  }
+
   // Auto-completar/construir datos del Emisor a partir de la tienda (Store),
   // respetando el esquema de Boleta (RznSocEmisor/GiroEmisor, sin
   // Acteco/Telefono) o Factura (RznSoc/GiroEmis con Acteco/Telefono) que
-  // exige Openfactura.
-  const encabezado = dto.dte.Encabezado;
+  // exige Openfactura. La Nota de Crédito usa siempre el esquema de Factura.
   if (isNotaCreditoEncabezado(encabezado)) {
     const existing = encabezado.Emisor;
-    const isBoletaStyle = Boolean(existing?.RznSocEmisor) || !existing?.RznSoc;
-
-    if (isBoletaStyle) {
-      encabezado.Emisor = {
-        RUTEmisor: store.rut,
-        RznSocEmisor: store.businessName || store.name,
-        GiroEmisor: store.giro || existing?.GiroEmisor || 'VENTA AL POR MENOR',
-        DirOrigen: store.address || existing?.DirOrigen || 'DIRECCION',
-        CmnaOrigen: store.city || existing?.CmnaOrigen || 'SANTIAGO',
-        CdgSIISucur: store.cdgSIISucur || existing?.CdgSIISucur || undefined,
-      };
-    } else {
-      encabezado.Emisor = {
-        RUTEmisor: store.rut,
-        RznSoc: store.businessName || store.name,
-        GiroEmis: store.giro || existing?.GiroEmis || 'VENTA AL POR MENOR',
-        Acteco: store.acteco
-          ? store.acteco.split(',').map((code) => code.trim())
-          : existing?.Acteco || ['479100'],
-        DirOrigen: store.address || existing?.DirOrigen || 'DIRECCION',
-        CmnaOrigen: store.city || existing?.CmnaOrigen || 'SANTIAGO',
-        Telefono: store.phone || existing?.Telefono || '0 0',
-        CdgSIISucur: store.cdgSIISucur || existing?.CdgSIISucur || undefined,
-      };
-    }
+    encabezado.Emisor = {
+      RUTEmisor: store.rut,
+      RznSoc: store.businessName || store.name,
+      GiroEmis: store.giro || existing?.GiroEmis || 'VENTA AL POR MENOR',
+      Acteco: store.acteco
+        ? store.acteco.split(',').map((code) => code.trim())
+        : existing?.Acteco || ['479100'],
+      DirOrigen: store.address || existing?.DirOrigen || 'DIRECCION',
+      CmnaOrigen: store.city || existing?.CmnaOrigen || 'SANTIAGO',
+      Telefono: store.phone || existing?.Telefono || '0 0',
+      CdgSIISucur: store.cdgSIISucur || existing?.CdgSIISucur || undefined,
+    };
 
     if (encabezado.Totales) {
       const {
@@ -232,25 +228,15 @@ export async function mapToDocumentPayload(
         MontoPeriodo,
         VlrPagar,
       } = encabezado.Totales;
-      if (isBoletaStyle) {
-        encabezado.Totales = {
-          ...(MntNeto !== undefined ? { MntNeto } : {}),
-          ...(MntExe !== undefined ? { MntExe } : {}),
-          ...(IVA !== undefined ? { IVA } : {}),
-          ...(MntTotal !== undefined ? { MntTotal } : {}),
-          ...(VlrPagar !== undefined ? { VlrPagar } : {}),
-        };
-      } else {
-        encabezado.Totales = {
-          ...(MntNeto !== undefined ? { MntNeto } : {}),
-          ...(MntExe !== undefined ? { MntExe } : {}),
-          ...(TasaIVA !== undefined ? { TasaIVA } : {}),
-          ...(IVA !== undefined ? { IVA } : {}),
-          ...(MntTotal !== undefined ? { MntTotal } : {}),
-          ...(MontoPeriodo !== undefined ? { MontoPeriodo } : {}),
-          ...(VlrPagar !== undefined ? { VlrPagar } : {}),
-        };
-      }
+      encabezado.Totales = {
+        ...(MntNeto !== undefined ? { MntNeto } : {}),
+        ...(MntExe !== undefined ? { MntExe } : {}),
+        ...(TasaIVA !== undefined ? { TasaIVA } : {}),
+        ...(IVA !== undefined ? { IVA } : {}),
+        ...(MntTotal !== undefined ? { MntTotal } : {}),
+        ...(MontoPeriodo !== undefined ? { MontoPeriodo } : {}),
+        ...(VlrPagar !== undefined ? { VlrPagar } : {}),
+      };
     }
   } else if (isGuiaEncabezado(encabezado)) {
     const existing = encabezado.Emisor;
