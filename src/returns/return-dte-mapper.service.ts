@@ -45,25 +45,13 @@ export class ReturnDteMapperService {
               NroLinDet: 1,
               NmbItem: ret.reason || 'Descuento posterior',
               QtyItem: 1,
-              PrcItem: roundClp(
-                isBoletaOriginal
-                  ? Number(ret.discountAmount)
-                  : Number(ret.discountAmount) / (1 + TAX_RATE),
-              ),
-              MontoItem: roundClp(
-                isBoletaOriginal
-                  ? Number(ret.discountAmount)
-                  : Number(ret.discountAmount) / (1 + TAX_RATE),
-              ),
+              PrcItem: roundClp(Number(ret.discountAmount) / (1 + TAX_RATE)),
+              MontoItem: roundClp(Number(ret.discountAmount) / (1 + TAX_RATE)),
             },
           ]
         : (ret.items ?? []).map((item, index) => {
-            const unitPrice = isBoletaOriginal
-              ? roundClp(Number(item.unitPrice))
-              : roundClp(Number(item.unitPrice) / (1 + TAX_RATE));
-            const lineTotal = isBoletaOriginal
-              ? roundClp(Number(item.lineTotal))
-              : roundClp(Number(item.lineTotal) / (1 + TAX_RATE));
+            const unitPrice = roundClp(Number(item.unitPrice) / (1 + TAX_RATE));
+            const lineTotal = roundClp(Number(item.lineTotal) / (1 + TAX_RATE));
 
             return {
               NroLinDet: index + 1,

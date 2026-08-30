@@ -57,8 +57,8 @@ function nceDto(
           NroLinDet: 1,
           NmbItem: 'Producto devuelto',
           QtyItem: 1,
-          PrcItem: 1190,
-          MontoItem: 1190,
+          PrcItem: 1000,
+          MontoItem: 1000,
         },
       ],
       Referencia: [

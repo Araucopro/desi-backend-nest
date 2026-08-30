@@ -96,7 +96,7 @@ function ret(overrides: Partial<Return> = {}): Return {
 describe('ReturnDteMapperService', () => {
   const service = new ReturnDteMapperService();
 
-  it('mapea una NCE 61 de boleta con Referencia y montos con IVA incluido', () => {
+  it('mapea una NCE 61 de boleta con Referencia y montos netos', () => {
     const dto = service.mapReturnToNce({
       sale: sale(),
       ret: ret(),
@@ -124,8 +124,8 @@ describe('ReturnDteMapperService', () => {
     });
     expect(dto.dte.Detalle[0]).toMatchObject({
       QtyItem: 1,
-      PrcItem: 1190,
-      MontoItem: 1190,
+      PrcItem: 1000,
+      MontoItem: 1000,
       CdgItem: { TpoCodigo: 'INT1', VlrCodigo: 'SKU-1' },
     });
     expect(dto.dte.Encabezado.Totales).toMatchObject({
@@ -213,7 +213,7 @@ describe('ReturnDteMapperService', () => {
     expect(dto.dte.Detalle).toHaveLength(1);
     expect(dto.dte.Detalle[0]).toMatchObject({
       NmbItem: 'Descuento posterior',
-      MontoItem: 595,
+      MontoItem: 500,
     });
     expect(dto.dte.Detalle[0]).not.toHaveProperty('CdgItem');
     expect(dto.dte.Referencia).toMatchObject([{ CodRef: 3 }]);
