@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CreateDteDocumentDto } from './dto/create-dte-document.dto';
+import { DteDocumentValue } from './dto/get-dte-document-query.dto';
 
 export const OPENFACTURA_TIMEOUT_MS = 15_000;
+export const OPENFACTURA_DOWNLOAD_TIMEOUT_MS = 60_000;
 
 const BINARY_RESPONSE_KEYS = ['XML', 'TIMBRE'];
 
@@ -66,23 +68,31 @@ export class OpenfacturaClientService {
   getOpenfacturaDocument(
     apikey: string,
     token: string,
+    value: DteDocumentValue = DteDocumentValue.JSON,
+    timeoutMs: number = OPENFACTURA_TIMEOUT_MS,
   ): Promise<OpenfacturaCallResult> {
     const baseUrl = this.configService.get<string>(
       'OPENFACTURA_BASE_URL',
       'https://dev-api.haulmer.com',
     );
-    const url = `${baseUrl.replace(/\/$/, '')}/dte/document/${encodeURIComponent(
+    const url = `${baseUrl.replace(/\/$/, '')}/v2/dte/document/${encodeURIComponent(
       token,
-    )}/json`;
-    this.logger.log(`Consultando documento en Openfactura | url=${url}`);
+    )}/${encodeURIComponent(value)}`;
+    this.logger.log(
+      `Consultando documento en Openfactura | url=${url} | value=${value}`,
+    );
 
-    return this.callOpenfactura(url, {
-      method: 'GET',
-      headers: {
-        apikey,
-        accept: 'application/json',
+    return this.callOpenfactura(
+      url,
+      {
+        method: 'GET',
+        headers: {
+          apikey,
+          accept: 'application/json',
+        },
       },
-    });
+      timeoutMs,
+    );
   }
 
   anularDte52(
@@ -116,9 +126,10 @@ export class OpenfacturaClientService {
       headers: Record<string, string>;
       body?: string;
     },
+    timeoutMs: number = OPENFACTURA_TIMEOUT_MS,
   ): Promise<OpenfacturaCallResult> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), OPENFACTURA_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     timer.unref?.();
 
     try {
@@ -164,7 +175,7 @@ export class OpenfacturaClientService {
     } catch (error) {
       const aborted = error instanceof Error && error.name === 'AbortError';
       const detail = aborted
-        ? `Timeout llamando a Openfactura (${OPENFACTURA_TIMEOUT_MS} ms)`
+        ? `Timeout llamando a Openfactura (${timeoutMs} ms)`
         : `Error de red llamando a Openfactura: ${
             error instanceof Error ? error.message : String(error)
           }`;

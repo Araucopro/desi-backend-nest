@@ -2,7 +2,9 @@ import {
   BadGatewayException,
   BadRequestException,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
+import { DteDocumentValue } from './dto/get-dte-document-query.dto';
 import { DteService } from './dte.service';
 import {
   DteDocument,
@@ -876,6 +878,123 @@ describe('DteService', () => {
       BadRequestException,
     );
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('getDocument returns the raw Openfactura payload and resolves the apikey from the document store', async () => {
+    manager = createMockManager({
+      existingDocument: {
+        dteDocumentID: 'dte-1',
+        token: 'real-token',
+        folio: 100,
+        status: DteDocumentStatus.EMITIDO,
+        payloadRaw: {},
+        payloadNormalized: {},
+      },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      text: async () =>
+        JSON.stringify({ TOKEN: 'real-token', PDF: 'base64-pdf' }),
+    });
+
+    const service = createService();
+    const result = await service.getDocument(
+      'dte-1',
+      'store-1',
+      DteDocumentValue.PDF,
+    );
+
+    expect(result).toEqual({ TOKEN: 'real-token', PDF: 'base64-pdf' });
+    expect(mockStoresService.resolveOpenfacturaKey).toHaveBeenCalledWith(
+      'store-1',
+    );
+    expect((global.fetch as jest.Mock).mock.calls[0][0]).toBe(
+      'https://dev-api.haulmer.com/v2/dte/document/real-token/pdf',
+    );
+    expect((global.fetch as jest.Mock).mock.calls[0][1].headers).toMatchObject(
+      { apikey: 'apikey-test' },
+    );
+  });
+
+  it('getDocument defaults to json when value is omitted', async () => {
+    manager = createMockManager({
+      existingDocument: {
+        dteDocumentID: 'dte-1',
+        token: 'real-token',
+        folio: 100,
+        status: DteDocumentStatus.EMITIDO,
+        payloadRaw: {},
+        payloadNormalized: {},
+      },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    await service.getDocument('dte-1', 'store-1');
+
+    expect((global.fetch as jest.Mock).mock.calls[0][0]).toBe(
+      'https://dev-api.haulmer.com/v2/dte/document/real-token/json',
+    );
+  });
+
+  it('getDocument throws NotFoundException for an inexistent or foreign document', async () => {
+    manager = createMockManager({ existingDocument: null });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    await expect(
+      service.getDocument('dte-1', 'store-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('getDocument rejects a local token without calling Openfactura', async () => {
+    manager = createMockManager({
+      existingDocument: {
+        dteDocumentID: 'dte-1',
+        token: 'local-abc',
+        folio: 100,
+        status: DteDocumentStatus.PENDIENTE,
+        payloadRaw: {},
+        payloadNormalized: {},
+      },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    await expect(
+      service.getDocument('dte-1', 'store-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('getDocument throws BadGatewayException with the Openfactura errorDetail', async () => {
+    manager = createMockManager({
+      existingDocument: {
+        dteDocumentID: 'dte-1',
+        token: 'real-token',
+        folio: 100,
+        status: DteDocumentStatus.EMITIDO,
+        payloadRaw: {},
+        payloadNormalized: {},
+      },
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 404,
+      headers: { get: () => 'application/json' },
+      text: async () => '{}',
+    });
+
+    const service = createService();
+    await expect(
+      service.getDocument('dte-1', 'store-1', DteDocumentValue.CEDIBLE),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('estado 404'),
+    });
   });
 
   it('supports reserveStock=false for nota de venta conversion without deducting stock', async () => {
