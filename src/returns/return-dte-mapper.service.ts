@@ -158,11 +158,7 @@ export class ReturnDteMapperService {
         };
 
     return {
-      response: [
-        DteResponseValue.FOLIO,
-        DteResponseValue.STATUS,
-        DteResponseValue.PDF,
-      ],
+      response: [DteResponseValue.FOLIO, DteResponseValue.STATUS],
       dte: {
         Encabezado: encabezado,
         Detalle: detalle,

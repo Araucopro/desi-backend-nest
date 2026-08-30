@@ -4,7 +4,7 @@ import { CreateDteDocumentDto } from './dto/create-dte-document.dto';
 
 export const OPENFACTURA_TIMEOUT_MS = 15_000;
 
-const BINARY_RESPONSE_KEYS = ['PDF', 'XML', 'TIMBRE'];
+const BINARY_RESPONSE_KEYS = ['XML', 'TIMBRE'];
 
 export type OpenfacturaDocumentResponse = {
   TOKEN?: string;
