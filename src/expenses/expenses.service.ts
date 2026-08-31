@@ -59,6 +59,7 @@ export class ExpensesService {
         const repo = manager.getRepository(Expense);
         const expense = repo.create({
           ...expenseData,
+          tenantID: this.tenantContext?.getTenantId(),
           amount: expenseData.netAmount + expenseData.taxAmount,
           store: { storeID },
         });

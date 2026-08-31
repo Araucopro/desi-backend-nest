@@ -19,7 +19,6 @@ import { ExpensesModule } from './expenses/expenses.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { PricingModule } from './pricing/pricing.module';
 import { TransfersModule } from './transfers/transfers.module';
-import { SeedModule } from './seed/seed.module';
 import { StoreMonthlyTargetsModule } from './store-monthly-targets/store-monthly-targets.module';
 import { DteModule } from './dte/dte.module';
 import { MultitenantModule } from './multitenant/multitenant.module';
@@ -51,7 +50,6 @@ import { ClientsModule } from './clients/clients.module';
     InventoryModule,
     PricingModule,
     TransfersModule,
-    SeedModule,
     StoreMonthlyTargetsModule,
     DteModule,
     MultitenantModule,

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantSubscriber } from '../multitenant/tenant-subscriber';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
             entities: [__dirname + '/../**/*.entity{.ts,.js}'],
             synchronize: false,
             migrationsRun: false,
+            subscribers: [TenantSubscriber],
             migrations: [__dirname + '/migrations/*{.ts,.js}'],
             migrationsTransactionMode: 'each',
             //dropSchema: true, // ELIMINA TODAS LAS TABLAS - Solo para desarrollo
@@ -37,6 +39,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
           entities: [__dirname + '/../**/*.entity{.ts,.js}'],
           synchronize: false,
           migrationsRun: false,
+          subscribers: [TenantSubscriber],
           migrations: [__dirname + '/migrations/*{.ts,.js}'],
           migrationsTransactionMode: 'each',
           //dropSchema: true, // ELIMINA TODAS LAS TABLAS - Solo para desarrollo

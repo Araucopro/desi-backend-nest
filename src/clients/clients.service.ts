@@ -50,6 +50,7 @@ export class ClientsService {
       }
 
       const client = manager.create(Client, {
+        tenantID: this.tenantContext?.getTenantId(),
         rut: dto.rut.trim(),
         name: dto.name.trim(),
         giro: dto.giro?.trim() ?? null,

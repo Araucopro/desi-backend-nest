@@ -11,7 +11,6 @@ import { MasterController } from './master.controller';
 import { JwtModule } from '@nestjs/jwt';
 import { MasterAuthGuard } from '../auth/guards/master-auth.guard';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { TenantSubscriber } from './tenant-subscriber';
 
 const JWT_MODULE = JwtModule.registerAsync({
   imports: [ConfigModule],
@@ -32,7 +31,6 @@ const JWT_MODULE = JwtModule.registerAsync({
     TenantContextService,
     TenantContextGuard,
     TenantContextInterceptor,
-    TenantSubscriber,
     MasterService,
     MasterAuthGuard,
   ],

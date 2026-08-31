@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { ClientsService } from './clients.service';
 import { Client, ClientSegment } from './entities/client.entity';
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { TenantContextService } from '../multitenant/tenant-context.service';
 
 describe('ClientsService', () => {
   let service: ClientsService;
@@ -37,6 +38,23 @@ describe('ClientsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ClientsService,
+        {
+          provide: TenantContextService,
+          useValue: {
+            getTenantId: jest.fn().mockReturnValue('tenant-uuid-1'),
+            transaction: jest.fn().mockImplementation((cb) =>
+              cb({
+                findOne: jest.fn(),
+                create: jest.fn().mockImplementation((_, dto) => dto),
+                save: jest
+                  .fn()
+                  .mockImplementation((_, client) =>
+                    Promise.resolve({ clientID: 'client-uuid-1', ...client }),
+                  ),
+              }),
+            ),
+          },
+        },
         {
           provide: getRepositoryToken(Client),
           useValue: {
@@ -107,6 +125,19 @@ describe('ClientsService', () => {
       await expect(service.findOne('invalido')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('create', () => {
+    it('debe crear un cliente con el tenantID del contexto', async () => {
+      const result = await service.create({
+        rut: '76234556-6',
+        name: 'Cliente Ejemplo SpA',
+      });
+
+      expect(result).toBeDefined();
+      expect(result.tenantID).toBe('tenant-uuid-1');
+      expect(result.name).toBe('Cliente Ejemplo SpA');
     });
   });
 
