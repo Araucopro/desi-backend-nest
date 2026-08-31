@@ -20,6 +20,7 @@ import { FinancialMovementsModule } from '../financial-movements/financial-movem
 import { DteModule } from '../dte/dte.module';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { AuthModule } from '../auth/auth.module';
+import { ClientsModule } from '../clients/clients.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { AuthModule } from '../auth/auth.module';
     DteModule,
     InventoryModule,
     AuthModule,
+    ClientsModule,
   ],
   controllers: [SalesController],
   providers: [SalesService, DteMapperService, TransactionRunnerService],

@@ -177,6 +177,7 @@ export type CreateSaleEntityInput = {
   folio: number | null;
   issueDate: Date;
   receiver: PreparedSale['receiver'];
+  clientID?: string | null;
   subtotal: number;
   discount: number;
   netTotal: number;
@@ -203,6 +204,7 @@ export function createSaleEntity(
     folio: input.folio,
     issueDate: input.issueDate,
     receiver: input.receiver,
+    clientID: input.clientID ?? null,
     subtotal: input.subtotal,
     discount: input.discount,
     netTotal: input.netTotal,

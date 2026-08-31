@@ -15,6 +15,8 @@ import { DteDocument } from '../../dte/entities/dte-document.entity';
 import { SaleItem } from './sale-item.entity';
 import { ColumnNumericTransformer } from '../../common/transformers/numeric.transformer';
 
+import { Client } from '../../clients/entities/client.entity';
+
 export enum SaleType {
   BOLETA = 'BOLETA',
   FACTURA = 'FACTURA',
@@ -48,6 +50,7 @@ export type SaleReceiver = {
 @Index(['tenantID', 'storeID', 'createdAt'])
 @Index(['tenantID', 'status'])
 @Index(['tenantID', 'saleType'])
+@Index(['tenantID', 'clientID'])
 export class Sale {
   @PrimaryGeneratedColumn('uuid')
   saleID!: string;
@@ -89,6 +92,13 @@ export class Sale {
 
   @Column({ type: 'jsonb', nullable: true })
   receiver!: SaleReceiver | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  clientID!: string | null;
+
+  @ManyToOne(() => Client, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'clientID' })
+  client!: Client | null;
 
   @Column('decimal', {
     precision: 12,

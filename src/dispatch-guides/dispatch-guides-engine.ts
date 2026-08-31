@@ -173,12 +173,12 @@ function buildPreparedDispatchGuideWithItems(
     indTraslado: dto.indTraslado ?? '1',
     includePrices: dto.includePrices ?? true,
     receiver: {
-      rut: dto.receiver.rut,
-      name: dto.receiver.name,
-      ...(dto.receiver.address ? { address: dto.receiver.address } : {}),
-      ...(dto.receiver.city ? { city: dto.receiver.city } : {}),
-      ...(dto.receiver.giro ? { giro: dto.receiver.giro } : {}),
-      ...(dto.receiver.email ? { email: dto.receiver.email } : {}),
+      rut: dto.receiver!.rut,
+      name: dto.receiver!.name,
+      ...(dto.receiver!.address ? { address: dto.receiver!.address } : {}),
+      ...(dto.receiver!.city ? { city: dto.receiver!.city } : {}),
+      ...(dto.receiver!.giro ? { giro: dto.receiver!.giro } : {}),
+      ...(dto.receiver!.email ? { email: dto.receiver!.email } : {}),
     },
     destination: {
       address: dto.destination.address,

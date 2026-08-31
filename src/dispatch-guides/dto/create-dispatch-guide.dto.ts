@@ -153,13 +153,22 @@ export class CreateDispatchGuideDto {
   @Type(() => CreateDispatchGuideItemDto)
   items!: CreateDispatchGuideItemDto[];
 
+  @ApiPropertyOptional({
+    description: 'ID opcional del cliente registrado',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  })
+  @IsOptional()
+  @IsUUID()
+  clientID?: string;
+
   @ApiProperty({
     description: 'Datos del receptor',
     type: CreateDispatchGuideReceiverDto,
   })
+  @IsOptional()
   @ValidateNested()
   @Type(() => CreateDispatchGuideReceiverDto)
-  receiver!: CreateDispatchGuideReceiverDto;
+  receiver?: CreateDispatchGuideReceiverDto;
 
   @ApiProperty({
     description: 'Destino de la mercadería',

@@ -162,6 +162,20 @@ export const PERMISSION_CATALOG: readonly PermissionCatalogEntry[] = [
     supportsOwnScope: false,
     description: 'Administrar roles y permisos',
   },
+  {
+    key: 'clients:read',
+    subject: 'Client',
+    action: 'read',
+    supportsOwnScope: false,
+    description: 'Ver clientes',
+  },
+  {
+    key: 'clients:manage',
+    subject: 'Client',
+    action: 'manage',
+    supportsOwnScope: false,
+    description: 'Administrar clientes',
+  },
 ];
 
 /**
@@ -178,4 +192,5 @@ export const BASE_PERMISSION_KEYS: readonly string[] = [
   'returns:write',
   'dte:read',
   'stores:read',
+  'clients:read',
 ];

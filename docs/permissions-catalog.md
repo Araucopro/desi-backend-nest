@@ -33,6 +33,8 @@ catálogo con una migración y coordinarse con el equipo de backend.
 | `stores:bypass-scope` | Store | bypass-scope | false | Operar sin asignación de tienda |
 | `userstores:manage` | UserStore | manage | false | Administrar asignaciones de tienda |
 | `roles:manage` | Role | manage | false | Administrar roles y permisos |
+| `clients:read` | Client | read | false | Ver clientes |
+| `clients:manage` | Client | manage | false | Administrar clientes |
 
 ## Roles protegidos y claves asignadas en el provisioning
 
@@ -44,7 +46,7 @@ catálogo con una migración y coordinarse con el equipo de backend.
 
 Claves base: `sales:read`, `sales:write`, `sales:convert`,
 `dispatch-guides:read`, `dispatch-guides:write`, `returns:read`,
-`returns:write`, `dte:read`, `stores:read`.
+`returns:write`, `dte:read`, `stores:read`, `clients:read`.
 
 ## Fuente de verdad en código
 

@@ -124,6 +124,14 @@ export class CreateSaleDto {
   @Type(() => CreateSaleReceiverDto)
   receiver?: CreateSaleReceiverDto;
 
+  @ApiPropertyOptional({
+    description: 'ID opcional del cliente registrado',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  })
+  @IsOptional()
+  @IsUUID()
+  clientID?: string;
+
   @ApiProperty({
     description: 'Ítems de la venta',
     type: [CreateSaleItemDto],

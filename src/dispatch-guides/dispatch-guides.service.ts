@@ -21,6 +21,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
 import { PricingService } from '../pricing/pricing.service';
 import { StoresService } from '../stores/stores.service';
+import { ClientsService } from '../clients/clients.service';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
@@ -74,6 +75,7 @@ export class DispatchGuidesService implements OnModuleInit {
     private readonly inventoryService: InventoryService,
     private readonly storesService: StoresService,
     private readonly openfacturaClient: OpenfacturaClientService,
+    @Optional() private readonly clientsService?: ClientsService,
     @Optional() private readonly tenantContext?: TenantContextService,
     @Optional() private readonly transactionRunner?: TransactionRunnerService,
     @Optional() private readonly abilityFactory?: AbilityFactory,
@@ -139,8 +141,49 @@ export class DispatchGuidesService implements OnModuleInit {
           );
         }
 
+        const tenantID = this.tenantContext?.getTenantId() ?? store.tenantID;
+        let receiver = dto.receiver;
+        let clientID = dto.clientID ?? null;
+
+        if (this.clientsService) {
+          if (clientID && !receiver) {
+            const client = await this.clientsService.findOne(clientID);
+            receiver = {
+              rut: client.rut,
+              name: client.name,
+              giro: client.giro ?? undefined,
+              address: client.address ?? undefined,
+              city: client.city ?? undefined,
+              email: client.email ?? undefined,
+            };
+          }
+
+          if (receiver?.rut && tenantID) {
+            const client = await this.clientsService.findOrCreate(
+              tenantID,
+              receiver,
+              manager,
+            );
+            if (client) {
+              clientID = client.clientID;
+              receiver = {
+                rut: client.rut,
+                name: client.name,
+                giro: client.giro ?? undefined,
+                address: client.address ?? undefined,
+                city: client.city ?? undefined,
+                email: client.email ?? undefined,
+              };
+            }
+          }
+        }
+
         const includePrices = dto.includePrices ?? true;
         let prepared;
+        const dtoWithResolvedReceiver = {
+          ...dto,
+          ...(receiver ? { receiver } : {}),
+        };
         if (includePrices) {
           const pricing = await this.pricingService.calculateCart({
             storeID,
@@ -154,7 +197,10 @@ export class DispatchGuidesService implements OnModuleInit {
               : {}),
             pricingDate: toDateOnly(dto.issueDate ?? new Date()),
           });
-          prepared = buildPreparedDispatchGuide(dto, pricing);
+          prepared = buildPreparedDispatchGuide(
+            dtoWithResolvedReceiver as CreateDispatchGuideDto,
+            pricing,
+          );
         } else {
           const resolvedItems = await findStoreProductsForGuide(
             manager,
@@ -162,7 +208,7 @@ export class DispatchGuidesService implements OnModuleInit {
             dto.items,
           );
           prepared = buildPreparedDispatchGuideWithoutPrices(
-            dto,
+            dtoWithResolvedReceiver as CreateDispatchGuideDto,
             resolvedItems,
           );
         }
@@ -182,7 +228,6 @@ export class DispatchGuidesService implements OnModuleInit {
           },
         );
 
-        const tenantID = this.tenantContext?.getTenantId() ?? store.tenantID;
         const dispatchGuideID = randomUUID();
         const guide = createDispatchGuideEntity(manager, {
           dispatchGuideID,
@@ -191,6 +236,7 @@ export class DispatchGuidesService implements OnModuleInit {
           userID: ownerId!,
           impersonatedBy: impersonatedBy ?? null,
           idempotencyKey: idempotencyKey ?? null,
+          clientID,
           prepared,
         });
         guide.payloadRaw = dteDto as unknown as Record<string, unknown>;
