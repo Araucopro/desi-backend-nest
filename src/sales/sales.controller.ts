@@ -91,7 +91,7 @@ export class SalesController {
   @ApiQuery({
     name: 'status',
     required: false,
-    enum: ['EMITIDA', 'CONVERTIDA'],
+    enum: ['EMITIDA', 'CONVERTIDA', 'ANULADA', 'DEVUELTA', 'CORREGIDA'],
   })
   @ApiQuery({ name: 'from', required: false })
   @ApiQuery({ name: 'to', required: false })

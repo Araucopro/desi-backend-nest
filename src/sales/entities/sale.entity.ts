@@ -24,6 +24,9 @@ export enum SaleType {
 export enum SaleStatus {
   EMITIDA = 'EMITIDA',
   CONVERTIDA = 'CONVERTIDA',
+  ANULADA = 'ANULADA',
+  DEVUELTA = 'DEVUELTA',
+  CORREGIDA = 'CORREGIDA',
 }
 
 export enum SalePaymentType {

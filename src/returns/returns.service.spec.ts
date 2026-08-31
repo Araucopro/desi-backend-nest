@@ -152,6 +152,8 @@ function createContext() {
       if (record.returnID) {
         Object.assign(retState, record);
         retState = { ...retState } as Partial<Return>;
+      } else if (record.saleID) {
+        Object.assign(sale, record);
       }
       if (record.currentFolio !== undefined) {
         folioCounter = record as Partial<ReturnFolioCounter>;
@@ -246,6 +248,7 @@ describe('ReturnsService', () => {
 
     expect(ctx.ret().status).toBe(ReturnStatus.COMPLETADA);
     expect(ctx.ret().folio).toBe(1);
+    expect(ctx.sale.status).toBe(SaleStatus.DEVUELTA);
     expect(ctx.inventoryService.applyMovement).toHaveBeenCalledWith(
       ctx.manager,
       expect.objectContaining({
@@ -300,6 +303,7 @@ describe('ReturnsService', () => {
       },
     );
     expect(ctx.ret().status).toBe(ReturnStatus.COMPLETADA);
+    expect(ctx.sale.status).toBe(SaleStatus.DEVUELTA);
     expect(ctx.ret().dteDocumentID).toBe('dte-9');
     expect(ctx.inventoryService.applyMovement).toHaveBeenCalledTimes(1);
     expect(
@@ -532,5 +536,23 @@ describe('ReturnsService', () => {
     expect(ctx.ret().status).toBe(ReturnStatus.COMPLETADA);
     expect(ctx.ret().dteDocumentID).toBe('dte-9');
     expect(ctx.inventoryService.applyMovement).toHaveBeenCalledTimes(1);
+  });
+
+  it('actualiza el estado de la venta a ANULADA en devolución TOTAL', async () => {
+    const ctx = createContext();
+    ctx.setReturn({ returnType: ReturnType.TOTAL });
+    await ctx.service.approve('ret-1', 'store-1', 'admin-1');
+    expect(ctx.sale.status).toBe(SaleStatus.ANULADA);
+  });
+
+  it('actualiza el estado de la venta a CORREGIDA en devolución DESCUENTO', async () => {
+    const ctx = createContext();
+    ctx.setReturn({
+      returnType: ReturnType.DESCUENTO,
+      discountAmount: 500,
+      reason: 'Ajuste',
+    });
+    await ctx.service.approve('ret-1', 'store-1', 'admin-1');
+    expect(ctx.sale.status).toBe(SaleStatus.CORREGIDA);
   });
 });

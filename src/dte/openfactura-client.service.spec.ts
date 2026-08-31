@@ -15,8 +15,7 @@ describe('OpenfacturaClientService', () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       headers: { get: () => 'application/json' },
-      text: async () =>
-        JSON.stringify({ TOKEN: 'token-1', PDF: 'base64-pdf' }),
+      text: async () => JSON.stringify({ TOKEN: 'token-1', PDF: 'base64-pdf' }),
     }) as unknown as typeof fetch;
   });
 

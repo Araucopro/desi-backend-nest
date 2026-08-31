@@ -913,9 +913,9 @@ describe('DteService', () => {
     expect((global.fetch as jest.Mock).mock.calls[0][0]).toBe(
       'https://dev-api.haulmer.com/v2/dte/document/real-token/pdf',
     );
-    expect((global.fetch as jest.Mock).mock.calls[0][1].headers).toMatchObject(
-      { apikey: 'apikey-test' },
-    );
+    expect((global.fetch as jest.Mock).mock.calls[0][1].headers).toMatchObject({
+      apikey: 'apikey-test',
+    });
   });
 
   it('getDocument defaults to json when value is omitted', async () => {
