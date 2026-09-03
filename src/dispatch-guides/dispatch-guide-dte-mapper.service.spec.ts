@@ -129,11 +129,13 @@ describe('DispatchGuideDteMapperService', () => {
 
     expect((dto.dte.Encabezado as any).Transporte).toEqual({
       Patente: 'AAAA11',
-      RUTTrans: '76123456-7',
-      NombreTrans: 'Juan Pérez',
+      Chofer: {
+        RUTChofer: '76123456-7',
+        NombreChofer: 'Juan Pérez',
+      },
       DirDest: 'Av. Providencia 1234',
       CmnaDest: 'Providencia',
-      FechaTraslado: '2026-08-25',
+      FchSalida: '2026-08-25',
     });
   });
 });

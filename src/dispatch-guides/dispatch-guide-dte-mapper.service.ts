@@ -103,16 +103,22 @@ export class DispatchGuideDteMapperService {
         },
         Transporte: {
           ...(transport?.patente ? { Patente: transport.patente } : {}),
-          ...(transport?.rutConductor
-            ? { RUTTrans: transport.rutConductor }
-            : {}),
-          ...(transport?.nombreConductor
-            ? { NombreTrans: transport.nombreConductor }
+          ...(transport?.rutConductor || transport?.nombreConductor
+            ? {
+                Chofer: {
+                  ...(transport.rutConductor
+                    ? { RUTChofer: transport.rutConductor }
+                    : {}),
+                  ...(transport.nombreConductor
+                    ? { NombreChofer: transport.nombreConductor }
+                    : {}),
+                },
+              }
             : {}),
           DirDest: destination.address,
           CmnaDest: destination.city,
           ...(transport?.fechaTraslado
-            ? { FechaTraslado: transport.fechaTraslado }
+            ? { FchSalida: transport.fechaTraslado }
             : {}),
         },
         Totales: input.includePrices

@@ -687,6 +687,24 @@ export class NotaCreditoEncabezadoDto {
   Totales?: DteTotalesNotaCreditoDto;
 }
 
+export class DteChoferDto {
+  @ApiPropertyOptional({
+    description: 'RUT del chofer o conductor',
+    example: '76123456-7',
+  })
+  @IsOptional()
+  @IsString()
+  RUTChofer?: string;
+
+  @ApiPropertyOptional({
+    description: 'Nombre del chofer o conductor',
+    example: 'Juan Pérez',
+  })
+  @IsOptional()
+  @IsString()
+  NombreChofer?: string;
+}
+
 export class DteTransporteDto {
   @ApiPropertyOptional({
     description: 'Patente del vehículo',
@@ -697,7 +715,7 @@ export class DteTransporteDto {
   Patente?: string;
 
   @ApiPropertyOptional({
-    description: 'RUT del transportista o conductor',
+    description: 'RUT de la empresa transportista',
     example: '76123456-7',
   })
   @IsOptional()
@@ -705,12 +723,13 @@ export class DteTransporteDto {
   RUTTrans?: string;
 
   @ApiPropertyOptional({
-    description: 'Nombre del transportista o conductor',
-    example: 'TRANSPORTES CHILE',
+    description: 'Datos del chofer o conductor',
+    type: DteChoferDto,
   })
   @IsOptional()
-  @IsString()
-  NombreTrans?: string;
+  @ValidateNested()
+  @Type(() => DteChoferDto)
+  Chofer?: DteChoferDto;
 
   @ApiProperty({
     description: 'Dirección de destino',
@@ -725,13 +744,18 @@ export class DteTransporteDto {
   @IsNotEmpty()
   CmnaDest!: string;
 
+  @ApiPropertyOptional({ description: 'Ciudad de destino', example: 'Curicó' })
+  @IsOptional()
+  @IsString()
+  CiudadDest?: string;
+
   @ApiPropertyOptional({
-    description: 'Fecha de traslado',
+    description: 'Fecha de salida o traslado (YYYY-MM-DD)',
     example: '2026-08-25',
   })
   @IsOptional()
   @IsDateString()
-  FechaTraslado?: string;
+  FchSalida?: string;
 }
 
 export class GuiaEncabezadoDto {

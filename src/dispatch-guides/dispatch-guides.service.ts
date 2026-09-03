@@ -439,13 +439,39 @@ export class DispatchGuidesService implements OnModuleInit {
       await this.confirmAnulacion(dispatchGuideID, storeID);
       return this.findOne(dispatchGuideID, storeID);
     }
-    if (!current.payloadRaw) {
-      throw new BadRequestException(
-        'La guía de despacho no tiene payload DTE para reintentar',
-      );
-    }
+    const dto = this.dispatchGuideDteMapperService.mapDispatchGuideToDte({
+      issueDate: current.issueDate,
+      indTraslado: current.indTraslado,
+      includePrices: current.includePrices,
+      receiver: current.receiver,
+      destination: current.destination,
+      transport: current.transport,
+      items: (current.items ?? []).map((item) => ({
+        storeProductID: item.storeProductID,
+        variationID: item.variationID,
+        productName: item.productName,
+        sku: item.sku,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        unitCost: Number(item.unitCost),
+        lineTotal: Number(item.lineTotal),
+        baseTotal: Number(item.lineTotal),
+      })),
+      total: Number(current.total),
+      netTotal: Number(current.netTotal),
+      taxTotal: Number(current.taxTotal),
+      store: current.store,
+    });
 
-    const dto = current.payloadRaw as unknown as CreateDteDocumentDto;
+    await this.runInTransaction(async (manager) => {
+      const guide = await loadDispatchGuideForUpdate(
+        manager,
+        dispatchGuideID,
+        storeID,
+      );
+      guide.payloadRaw = dto as unknown as Record<string, unknown>;
+      await manager.save(guide);
+    });
 
     try {
       const dteResponse =
