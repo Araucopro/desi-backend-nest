@@ -211,14 +211,14 @@ export class CreateDispatchGuideDto {
 
   @ApiPropertyOptional({
     description:
-      'Indicador de traslado SII: 1 venta, 2 venta por encargo, 3 consignación, 4 entrega gratuita, 5 traslados internos',
+      'Indicador de traslado SII: 1 operación constituye venta, 2 ventas por efectuar, 3 consignaciones, 4 entrega gratuita, 5 traslados internos, 6 otros traslados no venta, 7 guía de devolución, 8 traslado exportación no venta, 9 venta para exportación',
     example: '1',
-    enum: ['1', '2', '3', '4', '5'],
+    enum: ['1', '2', '3', '4', '5', '6', '7', '8', '9'],
     default: '1',
   })
   @IsOptional()
-  @IsIn(['1', '2', '3', '4', '5'])
-  indTraslado?: '1' | '2' | '3' | '4' | '5' = '1';
+  @IsIn(['1', '2', '3', '4', '5', '6', '7', '8', '9'])
+  indTraslado?: '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' = '1';
 
   @ApiPropertyOptional({
     description:

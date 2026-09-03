@@ -3,7 +3,7 @@ import { calculateInventoryDelta } from './inventory-engine';
 import { InventoryMovementReason } from './entities/inventory-movement.entity';
 
 describe('inventory-engine', () => {
-  it('calculates negative deltas for SALE and TRANSFER_OUT', () => {
+  it('calculates negative deltas for SALE, TRANSFER_OUT and DISPATCH_GUIDE', () => {
     expect(
       calculateInventoryDelta({
         reason: InventoryMovementReason.SALE,
@@ -18,6 +18,13 @@ describe('inventory-engine', () => {
         quantity: 5,
       }),
     ).toBe(-5);
+    expect(
+      calculateInventoryDelta({
+        reason: InventoryMovementReason.DISPATCH_GUIDE,
+        currentStock: 10,
+        quantity: 4,
+      }),
+    ).toBe(-4);
   });
 
   it('calculates positive deltas for PURCHASE and TRANSFER_IN', () => {

@@ -76,8 +76,6 @@ export class DispatchGuideDteMapperService {
           Folio: 0,
           FchEmis: this.toDateOnly(input.issueDate),
           IndTraslado: input.indTraslado,
-          DirDest: destination.address,
-          CmnaDest: destination.city,
         },
         Emisor: {
           RUTEmisor: store.rut,
@@ -103,6 +101,20 @@ export class DispatchGuideDteMapperService {
           ...(receiver.address ? { DirRecep: receiver.address } : {}),
           ...(receiver.city ? { CmnaRecep: receiver.city } : {}),
         },
+        Transporte: {
+          ...(transport?.patente ? { Patente: transport.patente } : {}),
+          ...(transport?.rutConductor
+            ? { RUTTrans: transport.rutConductor }
+            : {}),
+          ...(transport?.nombreConductor
+            ? { NombreTrans: transport.nombreConductor }
+            : {}),
+          DirDest: destination.address,
+          CmnaDest: destination.city,
+          ...(transport?.fechaTraslado
+            ? { FechaTraslado: transport.fechaTraslado }
+            : {}),
+        },
         Totales: input.includePrices
           ? {
               MntNeto: mntNeto,
@@ -120,21 +132,6 @@ export class DispatchGuideDteMapperService {
       },
       Detalle: detalle,
     };
-
-    if (transport) {
-      dte.Transporte = {
-        ...(transport.patente ? { Patente: transport.patente } : {}),
-        ...(transport.rutConductor ? { RUTTrans: transport.rutConductor } : {}),
-        ...(transport.nombreConductor
-          ? { NombreTrans: transport.nombreConductor }
-          : {}),
-        DirDest: destination.address,
-        CmnaDest: destination.city,
-        ...(transport.fechaTraslado
-          ? { FechaTraslado: transport.fechaTraslado }
-          : {}),
-      };
-    }
 
     return {
       response: [

@@ -49,7 +49,7 @@ describe('DispatchGuideDteMapperService', () => {
     };
   }
 
-  it('construye el payload 52 con IdDoc, emisor, receptor, totales y detalle', () => {
+  it('construye el payload 52 con IdDoc, emisor, receptor, transporte, totales y detalle', () => {
     const dto = service.mapDispatchGuideToDte(input() as any);
 
     expect(dto.response).toContain('FOLIO');
@@ -58,8 +58,6 @@ describe('DispatchGuideDteMapperService', () => {
       Folio: 0,
       FchEmis: '2026-08-25',
       IndTraslado: '1',
-      DirDest: 'Av. Providencia 1234',
-      CmnaDest: 'Providencia',
     });
     expect(dto.dte.Encabezado.Emisor).toMatchObject({
       RUTEmisor: '76123456-7',
@@ -72,6 +70,10 @@ describe('DispatchGuideDteMapperService', () => {
       RznSocRecep: 'Cliente SpA',
       DirRecep: 'Av. Providencia 1234',
       CmnaRecep: 'Providencia',
+    });
+    expect((dto.dte.Encabezado as any).Transporte).toEqual({
+      DirDest: 'Av. Providencia 1234',
+      CmnaDest: 'Providencia',
     });
     expect(dto.dte.Encabezado.Totales).toEqual({
       MntNeto: 2000,
@@ -88,7 +90,7 @@ describe('DispatchGuideDteMapperService', () => {
       MontoItem: 2000,
       CdgItem: { TpoCodigo: 'INT1', VlrCodigo: 'SKU-1' },
     });
-    expect(dto.dte.Transporte).toBeUndefined();
+    expect((dto.dte as any).Transporte).toBeUndefined();
   });
 
   it('emite sin precios con IndTraslado configurable y totales/detalle en cero', () => {
@@ -113,7 +115,7 @@ describe('DispatchGuideDteMapperService', () => {
     });
   });
 
-  it('agrega Transporte solo cuando el creador lo entregó', () => {
+  it('agrega datos de transporte en Encabezado.Transporte cuando el creador los entregó', () => {
     const dto = service.mapDispatchGuideToDte(
       input({
         transport: {
@@ -125,7 +127,7 @@ describe('DispatchGuideDteMapperService', () => {
       }) as any,
     );
 
-    expect(dto.dte.Transporte).toEqual({
+    expect((dto.dte.Encabezado as any).Transporte).toEqual({
       Patente: 'AAAA11',
       RUTTrans: '76123456-7',
       NombreTrans: 'Juan Pérez',

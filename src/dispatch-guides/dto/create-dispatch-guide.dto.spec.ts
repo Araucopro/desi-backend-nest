@@ -57,12 +57,12 @@ describe('CreateDispatchGuideDto', () => {
     expect(dto.includePrices).toBe(false);
   });
 
-  it('rechaza indTraslado fuera de 1-5 e includePrices no booleano', async () => {
+  it('rechaza indTraslado fuera de 1-9 e includePrices no booleano', async () => {
     await expect(
       pipe.transform(
         {
           ...validPayload(),
-          indTraslado: '9',
+          indTraslado: '10',
         },
         {
           type: 'body',

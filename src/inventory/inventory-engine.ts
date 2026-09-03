@@ -16,6 +16,7 @@ export function calculateInventoryDelta(input: InventoryDeltaInput): number {
   switch (input.reason) {
     case InventoryMovementReason.SALE:
     case InventoryMovementReason.TRANSFER_OUT:
+    case InventoryMovementReason.DISPATCH_GUIDE:
       if (input.quantity === undefined || input.quantity <= 0) {
         throw new BadRequestException('Quantity required for this operation');
       }
