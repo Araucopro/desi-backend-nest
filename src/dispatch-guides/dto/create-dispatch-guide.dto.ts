@@ -161,6 +161,15 @@ export class CreateDispatchGuideDto {
   @IsUUID()
   clientID?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'ID de documento DTE previo referenciado (Factura 33 o Boleta 39)',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  })
+  @IsOptional()
+  @IsUUID()
+  referencedDteDocumentID?: string;
+
   @ApiProperty({
     description: 'Datos del receptor',
     type: CreateDispatchGuideReceiverDto,

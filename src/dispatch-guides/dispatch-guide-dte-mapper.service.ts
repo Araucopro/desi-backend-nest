@@ -3,6 +3,7 @@ import { Store } from '../stores/entities/store.entity';
 import { roundClp } from '../common/utils/money.util';
 import {
   CreateDteDocumentDto,
+  DteReferenciaDto,
   DteResponseValue,
 } from '../dte/dto/create-dte-document.dto';
 import {
@@ -24,6 +25,7 @@ export type DispatchGuideDteInput = {
   netTotal: number;
   taxTotal: number;
   store: Store;
+  references?: DteReferenciaDto[];
 };
 
 /**
@@ -137,6 +139,7 @@ export class DispatchGuideDteMapperService {
             },
       },
       Detalle: detalle,
+      ...(input.references?.length ? { Referencia: input.references } : {}),
     };
 
     return {

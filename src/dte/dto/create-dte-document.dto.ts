@@ -11,6 +11,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
@@ -839,12 +840,34 @@ export class DteReferenciaDto {
   CodRef?: number;
 
   @ApiPropertyOptional({
-    description: 'Razón de la referencia',
+    description: 'Razón de la referencia (máximo 90 caracteres)',
     example: 'Devolución parcial de mercadería',
+    maxLength: 90,
   })
   @IsOptional()
   @IsString()
+  @MaxLength(90)
   RazonRef?: string;
+
+  @ApiPropertyOptional({
+    description: 'Código de vendedor asignado (máximo 8 caracteres)',
+    example: 'INTERNET',
+    maxLength: 8,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(8)
+  CodVndor?: string;
+
+  @ApiPropertyOptional({
+    description: 'Código de caja o terminal (máximo 8 caracteres)',
+    example: 'CAJA01',
+    maxLength: 8,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(8)
+  CodCaja?: string;
 }
 
 @ApiExtraModels(
@@ -957,32 +980,6 @@ class DteCustomizePageDto {
   @IsOptional()
   @IsString()
   urlLogo?: string;
-}
-
-class DteDocumentReferenceDto {
-  @ApiPropertyOptional({
-    description: 'Tipo de documento referenciado',
-    example: '801',
-  })
-  @IsOptional()
-  @IsString()
-  type?: string;
-
-  @ApiPropertyOptional({
-    description: 'ID del documento referenciado',
-    example: '334',
-  })
-  @IsOptional()
-  @IsString()
-  id?: string;
-
-  @ApiPropertyOptional({
-    description: 'Fecha del documento referenciado',
-    example: '2025-01-31',
-  })
-  @IsOptional()
-  @IsDateString()
-  date?: string;
 }
 
 export class CreateDteDocumentDto {

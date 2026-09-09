@@ -189,6 +189,10 @@ function createContext() {
     ),
   };
 
+  const invoiceMapper = {
+    mapGuidesToInvoice: jest.fn(),
+  };
+
   const service = new DispatchGuidesService(
     {} as any,
     {} as any,
@@ -197,6 +201,7 @@ function createContext() {
     pricingService as any,
     dteService as any,
     mapper as any,
+    invoiceMapper as any,
     inventoryService as any,
     storesService as any,
     openfacturaClient as any,

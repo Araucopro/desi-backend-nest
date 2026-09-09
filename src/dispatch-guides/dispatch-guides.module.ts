@@ -19,6 +19,8 @@ import { TransactionRunnerService } from '../common/services/transaction-runner.
 import { AuthModule } from '../auth/auth.module';
 import { ClientsModule } from '../clients/clients.module';
 
+import { DispatchGuideInvoiceMapperService } from './dispatch-guide-invoice-mapper.service';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -42,6 +44,7 @@ import { ClientsModule } from '../clients/clients.module';
   providers: [
     DispatchGuidesService,
     DispatchGuideDteMapperService,
+    DispatchGuideInvoiceMapperService,
     TransactionRunnerService,
   ],
   exports: [DispatchGuidesService],

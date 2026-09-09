@@ -15,7 +15,10 @@ import {
   DteDocumentStatus,
 } from '../dte/entities/dte-document.entity';
 import { DteDocumentResponseDto } from '../dte/dto/dte-document-response.dto';
-import { CreateDteDocumentDto } from '../dte/dto/create-dte-document.dto';
+import {
+  CreateDteDocumentDto,
+  DteReferenciaDto,
+} from '../dte/dto/create-dte-document.dto';
 import { OpenfacturaClientService } from '../dte/openfactura-client.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
@@ -27,24 +30,31 @@ import { TransactionRunnerService } from '../common/services/transaction-runner.
 import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { CreateDispatchGuideDto } from './dto/create-dispatch-guide.dto';
 import { ListDispatchGuidesQueryDto } from './dto/list-dispatch-guides.query.dto';
+import { InvoiceDispatchGuidesDto } from './dto/invoice-dispatch-guides.dto';
 import {
   DispatchGuide,
   DispatchGuideStatus,
 } from './entities/dispatch-guide.entity';
 import { DispatchGuideItem } from './entities/dispatch-guide-item.entity';
 import { DispatchGuideReference } from './entities/dispatch-guide-reference.entity';
+import { DispatchGuideReferenceItem } from './entities/dispatch-guide-reference-item.entity';
 import { DispatchGuideDteMapperService } from './dispatch-guide-dte-mapper.service';
+import { DispatchGuideInvoiceMapperService } from './dispatch-guide-invoice-mapper.service';
 import {
   assertCanAnular,
   assertCanConfirmAnulacion,
+  assertCanReference,
   buildPreparedDispatchGuide,
   buildPreparedDispatchGuideWithoutPrices,
+  planConsumption,
   toDateOnly,
 } from './dispatch-guides-engine';
 import {
   createDispatchGuideEntity,
   createDispatchGuideItems,
   findDispatchGuideByIdempotencyKey,
+  findDispatchGuideReferenceItems,
+  findEmittedDispatchGuidesForUpdate,
   findStoreById,
   findStoreProductsForGuide,
   listDispatchGuides,
@@ -72,6 +82,7 @@ export class DispatchGuidesService implements OnModuleInit {
     private readonly pricingService: PricingService,
     private readonly dteService: DteService,
     private readonly dispatchGuideDteMapperService: DispatchGuideDteMapperService,
+    private readonly dispatchGuideInvoiceMapperService: DispatchGuideInvoiceMapperService,
     private readonly inventoryService: InventoryService,
     private readonly storesService: StoresService,
     private readonly openfacturaClient: OpenfacturaClientService,
@@ -113,8 +124,8 @@ export class DispatchGuidesService implements OnModuleInit {
       (this.abilityFactory
         ? await this.abilityFactory.getSystemUserId()
         : undefined);
-    const { dispatchGuideID, dteDto } = await this.runInTransaction(
-      async (manager) => {
+    const { dispatchGuideID, dteDto, reserveStock } =
+      await this.runInTransaction(async (manager) => {
         if (idempotencyKey) {
           const existing = await findDispatchGuideByIdempotencyKey(
             manager,
@@ -212,6 +223,51 @@ export class DispatchGuidesService implements OnModuleInit {
             resolvedItems,
           );
         }
+        let referencedDte: DteDocument | null = null;
+        let dteReferences: DteReferenciaDto[] | undefined;
+        if (dto.referencedDteDocumentID) {
+          referencedDte = await manager.getRepository(DteDocument).findOne({
+            where: { dteDocumentID: dto.referencedDteDocumentID, storeID },
+          });
+          if (!referencedDte) {
+            throw new BadRequestException(
+              `El documento DTE referenciado ${dto.referencedDteDocumentID} no existe en la tienda`,
+            );
+          }
+          if (referencedDte.status !== DteDocumentStatus.EMITIDO) {
+            throw new BadRequestException(
+              `El documento DTE referenciado debe estar en estado EMITIDO (actual: ${referencedDte.status})`,
+            );
+          }
+          if (!referencedDte.folio) {
+            throw new BadRequestException(
+              'El documento DTE referenciado no tiene folio SII asignado',
+            );
+          }
+
+          const docType = (referencedDte.documentType ?? 33) as
+            | 33
+            | 39
+            | 41
+            | 52;
+          const docName = docType === 39 ? 'Boleta' : 'Factura';
+          dteReferences = [
+            {
+              NroLinRef: 1,
+              TpoDocRef: docType,
+              FolioRef: referencedDte.folio,
+              FchRef: toDateOnly(referencedDte.issueDate)
+                .toISOString()
+                .slice(0, 10),
+              RazonRef: `Despacho por ${docName} #${referencedDte.folio}`,
+            },
+          ];
+        }
+
+        const reserveStock = referencedDte
+          ? !referencedDte.stockReserved
+          : true;
+
         const dteDto = this.dispatchGuideDteMapperService.mapDispatchGuideToDte(
           {
             issueDate: prepared.issueDate,
@@ -225,6 +281,7 @@ export class DispatchGuidesService implements OnModuleInit {
             netTotal: prepared.netTotal,
             taxTotal: prepared.taxTotal,
             store,
+            references: dteReferences,
           },
         );
 
@@ -260,6 +317,9 @@ export class DispatchGuidesService implements OnModuleInit {
             dispatchGuideID: concurrent.dispatchGuideID,
             dteDto: null,
             existing: true,
+            reserveStock: true,
+            referencedDteID: null,
+            referencedSaleID: null,
           };
         }
 
@@ -272,9 +332,26 @@ export class DispatchGuidesService implements OnModuleInit {
           ),
         );
 
-        return { dispatchGuideID, dteDto, existing: false };
-      },
-    );
+        if (referencedDte) {
+          await manager.save(
+            manager.create(DispatchGuideReference, {
+              tenantID,
+              dispatchGuideID,
+              dteDocumentID: referencedDte.dteDocumentID,
+              saleID: referencedDte.saleID ?? null,
+            }),
+          );
+        }
+
+        return {
+          dispatchGuideID,
+          dteDto,
+          existing: false,
+          reserveStock,
+          referencedDteID: referencedDte?.dteDocumentID ?? null,
+          referencedSaleID: referencedDte?.saleID ?? null,
+        };
+      });
 
     if (dteDto === null) {
       return this.findOne(dispatchGuideID, storeID);
@@ -286,7 +363,7 @@ export class DispatchGuidesService implements OnModuleInit {
         idempotencyKey,
         dteDto,
         {
-          reserveStock: true,
+          reserveStock,
           reserveReason: InventoryMovementReason.DISPATCH_GUIDE,
         },
       );
@@ -599,6 +676,135 @@ export class DispatchGuidesService implements OnModuleInit {
     await this.confirmAnulacion(dispatchGuideID, storeID);
 
     return this.findOne(dispatchGuideID, storeID);
+  }
+
+  async invoiceGuides(
+    storeID: string,
+    primaryDispatchGuideID: string,
+    dto: InvoiceDispatchGuidesDto,
+    userId?: string,
+    impersonatedBy?: string,
+    idempotencyKey?: string,
+    ability?: TenantAbility,
+  ): Promise<DteDocumentResponseDto> {
+    const guideIDs = Array.from(
+      new Set([
+        primaryDispatchGuideID,
+        ...(dto.additionalDispatchGuideIDs ?? []),
+      ]),
+    );
+
+    const { dteDto, cogsTotal, consumptionPlan, tenantID } =
+      await this.runInTransaction(async (manager) => {
+        const store = await findStoreById(manager, storeID);
+        if (!store.hasOpenfacturaKey) {
+          throw new BadRequestException(
+            'La tienda no tiene configurada la API key de Openfactura. No es posible emitir facturas.',
+          );
+        }
+
+        const tenant = this.tenantContext?.getTenantId() ?? store.tenantID;
+
+        const guides = await findEmittedDispatchGuidesForUpdate(
+          manager,
+          storeID,
+          guideIDs,
+        );
+
+        if (guides.length !== guideIDs.length) {
+          throw new BadRequestException(
+            'Una o más guías de despacho no existen, no pertenecen a la tienda o no están en estado EMITIDA',
+          );
+        }
+
+        for (const guide of guides) {
+          if (
+            userId &&
+            ability &&
+            !ability.can('dispatch-guides:write', guide.userID, userId)
+          ) {
+            throw new BadRequestException(
+              `Sin autorización para facturar la guía de despacho ${guide.dispatchGuideID}`,
+            );
+          }
+          assertCanReference(guide);
+        }
+
+        const { dteDto, consolidatedItems, cogsTotal } =
+          this.dispatchGuideInvoiceMapperService.mapGuidesToInvoice(
+            guides,
+            store,
+            dto,
+          );
+
+        const consumedItems = await findDispatchGuideReferenceItems(
+          manager,
+          guideIDs,
+        );
+
+        const consumptionPlan = planConsumption(
+          guides,
+          consumedItems,
+          consolidatedItems.map((item) => ({
+            variationID: item.variationID,
+            quantity: item.quantity,
+          })),
+        );
+
+        return {
+          dteDto,
+          cogsTotal,
+          consumptionPlan,
+          tenantID: tenant,
+        };
+      });
+
+    const dteResponse = await this.dteService.create(
+      storeID,
+      idempotencyKey,
+      dteDto,
+      {
+        reserveStock: false,
+        paymentType: dto.paymentType,
+        cogsTotalOverride: cogsTotal,
+      },
+    );
+
+    await this.runInTransaction(async (manager) => {
+      const savedReferences = await manager.save(
+        guideIDs.map((dispatchGuideID) =>
+          manager.create(DispatchGuideReference, {
+            tenantID,
+            dispatchGuideID,
+            dteDocumentID: dteResponse.dteDocumentID,
+            saleID: null,
+          }),
+        ),
+      );
+
+      const referenceIDByGuide = new Map(
+        savedReferences.map((ref) => [
+          ref.dispatchGuideID,
+          ref.dispatchGuideReferenceID,
+        ]),
+      );
+
+      await manager.save(
+        consumptionPlan.map((allocation) =>
+          manager.create(DispatchGuideReferenceItem, {
+            tenantID,
+            dispatchGuideReferenceID: referenceIDByGuide.get(
+              allocation.dispatchGuideID,
+            )!,
+            dispatchGuideID: allocation.dispatchGuideID,
+            variationID: allocation.variationID,
+            quantity: allocation.quantity,
+          }),
+        ),
+      );
+    });
+
+    return dteResponse;
   }
 
   private async confirmAnulacion(
