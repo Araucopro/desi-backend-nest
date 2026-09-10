@@ -30,9 +30,6 @@ describe('DispatchGuideDteMapperService', () => {
           baseTotal: 2380,
         },
       ],
-      total: 2380,
-      netTotal: 2000,
-      taxTotal: 380,
       store: {
         storeID: 'store-1',
         rut: '76123456-7',
@@ -90,7 +87,46 @@ describe('DispatchGuideDteMapperService', () => {
       MontoItem: 2000,
       CdgItem: { TpoCodigo: 'INT1', VlrCodigo: 'SKU-1' },
     });
+    expect(dto.dte.Detalle[0].MontoItem).toBe(
+      dto.dte.Detalle[0].PrcItem! * dto.dte.Detalle[0].QtyItem,
+    );
     expect((dto.dte as any).Transporte).toBeUndefined();
+  });
+
+  it('cuadra PrcItem × QtyItem con MontoItem en el caso OF-10 (qty 10, bruto 15000)', () => {
+    const dto = service.mapDispatchGuideToDte(
+      input({
+        items: [
+          {
+            storeProductID: 'sp-1',
+            variationID: 'var-1',
+            productName: 'Demoo',
+            sku: '1001',
+            quantity: 10,
+            unitPrice: 1500,
+            unitCost: 500,
+            lineTotal: 15000,
+            baseTotal: 15000,
+          },
+        ],
+      }) as any,
+    );
+
+    expect(dto.dte.Detalle[0]).toMatchObject({
+      QtyItem: 10,
+      PrcItem: 1261,
+      MontoItem: 12610,
+    });
+    expect(dto.dte.Detalle[0].MontoItem).toBe(
+      dto.dte.Detalle[0].PrcItem! * dto.dte.Detalle[0].QtyItem,
+    );
+    expect(dto.dte.Encabezado.Totales).toEqual({
+      MntNeto: 12610,
+      TasaIVA: '19',
+      IVA: 2396,
+      MntTotal: 15006,
+      VlrPagar: 15006,
+    });
   });
 
   it('emite sin precios con IndTraslado configurable y totales/detalle en cero', () => {

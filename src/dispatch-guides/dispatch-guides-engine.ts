@@ -7,11 +7,7 @@ import {
   DispatchGuideTransport,
 } from './entities/dispatch-guide.entity';
 import { CalculateCartResult } from '../pricing/dto/pricing.dto';
-import {
-  roundClp,
-  splitIvaIncluded,
-  TAX_RATE,
-} from '../common/utils/money.util';
+import { roundClp, TAX_RATE } from '../common/utils/money.util';
 
 export { TAX_RATE };
 
@@ -65,6 +61,46 @@ export type DispatchGuideResolvedItem = {
 
 export function toMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Política de cálculo para documentos con precios netos (Guía de Despacho 52):
+ * la línea manda. Se deriva el neto de línea desde el bruto con IVA incluido y
+ * el precio unitario neto se redondea a CLP entero, recalculando el monto de la
+ * línea como PrcItem × QtyItem. Así se garantiza la identidad que valida
+ * Openfactura (MontoItem = QtyItem × PrcItem) sin descuadres por redondeo.
+ */
+export function computeLineNetAmounts(
+  quantity: number,
+  grossLineTotal: number,
+): { prcItem: number; montoItem: number } {
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return { prcItem: 0, montoItem: 0 };
+  }
+
+  const netLine = roundClp(grossLineTotal / (1 + TAX_RATE));
+  const prcItem = roundClp(netLine / quantity);
+
+  return { prcItem, montoItem: prcItem * quantity };
+}
+
+/**
+ * Totales del documento calculados de abajo hacia arriba: el neto es la suma
+ * de los montos netos de cada línea, el IVA se aplica sobre ese neto y el total
+ * es neto + IVA. Con precios deshabilitados los ítems valen 0 y los totales
+ * también.
+ */
+export function computeGuideTotalsFromItems(
+  items: Array<{ quantity: number; lineTotal: number }>,
+): { netTotal: number; taxTotal: number; total: number } {
+  const netTotal = items.reduce(
+    (acc, item) =>
+      acc + computeLineNetAmounts(item.quantity, item.lineTotal).montoItem,
+    0,
+  );
+  const taxTotal = roundClp(netTotal * TAX_RATE);
+
+  return { netTotal, taxTotal, total: netTotal + taxTotal };
 }
 
 export function toDateOnly(value: string | Date): Date {
@@ -160,12 +196,14 @@ function buildPreparedDispatchGuideWithItems(
   const cogsTotal = toMoney(
     items.reduce((acc, item) => acc + item.unitCost * item.quantity, 0),
   );
-  const total = roundClp(items.reduce((acc, item) => acc + item.lineTotal, 0));
+  const grossTotal = roundClp(
+    items.reduce((acc, item) => acc + item.lineTotal, 0),
+  );
   const subtotal = roundClp(
     items.reduce((acc, item) => acc + item.baseTotal, 0),
   );
-  const discount = Math.max(subtotal - total, 0);
-  const { netTotal, taxTotal } = splitIvaIncluded(total);
+  const discount = Math.max(subtotal - grossTotal, 0);
+  const { netTotal, taxTotal, total } = computeGuideTotalsFromItems(items);
 
   return {
     status: DispatchGuideStatus.PENDIENTE,

@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { Store } from '../stores/entities/store.entity';
-import { roundClp } from '../common/utils/money.util';
 import {
   CreateDteDocumentDto,
   DteReferenciaDto,
@@ -11,7 +10,11 @@ import {
   DispatchGuideReceiver,
   DispatchGuideTransport,
 } from './entities/dispatch-guide.entity';
-import { PreparedDispatchGuideItem, TAX_RATE } from './dispatch-guides-engine';
+import {
+  computeGuideTotalsFromItems,
+  computeLineNetAmounts,
+  PreparedDispatchGuideItem,
+} from './dispatch-guides-engine';
 
 export type DispatchGuideDteInput = {
   issueDate: Date;
@@ -21,9 +24,6 @@ export type DispatchGuideDteInput = {
   destination: DispatchGuideDestination;
   transport: DispatchGuideTransport | null;
   items: PreparedDispatchGuideItem[];
-  total: number;
-  netTotal: number;
-  taxTotal: number;
   store: Store;
   references?: DteReferenciaDto[];
 };
@@ -35,7 +35,9 @@ export type DispatchGuideDteInput = {
  * - Emisor estilo factura desde la tienda.
  * - Totales neto/IVA positivos (la GD no registra ingreso; solo respalda el
  *   traslado).
- * - Detalle por SKU con precios netos.
+ * - Detalle por SKU con precios netos calculados de abajo hacia arriba:
+ *   MontoItem se deriva de PrcItem × QtyItem, y MntNeto/IVA/MntTotal se suman
+ *   desde el detalle para que la aritmética cuadre con la validación OF-10.
  * - Transporte opcional: se envía solo si el creador lo entregó.
  */
 @Injectable()
@@ -52,14 +54,16 @@ export class DispatchGuideDteMapperService {
 
     const detalle = input.items.map((item, index) => {
       const includePrices = input.includePrices;
+      const { prcItem, montoItem } = includePrices
+        ? computeLineNetAmounts(item.quantity, item.lineTotal)
+        : { prcItem: 0, montoItem: 0 };
+
       return {
         NroLinDet: index + 1,
         NmbItem: item.productName,
         QtyItem: item.quantity,
-        PrcItem: includePrices ? roundClp(item.unitPrice / (1 + TAX_RATE)) : 0,
-        MontoItem: includePrices
-          ? roundClp(item.lineTotal / (1 + TAX_RATE))
-          : 0,
+        PrcItem: prcItem,
+        MontoItem: montoItem,
         CdgItem: {
           TpoCodigo: 'INT1',
           VlrCodigo: item.sku,
@@ -67,9 +71,13 @@ export class DispatchGuideDteMapperService {
       };
     });
 
-    const mntTotal = roundClp(input.total);
-    const mntNeto = roundClp(input.netTotal);
-    const iva = roundClp(input.taxTotal);
+    const {
+      netTotal: mntNeto,
+      taxTotal: iva,
+      total: mntTotal,
+    } = input.includePrices
+      ? computeGuideTotalsFromItems(input.items)
+      : { netTotal: 0, taxTotal: 0, total: 0 };
 
     const dte: CreateDteDocumentDto['dte'] = {
       Encabezado: {

@@ -521,8 +521,31 @@ describe('DispatchGuidesService', () => {
     expect(ctx.openfacturaClient.anularDte52).not.toHaveBeenCalled();
   });
 
-  it('reconcilia reintentando la emisión con el payload persistido', async () => {
+  it('reconcilia recalculando los montos desde el detalle antes de reemitir', async () => {
     const ctx = createContext();
+    ctx.setGuide({
+      includePrices: true,
+      subtotal: 15000,
+      discount: 0,
+      netTotal: 12605,
+      taxTotal: 2395,
+      total: 15000,
+      items: [
+        {
+          dispatchGuideItemID: 'dgi-1',
+          tenantID: 'tenant-1',
+          dispatchGuideID: 'dg-1',
+          storeProductID: 'sp-1',
+          variationID: 'var-1',
+          productName: 'Demoo',
+          sku: '1001',
+          quantity: 10,
+          unitPrice: 1500,
+          unitCost: 500,
+          lineTotal: 15000,
+        },
+      ] as any,
+    });
     ctx.dteService.create.mockImplementation(async () => {
       ctx.setGuide({
         status: DispatchGuideStatus.EMITIDA,
@@ -543,6 +566,9 @@ describe('DispatchGuidesService', () => {
         reserveReason: InventoryMovementReason.DISPATCH_GUIDE,
       },
     );
+    expect(ctx.guide().netTotal).toBe(12610);
+    expect(ctx.guide().taxTotal).toBe(2396);
+    expect(ctx.guide().total).toBe(15006);
     expect(ctx.guide().status).toBe(DispatchGuideStatus.EMITIDA);
     expect(result.dispatchGuide.status).toBe(DispatchGuideStatus.EMITIDA);
   });

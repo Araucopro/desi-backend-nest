@@ -46,6 +46,7 @@ import {
   assertCanReference,
   buildPreparedDispatchGuide,
   buildPreparedDispatchGuideWithoutPrices,
+  computeGuideTotalsFromItems,
   planConsumption,
   toDateOnly,
 } from './dispatch-guides-engine';
@@ -277,9 +278,6 @@ export class DispatchGuidesService implements OnModuleInit {
             destination: prepared.destination,
             transport: prepared.transport,
             items: prepared.items,
-            total: prepared.total,
-            netTotal: prepared.netTotal,
-            taxTotal: prepared.taxTotal,
             store,
             references: dteReferences,
           },
@@ -516,6 +514,18 @@ export class DispatchGuidesService implements OnModuleInit {
       await this.confirmAnulacion(dispatchGuideID, storeID);
       return this.findOne(dispatchGuideID, storeID);
     }
+    const items = (current.items ?? []).map((item) => ({
+      storeProductID: item.storeProductID,
+      variationID: item.variationID,
+      productName: item.productName,
+      sku: item.sku,
+      quantity: item.quantity,
+      unitPrice: Number(item.unitPrice),
+      unitCost: Number(item.unitCost),
+      lineTotal: Number(item.lineTotal),
+      baseTotal: Number(item.lineTotal),
+    }));
+
     const dto = this.dispatchGuideDteMapperService.mapDispatchGuideToDte({
       issueDate: current.issueDate,
       indTraslado: current.indTraslado,
@@ -523,22 +533,15 @@ export class DispatchGuidesService implements OnModuleInit {
       receiver: current.receiver,
       destination: current.destination,
       transport: current.transport,
-      items: (current.items ?? []).map((item) => ({
-        storeProductID: item.storeProductID,
-        variationID: item.variationID,
-        productName: item.productName,
-        sku: item.sku,
-        quantity: item.quantity,
-        unitPrice: Number(item.unitPrice),
-        unitCost: Number(item.unitCost),
-        lineTotal: Number(item.lineTotal),
-        baseTotal: Number(item.lineTotal),
-      })),
-      total: Number(current.total),
-      netTotal: Number(current.netTotal),
-      taxTotal: Number(current.taxTotal),
+      items,
       store: current.store,
     });
+
+    // Los montos persistidos se recalculan desde el detalle antes de reenviar,
+    // de modo que la guía, el payload y el DTE queden matemáticamente cuadrados.
+    const totals = current.includePrices
+      ? computeGuideTotalsFromItems(items)
+      : { netTotal: 0, taxTotal: 0, total: 0 };
 
     await this.runInTransaction(async (manager) => {
       const guide = await loadDispatchGuideForUpdate(
@@ -547,6 +550,9 @@ export class DispatchGuidesService implements OnModuleInit {
         storeID,
       );
       guide.payloadRaw = dto as unknown as Record<string, unknown>;
+      guide.netTotal = totals.netTotal;
+      guide.taxTotal = totals.taxTotal;
+      guide.total = totals.total;
       await manager.save(guide);
     });
 

@@ -4,6 +4,8 @@ import {
   assertCanConfirmAnulacion,
   buildPreparedDispatchGuide,
   buildPreparedDispatchGuideWithoutPrices,
+  computeGuideTotalsFromItems,
+  computeLineNetAmounts,
   getRemainingQuantities,
   planConsumption,
   validateDispatchGuideCoverage,
@@ -113,6 +115,46 @@ describe('DispatchGuidesEngine', () => {
       });
     });
 
+    it('cuadra los totales de abajo hacia arriba cuando el neto unitario no es entero (OF-10)', () => {
+      const dto = validDto() as any;
+      dto.items = [{ storeProductID: 'sp-1', quantity: 10 }];
+      const prepared = buildPreparedDispatchGuide(dto, {
+        items: [
+          {
+            storeProductID: 'sp-1',
+            variationID: 'var-1',
+            productID: 'product-1',
+            productName: 'Demoo',
+            sku: '1001',
+            quantity: 10,
+            baseUnitPrice: 1500,
+            unitCost: 500,
+            basePrice: 15000,
+            finalUnitPrice: 1500,
+            lineTotal: 15000,
+            discountsApplied: [],
+            breakdown: [],
+          },
+        ],
+        totals: { subtotal: 15000, discount: 0, total: 15000 },
+        pricingContext: { storeID: 'store-1' },
+      } as any);
+
+      // El bruto comercial se conserva en subtotal/discount.
+      expect(prepared.subtotal).toBe(15000);
+      expect(prepared.discount).toBe(0);
+      expect(prepared.items[0]).toMatchObject({
+        quantity: 10,
+        unitPrice: 1500,
+        lineTotal: 15000,
+      });
+
+      // Los totales netos nacen del detalle: 1261 × 10 = 12610.
+      expect(prepared.netTotal).toBe(12610);
+      expect(prepared.taxTotal).toBe(2396);
+      expect(prepared.total).toBe(15006);
+    });
+
     it('conserva el transporte solo cuando viene', () => {
       const dto = validDto() as any;
       dto.transport = { patente: 'AAAA11', nombreConductor: 'Juan Pérez' };
@@ -136,6 +178,41 @@ describe('DispatchGuidesEngine', () => {
       const prepared = buildPreparedDispatchGuide(dto, pricing() as any);
       expect(prepared.indTraslado).toBe('3');
       expect(prepared.includePrices).toBe(false);
+    });
+  });
+
+  describe('computeLineNetAmounts y computeGuideTotalsFromItems', () => {
+    it('deriva MontoItem de PrcItem × QtyItem para evitar descuadres', () => {
+      const incidente = computeLineNetAmounts(10, 15000);
+      expect(incidente).toEqual({ prcItem: 1261, montoItem: 12610 });
+      expect(incidente.montoItem).toBe(incidente.prcItem * 10);
+
+      expect(computeLineNetAmounts(2, 2380)).toEqual({
+        prcItem: 1000,
+        montoItem: 2000,
+      });
+    });
+
+    it('devuelve ceros cuando no hay cantidad válida', () => {
+      expect(computeLineNetAmounts(0, 15000)).toEqual({
+        prcItem: 0,
+        montoItem: 0,
+      });
+    });
+
+    it('suma neto, IVA y total desde el detalle', () => {
+      expect(
+        computeGuideTotalsFromItems([
+          { quantity: 10, lineTotal: 15000 },
+          { quantity: 2, lineTotal: 2380 },
+        ]),
+      ).toEqual({ netTotal: 14610, taxTotal: 2776, total: 17386 });
+    });
+
+    it('mantiene totales en cero sin precios', () => {
+      expect(
+        computeGuideTotalsFromItems([{ quantity: 2, lineTotal: 0 }]),
+      ).toEqual({ netTotal: 0, taxTotal: 0, total: 0 });
     });
   });
 
