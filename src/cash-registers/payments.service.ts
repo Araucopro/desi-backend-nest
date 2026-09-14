@@ -14,7 +14,7 @@ import { SalePaymentInputDto } from './dto/sale-payment.dto';
 import { QuerySessionPaymentsDto } from './dto/query-session-payments.dto';
 import {
   CashMovement,
-  CashMovementReason,
+  CashMovementReasonCode,
   CashMovementReferenceType,
   CashMovementType,
 } from './entities/cash-movement.entity';
@@ -257,7 +257,7 @@ export class PaymentsService {
           sessionID: resolved.session.sessionID,
           type: CashMovementType.CASH_IN,
           amount: line.amount,
-          reason: CashMovementReason.SALE,
+          reason: CashMovementReasonCode.SALE,
           referenceType: CashMovementReferenceType.SALE,
           referenceID: options.saleID,
           description: `Cobro en efectivo (${line.method.name}) de la venta ${options.saleID}`,

@@ -34,6 +34,31 @@ export function resolveActingUserId(
 }
 
 /**
+ * Roles con facultad de aprobación dentro de caja: registrar movimientos con
+ * `requiresApproval = true` y rechazar un arqueo en curso. Los tokens MASTER
+ * impersonando un tenant actúan como supervisores.
+ */
+export const CASH_APPROVAL_ROLES: readonly UserRole[] = [
+  UserRole.ADMIN,
+  UserRole.STORE_MANAGER,
+];
+
+export function isCashApprover(user: JwtPayload | MasterJwtPayload): boolean {
+  if (user.type === 'master') return true;
+
+  return CASH_APPROVAL_ROLES.includes(user.role);
+}
+
+export function assertCashApprover(
+  user: JwtPayload | MasterJwtPayload,
+  message: string,
+): void {
+  if (!isCashApprover(user)) {
+    throw new ForbiddenException(message);
+  }
+}
+
+/**
  * Valida que el usuario pueda operar sobre la tienda de la caja. Usuarios
  * MASTER y ADMIN del tenant acceden siempre; el resto requiere `UserStore`.
  */
@@ -136,12 +161,14 @@ export type SessionCashTotals = {
   cashIn: number;
   cashOut: number;
   net: number;
+  movementCount: number;
 };
 
 /**
  * Suma los movimientos `POSTED` de una sesión: las anulaciones se compensan
  * con su contra-movimiento, por lo que el saldo esperado siempre se deriva de
- * movimientos vigentes.
+ * movimientos vigentes. Devuelve además el conteo de movimientos, usado como
+ * fotografía en el arqueo de cierre.
  */
 export async function sumSessionCashMovements(
   manager: EntityManager,
@@ -162,6 +189,7 @@ export async function sumSessionCashMovements(
       `COALESCE(SUM(CASE WHEN movement.type = :cashOut THEN movement.amount ELSE 0 END), 0)`,
       'cashOut',
     )
+    .addSelect(`COUNT(*)`, 'movementCount')
     .where('movement.sessionID = :sessionID', { sessionID })
     .andWhere('movement.status = :posted', {
       posted: CashMovementStatus.POSTED,
@@ -170,7 +198,12 @@ export async function sumSessionCashMovements(
       cashIn: CashMovementType.CASH_IN,
       cashOut: CashMovementType.CASH_OUT,
     })
-    .getRawOne<{ net: string; cashIn: string; cashOut: string }>();
+    .getRawOne<{
+      net: string;
+      cashIn: string;
+      cashOut: string;
+      movementCount: string;
+    }>();
 
   const cashIn = toMoney(Number(raw?.cashIn ?? 0));
   const cashOut = toMoney(Number(raw?.cashOut ?? 0));
@@ -179,5 +212,6 @@ export async function sumSessionCashMovements(
     cashIn,
     cashOut,
     net: toMoney(cashIn - cashOut),
+    movementCount: Number(raw?.movementCount ?? 0),
   };
 }

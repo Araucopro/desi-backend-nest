@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Optional,
@@ -18,21 +19,22 @@ import {
   findCashRegisterOrFail,
   findOpenSessionOrFail,
   findSessionOrFail,
+  isCashApprover,
   resolveActingUserId,
   sumSessionCashMovements,
   toMoney,
   type SessionCashTotals,
 } from './cash-registers.helpers';
+import { CashMovementReasonsService } from './cash-movement-reasons.service';
 import { CreateCashMovementDto } from './dto/create-cash-movement.dto';
 import { QueryCashMovementsDto } from './dto/query-cash-movements.dto';
 import { VoidCashMovementDto } from './dto/void-cash-movement.dto';
 import {
   CashMovement,
-  CashMovementReason,
   CashMovementReferenceType,
   CashMovementStatus,
   CashMovementType,
-  MANUAL_CASH_MOVEMENT_REASONS,
+  RESERVED_SYSTEM_CASH_MOVEMENT_REASONS,
 } from './entities/cash-movement.entity';
 
 export type SystemCashMovementInput = {
@@ -40,7 +42,8 @@ export type SystemCashMovementInput = {
   sessionID: string;
   type: CashMovementType;
   amount: number;
-  reason: CashMovementReason;
+  /** Código de razón: los módulos satélite usan `CashMovementReasonCode`. */
+  reason: string;
   referenceType: CashMovementReferenceType;
   referenceID: string | null;
   description?: string | null;
@@ -58,6 +61,7 @@ export class CashMovementsService {
     @InjectRepository(CashMovement)
     private readonly cashMovementRepository: Repository<CashMovement>,
     private readonly userstoresService: UserstoresService,
+    private readonly movementReasonsService: CashMovementReasonsService,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
@@ -163,10 +167,11 @@ export class CashMovementsService {
     user: JwtPayload | MasterJwtPayload,
   ): Promise<CashMovement> {
     const tenantID = this.getEffectiveTenantId();
+    const reasonCode = dto.reason.trim().toUpperCase();
 
-    if (!MANUAL_CASH_MOVEMENT_REASONS.includes(dto.reason)) {
+    if (RESERVED_SYSTEM_CASH_MOVEMENT_REASONS.includes(reasonCode)) {
       throw new BadRequestException(
-        `La razón "${dto.reason}" no puede registrarse manualmente; se genera desde su módulo de origen`,
+        `La razón "${reasonCode}" no puede registrarse manualmente; se genera desde su módulo de origen`,
       );
     }
 
@@ -192,12 +197,26 @@ export class CashMovementsService {
         );
       }
 
+      // Catálogo configurable del tenant: valida vigencia, sentido y
+      // aprobación de supervisor (flag `requiresApproval`).
+      const reason = await this.movementReasonsService.getActiveByCodeOrFail(
+        manager,
+        tenantID,
+        reasonCode,
+        dto.type,
+      );
+      if (reason.requiresApproval && !isCashApprover(user)) {
+        throw new ForbiddenException(
+          `La razón "${reason.name}" requiere aprobación de un supervisor (administrador, jefe de tienda o MASTER)`,
+        );
+      }
+
       return this.recordSystemMovement(manager, {
         tenantID,
         sessionID: session.sessionID,
         type: dto.type,
         amount: dto.amount,
-        reason: dto.reason,
+        reason: reason.code,
         referenceType: CashMovementReferenceType.MANUAL,
         referenceID: null,
         description: dto.description ?? null,

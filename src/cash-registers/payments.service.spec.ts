@@ -11,7 +11,7 @@ import {
   CashRegisterSessionStatus,
 } from './entities/cash-register-session.entity';
 import {
-  CashMovementReason,
+  CashMovementReasonCode,
   CashMovementReferenceType,
   CashMovementType,
 } from './entities/cash-movement.entity';
@@ -300,7 +300,7 @@ describe('PaymentsService (Hito 2)', () => {
       expect(result.cashMovements[0]).toMatchObject({
         type: CashMovementType.CASH_IN,
         amount: 700,
-        reason: CashMovementReason.SALE,
+        reason: CashMovementReasonCode.SALE,
         referenceType: CashMovementReferenceType.SALE,
         referenceID: mockSaleID,
         createdByUserID: mockUserID,

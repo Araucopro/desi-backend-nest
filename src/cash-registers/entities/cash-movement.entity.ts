@@ -22,11 +22,12 @@ export enum CashMovementStatus {
 }
 
 /**
- * Razones de movimiento. En el Hito 3 pasarán a ser un catálogo configurable
- * (`CashMovementReason`) con flag `requiresApproval`; por ahora se validan
- * contra este enum y se persisten como `varchar` para facilitar esa migración.
+ * Códigos de razón conocidos por el dominio. Desde el Hito 3 el catálogo
+ * configurable por tenant vive en la entidad `CashMovementReason`
+ * (`requiresApproval`, `active`, sentido del movimiento); este enum solo
+ * nombra los códigos estándar que los módulos satélite necesitan.
  */
-export enum CashMovementReason {
+export enum CashMovementReasonCode {
   SALE = 'SALE',
   REFUND = 'REFUND',
   OPENING_BALANCE = 'OPENING_BALANCE',
@@ -40,18 +41,13 @@ export enum CashMovementReason {
 }
 
 /**
- * Razones que un operador puede registrar manualmente. `SALE` y `REFUND`
- * quedan reservadas a los módulos satélite (`sales`, `returns`), que deben
- * informar `referenceType` + `referenceID` (Regla 5 del dominio de caja).
+ * Códigos reservados a los módulos satélite (`sales`, `returns`): no pueden
+ * registrarse manualmente porque exigen informar `referenceType` +
+ * `referenceID` (Regla 5 del dominio de caja).
  */
-export const MANUAL_CASH_MOVEMENT_REASONS: readonly CashMovementReason[] = [
-  CashMovementReason.CASH_WITHDRAWAL,
-  CashMovementReason.PETTY_CASH,
-  CashMovementReason.SUPPLIER_PAYMENT,
-  CashMovementReason.EXPENSE,
-  CashMovementReason.CASH_ADJUSTMENT,
-  CashMovementReason.CASH_DEPOSIT,
-  CashMovementReason.OTHER,
+export const RESERVED_SYSTEM_CASH_MOVEMENT_REASONS: readonly string[] = [
+  CashMovementReasonCode.SALE,
+  CashMovementReasonCode.REFUND,
 ];
 
 export enum CashMovementReferenceType {
@@ -104,8 +100,13 @@ export class CashMovement {
   })
   status!: CashMovementStatus;
 
+  /**
+   * Código de la razón según el catálogo del tenant (`CashMovementReason.code`).
+   * Se persiste como `varchar` para poder configurar razones nuevas sin
+   * migraciones de base de datos.
+   */
   @Column({ type: 'varchar', length: 50 })
-  reason!: CashMovementReason;
+  reason!: string;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   referenceType?: CashMovementReferenceType | null;

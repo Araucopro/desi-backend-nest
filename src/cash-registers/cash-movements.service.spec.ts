@@ -10,6 +10,7 @@ import { TenantContextService } from '../multitenant/tenant-context.service';
 import { UserstoresService } from '../relations/userstores/userstores.service';
 import { UserRole } from '../users/entities/user.entity';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { CashMovementReasonsService } from './cash-movement-reasons.service';
 import { CashMovementsService } from './cash-movements.service';
 import { CashRegister } from './entities/cash-register.entity';
 import {
@@ -18,7 +19,7 @@ import {
 } from './entities/cash-register-session.entity';
 import {
   CashMovement,
-  CashMovementReason,
+  CashMovementReasonCode,
   CashMovementReferenceType,
   CashMovementStatus,
   CashMovementType,
@@ -88,6 +89,10 @@ describe('CashMovementsService (Hito 2)', () => {
       .mockResolvedValue([{ store: { storeID: mockStoreID } }]),
   };
 
+  const mockCashMovementReasonsService = {
+    getActiveByCodeOrFail: jest.fn(),
+  };
+
   const mockTenantContext = {
     getTenantId: jest.fn().mockReturnValue(mockTenantID),
     transaction: jest.fn((cb: (manager: unknown) => unknown) =>
@@ -110,6 +115,23 @@ describe('CashMovementsService (Hito 2)', () => {
     mockUserstoresService.findStoresByUserId.mockResolvedValue([
       { store: { storeID: mockStoreID } },
     ]);
+    mockCashMovementReasonsService.getActiveByCodeOrFail.mockImplementation(
+      (
+        _manager: unknown,
+        _tenantID: string,
+        code: string,
+        direction: unknown,
+      ) =>
+        Promise.resolve({
+          cashMovementReasonID: 'reason-uuid-7777',
+          tenantID: mockTenantID,
+          code,
+          name: code,
+          type: direction,
+          requiresApproval: false,
+          active: true,
+        }),
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -121,6 +143,10 @@ describe('CashMovementsService (Hito 2)', () => {
         {
           provide: UserstoresService,
           useValue: mockUserstoresService,
+        },
+        {
+          provide: CashMovementReasonsService,
+          useValue: mockCashMovementReasonsService,
         },
         {
           provide: TenantContextService,
@@ -141,7 +167,7 @@ describe('CashMovementsService (Hito 2)', () => {
           {
             type: CashMovementType.CASH_IN,
             amount: 10000,
-            reason: CashMovementReason.SALE,
+            reason: CashMovementReasonCode.SALE,
           },
           mockUser,
         ),
@@ -158,7 +184,7 @@ describe('CashMovementsService (Hito 2)', () => {
           {
             type: CashMovementType.CASH_OUT,
             amount: 10000,
-            reason: CashMovementReason.CASH_WITHDRAWAL,
+            reason: CashMovementReasonCode.CASH_WITHDRAWAL,
           },
           mockUser,
         ),
@@ -177,7 +203,7 @@ describe('CashMovementsService (Hito 2)', () => {
           {
             type: CashMovementType.CASH_OUT,
             amount: 10000,
-            reason: CashMovementReason.CASH_WITHDRAWAL,
+            reason: CashMovementReasonCode.CASH_WITHDRAWAL,
           },
           mockUser,
         ),
@@ -191,7 +217,7 @@ describe('CashMovementsService (Hito 2)', () => {
         {
           type: CashMovementType.CASH_OUT,
           amount: 30000,
-          reason: CashMovementReason.CASH_WITHDRAWAL,
+          reason: CashMovementReasonCode.CASH_WITHDRAWAL,
           description: 'Retiro a bóveda',
         },
         mockUser,
@@ -203,13 +229,101 @@ describe('CashMovementsService (Hito 2)', () => {
         type: CashMovementType.CASH_OUT,
         amount: 30000,
         status: CashMovementStatus.POSTED,
-        reason: CashMovementReason.CASH_WITHDRAWAL,
+        reason: CashMovementReasonCode.CASH_WITHDRAWAL,
         referenceType: CashMovementReferenceType.MANUAL,
         referenceID: null,
         description: 'Retiro a bóveda',
         createdByUserID: mockUserID,
       });
       expect(result.occurredAt).toBeInstanceOf(Date);
+    });
+
+    it('debe rechazar razones que no existen o no están activas en el catálogo (Hito 3)', async () => {
+      mockCashMovementReasonsService.getActiveByCodeOrFail.mockRejectedValue(
+        new BadRequestException(
+          'La razón "CUSTOM_REASON" no existe o no está activa en el catálogo de razones de caja',
+        ),
+      );
+
+      await expect(
+        service.createManualMovement(
+          mockRegisterID,
+          mockSessionID,
+          {
+            type: CashMovementType.CASH_OUT,
+            amount: 10000,
+            reason: 'CUSTOM_REASON',
+          },
+          mockUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('debe exigir supervisor cuando la razón requiere aprobación (Hito 3)', async () => {
+      mockCashMovementReasonsService.getActiveByCodeOrFail.mockResolvedValue({
+        cashMovementReasonID: 'reason-uuid-8888',
+        tenantID: mockTenantID,
+        code: CashMovementReasonCode.CASH_ADJUSTMENT,
+        name: 'Ajuste de caja',
+        type: null,
+        requiresApproval: true,
+        active: true,
+      });
+      const consignadoUser: JwtPayload = {
+        ...mockUser,
+        role: UserRole.CONSIGNADO,
+      };
+
+      await expect(
+        service.createManualMovement(
+          mockRegisterID,
+          mockSessionID,
+          {
+            type: CashMovementType.CASH_IN,
+            amount: 5000,
+            reason: CashMovementReasonCode.CASH_ADJUSTMENT,
+          },
+          consignadoUser,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('debe permitir al supervisor registrar una razón con requiresApproval (Hito 3)', async () => {
+      mockCashMovementReasonsService.getActiveByCodeOrFail.mockResolvedValue({
+        cashMovementReasonID: 'reason-uuid-8888',
+        tenantID: mockTenantID,
+        code: CashMovementReasonCode.CASH_ADJUSTMENT,
+        name: 'Ajuste de caja',
+        type: null,
+        requiresApproval: true,
+        active: true,
+      });
+
+      const result = await service.createManualMovement(
+        mockRegisterID,
+        mockSessionID,
+        {
+          type: CashMovementType.CASH_IN,
+          amount: 5000,
+          reason: CashMovementReasonCode.CASH_ADJUSTMENT,
+        },
+        mockUser,
+      );
+
+      expect(result).toMatchObject({
+        reason: CashMovementReasonCode.CASH_ADJUSTMENT,
+        type: CashMovementType.CASH_IN,
+        amount: 5000,
+        referenceType: CashMovementReferenceType.MANUAL,
+      });
+      expect(
+        mockCashMovementReasonsService.getActiveByCodeOrFail,
+      ).toHaveBeenCalledWith(
+        mockEntityManager,
+        mockTenantID,
+        CashMovementReasonCode.CASH_ADJUSTMENT,
+        CashMovementType.CASH_IN,
+      );
     });
   });
 
@@ -258,7 +372,7 @@ describe('CashMovementsService (Hito 2)', () => {
         type: CashMovementType.CASH_OUT,
         amount: 30000,
         status: CashMovementStatus.POSTED,
-        reason: CashMovementReason.CASH_WITHDRAWAL,
+        reason: CashMovementReasonCode.CASH_WITHDRAWAL,
       };
       mockMovementRepo.findOne.mockResolvedValue(movement);
 

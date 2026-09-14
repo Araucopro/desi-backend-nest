@@ -5,14 +5,12 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Matches,
   MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import {
-  CashMovementReason,
-  CashMovementType,
-} from '../entities/cash-movement.entity';
+import { CashMovementType } from '../entities/cash-movement.entity';
 
 export class CreateCashMovementDto {
   @ApiProperty({
@@ -35,12 +33,18 @@ export class CreateCashMovementDto {
 
   @ApiProperty({
     description:
-      'Razón del movimiento manual. SALE y REFUND quedan reservadas a los módulos de ventas y devoluciones.',
-    enum: CashMovementReason,
-    example: CashMovementReason.CASH_WITHDRAWAL,
+      'Código de la razón del movimiento manual según el catálogo del tenant (se normaliza a mayúsculas). SALE y REFUND quedan reservadas a los módulos de ventas y devoluciones; las razones con requiresApproval exigen supervisor.',
+    example: 'CASH_WITHDRAWAL',
+    maxLength: 50,
   })
-  @IsEnum(CashMovementReason)
-  reason!: CashMovementReason;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(50)
+  @Matches(/^[A-Za-z0-9 _-]+$/, {
+    message:
+      'El código de razón solo admite letras, números, espacios, guiones y guiones bajos',
+  })
+  reason!: string;
 
   @ApiPropertyOptional({
     description: 'Descripción o justificación del movimiento',
