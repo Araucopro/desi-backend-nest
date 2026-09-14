@@ -210,7 +210,7 @@ export class DispatchGuidesService implements OnModuleInit {
             pricingDate: toDateOnly(dto.issueDate ?? new Date()),
           });
           prepared = buildPreparedDispatchGuide(
-            dtoWithResolvedReceiver as CreateDispatchGuideDto,
+            dtoWithResolvedReceiver,
             pricing,
           );
         } else {
@@ -220,7 +220,7 @@ export class DispatchGuidesService implements OnModuleInit {
             dto.items,
           );
           prepared = buildPreparedDispatchGuideWithoutPrices(
-            dtoWithResolvedReceiver as CreateDispatchGuideDto,
+            dtoWithResolvedReceiver,
             resolvedItems,
           );
         }
