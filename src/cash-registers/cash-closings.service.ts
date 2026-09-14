@@ -20,6 +20,7 @@ import {
   findCashRegisterOrFail,
   findOpenSessionOrFail,
   findSessionOrFail,
+  closeSessionOperators,
   resolveActingUserId,
   sumSessionCashMovements,
   toMoney,
@@ -32,6 +33,7 @@ import {
   CashRegisterSession,
   CashRegisterSessionStatus,
 } from './entities/cash-register-session.entity';
+import { CashCount, CashCountStatus } from './entities/cash-count.entity';
 import {
   CashPaymentMethodTotal,
   CashRegisterClosing,
@@ -147,6 +149,17 @@ export class CashClosingsService {
     return toMoney(Number(stored));
   }
 
+  private async findCashCountByStatus(
+    manager: EntityManager,
+    closingID: string,
+    tenantID: string,
+    status: CashCountStatus,
+  ): Promise<CashCount | null> {
+    return manager.getRepository(CashCount).findOne({
+      where: { closingID, tenantID, status },
+    });
+  }
+
   /**
    * Fotografía de conciliación: saldo esperado de efectivo (fondo inicial +
    * movimientos `POSTED`) y cobros `COMPLETED` agrupados por medio de pago. Se
@@ -186,6 +199,59 @@ export class CashClosingsService {
       ),
       paymentMethodTotals,
     };
+  }
+
+  /**
+   * Refresca la fotografía de conciliación y sella el monto contado sobre el
+   * arqueo en curso. No persiste ni cambia el estado del cierre: el llamador
+   * decide el estado final y guarda dentro de su transacción. Lo reutiliza el
+   * arqueo detallado por denominaciones (Hito 4) al completarse.
+   */
+  private async buildCountedClosing(
+    manager: EntityManager,
+    session: CashRegisterSession,
+    closing: CashRegisterClosing,
+    countedCashAmount: number,
+    notes?: string,
+  ): Promise<CashRegisterClosing> {
+    const snapshot = await this.buildSnapshot(manager, session);
+
+    Object.assign(closing, snapshot);
+    closing.countedCashAmount = toMoney(countedCashAmount);
+    closing.cashDifference = toMoney(
+      closing.countedCashAmount - snapshot.expectedCashAmount,
+    );
+    closing.actualTotalAmount = toMoney(
+      closing.countedCashAmount + snapshot.expectedNonCashAmount,
+    );
+    if (notes !== undefined) {
+      closing.notes = notes.trim() || null;
+    }
+
+    return closing;
+  }
+
+  /**
+   * Proyecta un monto contado externo (conteo detallado por denominaciones) al
+   * arqueo en curso y lo persiste. Debe invocarse dentro de una transacción
+   * con el cierre bloqueado.
+   */
+  async applyCountedCashAmount(
+    manager: EntityManager,
+    session: CashRegisterSession,
+    closing: CashRegisterClosing,
+    countedCashAmount: number,
+    notes?: string,
+  ): Promise<CashRegisterClosing> {
+    const updated = await this.buildCountedClosing(
+      manager,
+      session,
+      closing,
+      countedCashAmount,
+      notes,
+    );
+
+    return manager.getRepository(CashRegisterClosing).save(updated);
   }
 
   private async sumSessionPaymentsByMethod(
@@ -320,22 +386,28 @@ export class CashClosingsService {
         session.sessionID,
         tenantID,
       );
-      const snapshot = await this.buildSnapshot(manager, session);
-      const countedCashAmount = toMoney(Number(dto.countedCashAmount));
 
-      Object.assign(closing, snapshot);
-      closing.countedCashAmount = countedCashAmount;
-      closing.cashDifference = toMoney(
-        countedCashAmount - snapshot.expectedCashAmount,
+      // El conteo detallado sellado es la fuente del monto contado: no se
+      // reemplaza con un registro manual para no romper la conciliación.
+      const detailedCount = await this.findCashCountByStatus(
+        manager,
+        closing.closingID,
+        tenantID,
+        CashCountStatus.COMPLETED,
       );
-      closing.actualTotalAmount = toMoney(
-        countedCashAmount + snapshot.expectedNonCashAmount,
-      );
-      if (dto.notes !== undefined) {
-        closing.notes = dto.notes.trim() || null;
+      if (detailedCount) {
+        throw new BadRequestException(
+          `El monto contado proviene del conteo detallado por denominaciones (ID: ${detailedCount.cashCountID}) y no puede reemplazarse manualmente; rechace el arqueo para rehacerlo`,
+        );
       }
 
-      return manager.getRepository(CashRegisterClosing).save(closing);
+      return this.applyCountedCashAmount(
+        manager,
+        session,
+        closing,
+        Number(dto.countedCashAmount),
+        dto.notes,
+      );
     });
   }
 
@@ -366,8 +438,30 @@ export class CashClosingsService {
         session.sessionID,
         tenantID,
       );
-      const snapshot = await this.buildSnapshot(manager, session);
-      const countedCashAmount = this.resolveCountedCashAmount(dto, closing);
+
+      const draftCount = await this.findCashCountByStatus(
+        manager,
+        closing.closingID,
+        tenantID,
+        CashCountStatus.DRAFT,
+      );
+      if (draftCount) {
+        throw new BadRequestException(
+          `El arqueo tiene un conteo detallado en curso (ID: ${draftCount.cashCountID}). Complételo o cancélelo antes de cerrar la caja`,
+        );
+      }
+
+      // El conteo detallado por denominaciones es la fuente del monto contado
+      // cuando existe: evita que el cierre selle un valor distinto al arqueo.
+      const detailedCount = await this.findCashCountByStatus(
+        manager,
+        closing.closingID,
+        tenantID,
+        CashCountStatus.COMPLETED,
+      );
+      const countedCashAmount = detailedCount
+        ? toMoney(Number(detailedCount.totalAmount))
+        : this.resolveCountedCashAmount(dto, closing);
 
       if (countedCashAmount === null) {
         throw new BadRequestException(
@@ -375,27 +469,33 @@ export class CashClosingsService {
         );
       }
 
-      const completedAt = new Date();
-      Object.assign(closing, snapshot);
-      closing.countedCashAmount = countedCashAmount;
-      closing.cashDifference = toMoney(
-        countedCashAmount - snapshot.expectedCashAmount,
-      );
-      closing.actualTotalAmount = toMoney(
-        countedCashAmount + snapshot.expectedNonCashAmount,
-      );
-      if (dto.notes !== undefined) {
-        closing.notes = dto.notes.trim() || null;
+      if (
+        detailedCount &&
+        dto.countedCashAmount !== undefined &&
+        toMoney(Number(dto.countedCashAmount)) !== countedCashAmount
+      ) {
+        throw new BadRequestException(
+          `El monto contado proviene del conteo detallado por denominaciones (${countedCashAmount}); no envíe un countedCashAmount distinto`,
+        );
       }
-      closing.status = CashRegisterClosingStatus.COMPLETED;
-      closing.completedByUserID = userId;
-      closing.completedAt = completedAt;
+
+      const completedAt = new Date();
+      const updatedClosing = await this.buildCountedClosing(
+        manager,
+        session,
+        closing,
+        countedCashAmount,
+        dto.notes,
+      );
+      updatedClosing.status = CashRegisterClosingStatus.COMPLETED;
+      updatedClosing.completedByUserID = userId;
+      updatedClosing.completedAt = completedAt;
 
       const savedClosing = await manager
         .getRepository(CashRegisterClosing)
-        .save(closing);
+        .save(updatedClosing);
 
-      session.expectedCashBalance = snapshot.expectedCashAmount;
+      session.expectedCashBalance = savedClosing.expectedCashAmount;
       session.countedCashBalance = countedCashAmount;
       session.cashDifference = savedClosing.cashDifference;
       session.closedByUserID = userId;
@@ -403,6 +503,9 @@ export class CashClosingsService {
       session.status = CashRegisterSessionStatus.CLOSED;
       session.closingNotes = savedClosing.notes ?? null;
       await manager.getRepository(CashRegisterSession).save(session);
+
+      // Ninguna sesión cerrada puede quedar con operadores "en turno".
+      await closeSessionOperators(manager, session.sessionID, completedAt);
 
       return savedClosing;
     });

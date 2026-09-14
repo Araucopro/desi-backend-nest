@@ -16,6 +16,7 @@ import {
   CashRegisterSessionStatus,
 } from './entities/cash-register-session.entity';
 import { CashMovement } from './entities/cash-movement.entity';
+import { CashRegisterSessionUser } from './entities/cash-register-session-user.entity';
 import { Store } from '../stores/entities/store.entity';
 import { UserstoresService } from '../relations/userstores/userstores.service';
 import { TenantContextService } from '../multitenant/tenant-context.service';
@@ -108,6 +109,28 @@ describe('CashRegistersService (Hito 1)', () => {
     findOne: jest.fn(),
   };
 
+  const mockSessionUserQueryBuilder: Record<string, jest.Mock> = {};
+  for (const method of ['update', 'set', 'where', 'andWhere']) {
+    mockSessionUserQueryBuilder[method] = jest
+      .fn()
+      .mockReturnValue(mockSessionUserQueryBuilder);
+  }
+  mockSessionUserQueryBuilder.execute = jest
+    .fn()
+    .mockResolvedValue({ affected: 1 });
+
+  const mockSessionUserRepo: {
+    findOne: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  } = {
+    findOne: jest.fn(),
+    create: jest.fn((values: object) => ({ ...values })),
+    save: jest.fn((entity: unknown) => Promise.resolve(entity)),
+    createQueryBuilder: jest.fn(() => mockSessionUserQueryBuilder),
+  };
+
   const mockUserstoresService = {
     findStoresByUserId: jest.fn(),
   };
@@ -124,6 +147,7 @@ describe('CashRegistersService (Hito 1)', () => {
       if (entity === CashRegister) return mockCashRegisterRepo;
       if (entity === CashRegisterSession) return mockSessionRepo;
       if (entity === CashMovement) return mockCashMovementRepo;
+      if (entity === CashRegisterSessionUser) return mockSessionUserRepo;
       if (entity === Store) return mockStoreRepo;
       return null;
     }),

@@ -30,7 +30,9 @@ import {
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
 import {
+  attachSessionOperator,
   assertUserCanAccessStore,
+  closeSessionOperators,
   sumSessionCashMovements,
   toMoney,
 } from './cash-registers.helpers';
@@ -266,8 +268,11 @@ export class CashRegistersService {
         openingNotes: dto.openingNotes?.trim() ?? null,
       });
 
+      let savedSession: CashRegisterSession;
       try {
-        return await manager.getRepository(CashRegisterSession).save(session);
+        savedSession = await manager
+          .getRepository(CashRegisterSession)
+          .save(session);
       } catch (error) {
         if (isUniqueViolation(error)) {
           throw new ConflictException(
@@ -276,6 +281,18 @@ export class CashRegistersService {
         }
         throw error;
       }
+
+      // Hito 4: la apertura deja al cajero en turno para que la sesión tenga
+      // trazabilidad de operadores desde su primer minuto.
+      await attachSessionOperator(manager, {
+        tenantID,
+        sessionID: savedSession.sessionID,
+        userID: userId,
+        assignedByUserID: userId,
+        enteredAt: savedSession.openedAt,
+      });
+
+      return savedSession;
     });
   }
 
@@ -347,16 +364,24 @@ export class CashRegistersService {
       );
       const countedCashBalance = toMoney(Number(dto.countedCashBalance));
       const cashDifference = toMoney(countedCashBalance - expectedCashBalance);
+      const closedAt = new Date();
 
       session.expectedCashBalance = expectedCashBalance;
       session.countedCashBalance = countedCashBalance;
       session.cashDifference = cashDifference;
       session.closedByUserID = userId;
-      session.closedAt = new Date();
+      session.closedAt = closedAt;
       session.status = CashRegisterSessionStatus.CLOSED;
       session.closingNotes = dto.closingNotes?.trim() ?? null;
 
-      return await manager.getRepository(CashRegisterSession).save(session);
+      const savedSession = await manager
+        .getRepository(CashRegisterSession)
+        .save(session);
+
+      // Hito 4: el cierre directo también cierra los turnos de los operadores.
+      await closeSessionOperators(manager, savedSession.sessionID, closedAt);
+
+      return savedSession;
     });
   }
 

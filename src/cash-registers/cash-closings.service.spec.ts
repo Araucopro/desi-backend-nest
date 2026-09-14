@@ -21,6 +21,8 @@ import {
   CashRegisterClosingStatus,
 } from './entities/cash-register-closing.entity';
 import { CashMovement } from './entities/cash-movement.entity';
+import { CashCount } from './entities/cash-count.entity';
+import { CashRegisterSessionUser } from './entities/cash-register-session-user.entity';
 import { Payment, PaymentStatus } from './entities/payment.entity';
 
 describe('CashClosingsService (Hito 3)', () => {
@@ -118,6 +120,24 @@ describe('CashClosingsService (Hito 3)', () => {
     createQueryBuilder: jest.fn(() => mockPaymentQueryBuilder),
   };
 
+  const mockCashCountRepo: { findOne: jest.Mock } = {
+    findOne: jest.fn(),
+  };
+
+  const mockSessionUserQueryBuilder: Record<string, jest.Mock> = {};
+  for (const method of ['update', 'set', 'where', 'andWhere']) {
+    mockSessionUserQueryBuilder[method] = jest
+      .fn()
+      .mockReturnValue(mockSessionUserQueryBuilder);
+  }
+  mockSessionUserQueryBuilder.execute = jest
+    .fn()
+    .mockResolvedValue({ affected: 1 });
+
+  const mockSessionUserRepo: { createQueryBuilder: jest.Mock } = {
+    createQueryBuilder: jest.fn(() => mockSessionUserQueryBuilder),
+  };
+
   const mockEntityManager: { getRepository: jest.Mock } = {
     getRepository: jest.fn((entity: unknown) => {
       if (entity === CashRegister) return mockRegisterRepo;
@@ -125,6 +145,8 @@ describe('CashClosingsService (Hito 3)', () => {
       if (entity === CashRegisterClosing) return mockClosingRepo;
       if (entity === CashMovement) return mockMovementRepo;
       if (entity === Payment) return mockPaymentRepo;
+      if (entity === CashCount) return mockCashCountRepo;
+      if (entity === CashRegisterSessionUser) return mockSessionUserRepo;
       return null;
     }),
   };
@@ -181,6 +203,7 @@ describe('CashClosingsService (Hito 3)', () => {
       { store: { storeID: mockStoreID } },
     ]);
     mockClosingRepo.findOne.mockResolvedValue(null);
+    mockCashCountRepo.findOne.mockResolvedValue(null);
     mockClosingRepo.save.mockImplementation((entity: unknown) =>
       Promise.resolve(entity),
     );

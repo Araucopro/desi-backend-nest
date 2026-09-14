@@ -3,13 +3,17 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { EntityManager, FindOptionsWhere } from 'typeorm';
+import { EntityManager, FindOptionsWhere, IsNull } from 'typeorm';
 import {
   JwtPayload,
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
 import { UserstoresService } from '../relations/userstores/userstores.service';
 import { UserRole } from '../users/entities/user.entity';
+import {
+  CashRegisterSessionUser,
+  CashRegisterSessionUserRole,
+} from './entities/cash-register-session-user.entity';
 import {
   CashMovement,
   CashMovementStatus,
@@ -214,4 +218,68 @@ export async function sumSessionCashMovements(
     net: toMoney(cashIn - cashOut),
     movementCount: Number(raw?.movementCount ?? 0),
   };
+}
+
+/**
+ * Registra a un usuario como operador activo de la sesión (Hito 4). Se usa al
+ * abrir la sesión para dejar trazabilidad inmediata de quién atiende la caja;
+ * si el operador ya tiene un registro activo se devuelve el existente para
+ * mantener la operación idempotente.
+ */
+export async function attachSessionOperator(
+  manager: EntityManager,
+  params: {
+    tenantID: string;
+    sessionID: string;
+    userID: string;
+    assignedByUserID: string;
+    enteredAt: Date;
+    role?: CashRegisterSessionUserRole;
+    notes?: string | null;
+  },
+): Promise<CashRegisterSessionUser> {
+  const repository = manager.getRepository(CashRegisterSessionUser);
+
+  const existing = await repository.findOne({
+    where: {
+      tenantID: params.tenantID,
+      sessionID: params.sessionID,
+      userID: params.userID,
+      leftAt: IsNull(),
+    },
+  });
+  if (existing) return existing;
+
+  return repository.save(
+    repository.create({
+      tenantID: params.tenantID,
+      sessionID: params.sessionID,
+      userID: params.userID,
+      assignedByUserID: params.assignedByUserID,
+      role: params.role ?? CashRegisterSessionUserRole.OPERATOR,
+      enteredAt: params.enteredAt,
+      leftAt: null,
+      notes: params.notes ?? null,
+    }),
+  );
+}
+
+/**
+ * Cierra el turno de todos los operadores activos de la sesión (Hito 4). Se
+ * invoca al sellar la sesión (`CLOSED`) para que ninguna sesión cerrada quede
+ * con operadores marcados como "en turno".
+ */
+export async function closeSessionOperators(
+  manager: EntityManager,
+  sessionID: string,
+  leftAt: Date,
+): Promise<void> {
+  await manager
+    .getRepository(CashRegisterSessionUser)
+    .createQueryBuilder()
+    .update(CashRegisterSessionUser)
+    .set({ leftAt, updatedAt: new Date() })
+    .where('"sessionID" = :sessionID', { sessionID })
+    .andWhere('"leftAt" IS NULL')
+    .execute();
 }
