@@ -406,6 +406,14 @@ export class SaleDto {
   dteDocumentID!: string | null;
 
   @ApiProperty({
+    description:
+      'ID de la sesión de caja en la que se cobró la venta, si existe',
+    example: 'session-uuid',
+    nullable: true,
+  })
+  cashRegisterSessionID!: string | null;
+
+  @ApiProperty({
     description: 'Clave de idempotencia usada para crear la venta',
     nullable: true,
   })

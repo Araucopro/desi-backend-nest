@@ -12,6 +12,7 @@ import {
 } from 'typeorm';
 import { Store } from '../../stores/entities/store.entity';
 import { DteDocument } from '../../dte/entities/dte-document.entity';
+import { CashRegisterSession } from '../../cash-registers/entities/cash-register-session.entity';
 import { SaleItem } from './sale-item.entity';
 import { ColumnNumericTransformer } from '../../common/transformers/numeric.transformer';
 
@@ -51,6 +52,7 @@ export type SaleReceiver = {
 @Index(['tenantID', 'status'])
 @Index(['tenantID', 'saleType'])
 @Index(['tenantID', 'clientID'])
+@Index(['tenantID', 'cashRegisterSessionID'])
 export class Sale {
   @PrimaryGeneratedColumn('uuid')
   saleID!: string;
@@ -99,6 +101,20 @@ export class Sale {
   @ManyToOne(() => Client, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'clientID' })
   client!: Client | null;
+
+  /**
+   * Sesión de caja en la que se cobró la venta. Nullable para compatibilidad
+   * progresiva: las ventas fuera de POS o previas al Hito 2 no la informan.
+   */
+  @Column({ type: 'uuid', nullable: true })
+  cashRegisterSessionID!: string | null;
+
+  @ManyToOne(() => CashRegisterSession, {
+    onDelete: 'SET NULL',
+    nullable: true,
+  })
+  @JoinColumn({ name: 'cashRegisterSessionID' })
+  cashRegisterSession?: CashRegisterSession | null;
 
   @Column('decimal', {
     precision: 12,

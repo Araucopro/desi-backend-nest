@@ -866,4 +866,81 @@ describe('SalesService', () => {
       );
     });
   });
+
+  describe('cash register payments (Hito 2)', () => {
+    function createServiceWithPayments(paymentsService: unknown) {
+      return new SalesService(
+        {} as any,
+        {} as any,
+        {} as any,
+        dataSource as any,
+        pricingService as any,
+        dteService as any,
+        dteMapperService as any,
+        financialMovementsService as any,
+        new InventoryService(undefined as any),
+        undefined as any,
+        undefined as any,
+        undefined as any,
+        undefined as any,
+        paymentsService as any,
+      );
+    }
+
+    it('cobra la venta contra la sesión de caja informada', async () => {
+      const paymentsService = {
+        resolveSalePayments: jest.fn().mockResolvedValue({
+          tenantID: 'tenant-1',
+          session: { sessionID: 'session-1' },
+          lines: [],
+          total: 1190,
+        }),
+        persistSalePayments: jest.fn().mockResolvedValue({
+          payments: [],
+          cashMovements: [],
+        }),
+      };
+      const service = createServiceWithPayments(paymentsService);
+
+      const dto = {
+        ...notaVentaDto(),
+        cashRegisterID: 'register-1',
+        payments: [{ paymentMethodID: 'method-1', amount: 1190 }],
+      };
+
+      await service.create('store-1', undefined, dto as any, 'user-1');
+
+      expect(paymentsService.resolveSalePayments).toHaveBeenCalledWith(
+        ctx.manager,
+        expect.objectContaining({
+          storeID: 'store-1',
+          saleTotal: 1190,
+          cashRegisterID: 'register-1',
+          lock: true,
+        }),
+      );
+      expect(paymentsService.persistSalePayments).toHaveBeenCalledWith(
+        ctx.manager,
+        expect.objectContaining({ session: { sessionID: 'session-1' } }),
+        { saleID: expect.any(String), createdByUserID: 'user-1' },
+      );
+      expect(ctx.sale()).toMatchObject({
+        cashRegisterSessionID: 'session-1',
+      });
+    });
+
+    it('no consulta caja cuando la venta no informa sesión ni pagos', async () => {
+      const paymentsService = {
+        resolveSalePayments: jest.fn(),
+        persistSalePayments: jest.fn(),
+      };
+      const service = createServiceWithPayments(paymentsService);
+
+      await service.create('store-1', undefined, notaVentaDto() as any);
+
+      expect(paymentsService.resolveSalePayments).not.toHaveBeenCalled();
+      expect(paymentsService.persistSalePayments).not.toHaveBeenCalled();
+      expect(ctx.sale()).toMatchObject({ cashRegisterSessionID: null });
+    });
+  });
 });

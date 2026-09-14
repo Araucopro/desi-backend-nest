@@ -15,6 +15,7 @@ import {
   CashRegisterSession,
   CashRegisterSessionStatus,
 } from './entities/cash-register-session.entity';
+import { CashMovement } from './entities/cash-movement.entity';
 import { Store } from '../stores/entities/store.entity';
 import { UserstoresService } from '../relations/userstores/userstores.service';
 import { TenantContextService } from '../multitenant/tenant-context.service';
@@ -45,17 +46,31 @@ describe('CashRegistersService (Hito 1)', () => {
     role: UserRole.ADMIN,
   };
 
-  const mockCashRegisterRepo = {
+  const mockCashRegisterRepo: {
+    find: jest.Mock;
+    findOne: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+    manager: { transaction: jest.Mock };
+  } = {
     find: jest.fn(),
     findOne: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
     manager: {
-      transaction: jest.fn((cb) => cb(mockEntityManager)),
+      transaction: jest.fn((cb: (manager: unknown) => unknown) =>
+        cb(mockEntityManager),
+      ),
     },
   };
 
-  const mockSessionRepo = {
+  const mockSessionRepo: {
+    find: jest.Mock;
+    findOne: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  } = {
     find: jest.fn(),
     findOne: jest.fn(),
     create: jest.fn(),
@@ -63,7 +78,33 @@ describe('CashRegistersService (Hito 1)', () => {
     createQueryBuilder: jest.fn(),
   };
 
-  const mockStoreRepo = {
+  const mockCashMovementQueryBuilder: Record<string, jest.Mock> = {};
+  for (const method of [
+    'select',
+    'addSelect',
+    'where',
+    'andWhere',
+    'setParameters',
+  ]) {
+    mockCashMovementQueryBuilder[method] = jest
+      .fn()
+      .mockReturnValue(mockCashMovementQueryBuilder);
+  }
+  mockCashMovementQueryBuilder.getRawOne = jest.fn();
+
+  const mockCashMovementRepo: {
+    create: jest.Mock;
+    save: jest.Mock;
+    findOne: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  } = {
+    create: jest.fn(),
+    save: jest.fn(),
+    findOne: jest.fn(),
+    createQueryBuilder: jest.fn(() => mockCashMovementQueryBuilder),
+  };
+
+  const mockStoreRepo: { findOne: jest.Mock } = {
     findOne: jest.fn(),
   };
 
@@ -73,13 +114,16 @@ describe('CashRegistersService (Hito 1)', () => {
 
   const mockTenantContext = {
     getTenantId: jest.fn().mockReturnValue(mockTenantID),
-    transaction: jest.fn((cb) => cb(mockEntityManager)),
+    transaction: jest.fn((cb: (manager: unknown) => unknown) =>
+      cb(mockEntityManager),
+    ),
   };
 
-  const mockEntityManager = {
-    getRepository: jest.fn((entity) => {
+  const mockEntityManager: { getRepository: jest.Mock } = {
+    getRepository: jest.fn((entity: unknown) => {
       if (entity === CashRegister) return mockCashRegisterRepo;
       if (entity === CashRegisterSession) return mockSessionRepo;
+      if (entity === CashMovement) return mockCashMovementRepo;
       if (entity === Store) return mockStoreRepo;
       return null;
     }),
@@ -87,6 +131,11 @@ describe('CashRegistersService (Hito 1)', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockCashMovementQueryBuilder.getRawOne.mockResolvedValue({
+      net: '0',
+      cashIn: '0',
+      cashOut: '0',
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -318,7 +367,7 @@ describe('CashRegistersService (Hito 1)', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('debe cerrar la sesión, calcular la diferencia y sellar el estado en CLOSED', async () => {
+    it('debe cerrar la sesión con saldo esperado igual al fondo inicial cuando no hay movimientos', async () => {
       mockCashRegisterRepo.findOne.mockResolvedValue({
         cashRegisterID: mockRegisterID,
         storeID: mockStoreID,
@@ -351,6 +400,44 @@ describe('CashRegistersService (Hito 1)', () => {
       expect(result.closedByUserID).toBe(mockUserID);
       expect(result.closingNotes).toBe(closeDto.closingNotes);
       expect(result.closedAt).toBeInstanceOf(Date);
+    });
+
+    it('debe calcular el saldo esperado sumando cobros y retiros de la sesión (Hito 2)', async () => {
+      mockCashRegisterRepo.findOne.mockResolvedValue({
+        cashRegisterID: mockRegisterID,
+        storeID: mockStoreID,
+      });
+      mockUserstoresService.findStoresByUserId.mockResolvedValue([
+        { store: { storeID: mockStoreID } },
+      ]);
+      mockSessionRepo.findOne.mockResolvedValue({
+        sessionID: mockSessionID,
+        cashRegisterID: mockRegisterID,
+        openingBalance: 50000,
+        status: CashRegisterSessionStatus.OPEN,
+      });
+      mockSessionRepo.save.mockImplementation((session) =>
+        Promise.resolve(session),
+      );
+      // 50000 de fondo + 15000 de cobros en efectivo = 65000 esperado
+      mockCashMovementQueryBuilder.getRawOne.mockResolvedValue({
+        net: '15000',
+        cashIn: '15000',
+        cashOut: '0',
+      });
+
+      const result = await service.closeSession(
+        mockRegisterID,
+        { countedCashBalance: 48000 },
+        mockUser,
+      );
+
+      expect(result.expectedCashBalance).toBe(65000);
+      expect(result.cashDifference).toBe(-17000);
+      expect(mockCashMovementQueryBuilder.andWhere).toHaveBeenCalledWith(
+        'movement.status = :posted',
+        expect.anything(),
+      );
     });
   });
 });

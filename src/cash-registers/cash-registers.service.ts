@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
   Optional,
@@ -26,11 +25,15 @@ import { CloseCashSessionDto } from './dto/close-cash-session.dto';
 import { QueryCashRegistersDto } from './dto/query-cash-registers.dto';
 import { QueryCashSessionsDto } from './dto/query-cash-sessions.dto';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
-import { UserRole } from '../users/entities/user.entity';
 import {
   JwtPayload,
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
+import {
+  assertUserCanAccessStore,
+  sumSessionCashMovements,
+  toMoney,
+} from './cash-registers.helpers';
 
 @Injectable()
 export class CashRegistersService {
@@ -65,23 +68,7 @@ export class CashRegistersService {
     user: JwtPayload | MasterJwtPayload,
     storeID: string,
   ): Promise<void> {
-    if (user.type === 'master') return;
-
-    const tenantUser = user;
-    if (tenantUser.role === UserRole.ADMIN) return;
-
-    const assignedStores = await this.userstoresService.findStoresByUserId(
-      tenantUser.userId || tenantUser.id,
-    );
-    const hasAccess = assignedStores.some(
-      (userStore) => userStore.store?.storeID === storeID,
-    );
-
-    if (!hasAccess) {
-      throw new ForbiddenException(
-        'El usuario no tiene asignada la tienda correspondiente a esta caja',
-      );
-    }
+    return assertUserCanAccessStore(this.userstoresService, user, storeID);
   }
 
   async create(dto: CreateCashRegisterDto): Promise<CashRegister> {
@@ -342,6 +329,8 @@ export class CashRegistersService {
           tenantID,
           status: CashRegisterSessionStatus.OPEN,
         },
+        // Serializa el cierre contra cobros y movimientos concurrentes.
+        lock: { mode: 'pessimistic_write' },
       });
 
       if (!session) {
@@ -350,10 +339,14 @@ export class CashRegistersService {
         );
       }
 
-      // En Hito 1: expectedCashBalance inicial equivale a openingBalance (en Hito 2 se sumarán CashMovements)
-      const expectedCashBalance = Number(session.openingBalance);
-      const countedCashBalance = Number(dto.countedCashBalance);
-      const cashDifference = countedCashBalance - expectedCashBalance;
+      // Saldo esperado = fondo inicial + entradas - salidas registradas
+      // (los cobros en efectivo entran como CashMovement CASH_IN).
+      const totals = await sumSessionCashMovements(manager, session.sessionID);
+      const expectedCashBalance = toMoney(
+        Number(session.openingBalance) + totals.net,
+      );
+      const countedCashBalance = toMoney(Number(dto.countedCashBalance));
+      const cashDifference = toMoney(countedCashBalance - expectedCashBalance);
 
       session.expectedCashBalance = expectedCashBalance;
       session.countedCashBalance = countedCashBalance;
