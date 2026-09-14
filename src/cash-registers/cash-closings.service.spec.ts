@@ -22,6 +22,7 @@ import {
 } from './entities/cash-register-closing.entity';
 import { CashMovement } from './entities/cash-movement.entity';
 import { CashCount } from './entities/cash-count.entity';
+import { CashTransfer } from './entities/cash-transfer.entity';
 import { CashRegisterSessionUser } from './entities/cash-register-session-user.entity';
 import { Payment, PaymentStatus } from './entities/payment.entity';
 
@@ -124,6 +125,10 @@ describe('CashClosingsService (Hito 3)', () => {
     findOne: jest.fn(),
   };
 
+  const mockTransferRepo: { count: jest.Mock } = {
+    count: jest.fn().mockResolvedValue(0),
+  };
+
   const mockSessionUserQueryBuilder: Record<string, jest.Mock> = {};
   for (const method of ['update', 'set', 'where', 'andWhere']) {
     mockSessionUserQueryBuilder[method] = jest
@@ -146,6 +151,7 @@ describe('CashClosingsService (Hito 3)', () => {
       if (entity === CashMovement) return mockMovementRepo;
       if (entity === Payment) return mockPaymentRepo;
       if (entity === CashCount) return mockCashCountRepo;
+      if (entity === CashTransfer) return mockTransferRepo;
       if (entity === CashRegisterSessionUser) return mockSessionUserRepo;
       return null;
     }),
@@ -204,6 +210,7 @@ describe('CashClosingsService (Hito 3)', () => {
     ]);
     mockClosingRepo.findOne.mockResolvedValue(null);
     mockCashCountRepo.findOne.mockResolvedValue(null);
+    mockTransferRepo.count.mockResolvedValue(0);
     mockClosingRepo.save.mockImplementation((entity: unknown) =>
       Promise.resolve(entity),
     );
@@ -451,6 +458,31 @@ describe('CashClosingsService (Hito 3)', () => {
           mockAdminUser,
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('debe bloquear el cierre si la sesión tiene transferencias de fondos en curso (Hito 5)', async () => {
+      mockClosingRepo.findOne.mockResolvedValue(
+        buildPendingClosing({ countedCashAmount: 65000 }),
+      );
+      mockTransferRepo.count.mockResolvedValue(1);
+
+      await expect(
+        service.completeClosing(
+          mockRegisterID,
+          mockSessionID,
+          { countedCashAmount: 65000 },
+          mockAdminUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockTransferRepo.count).toHaveBeenCalledWith({
+        where: {
+          tenantID: mockTenantID,
+          sourceSessionID: mockSessionID,
+          status: expect.anything(),
+        },
+      });
+      expect(mockSessionRepo.save).not.toHaveBeenCalled();
     });
   });
 

@@ -11,6 +11,7 @@ import { CashRegisterSessionUser } from './entities/cash-register-session-user.e
 import { CashDenomination } from './entities/cash-denomination.entity';
 import { CashCount } from './entities/cash-count.entity';
 import { CashCountItem } from './entities/cash-count-item.entity';
+import { CashTransfer } from './entities/cash-transfer.entity';
 import { Store } from '../stores/entities/store.entity';
 import { User } from '../users/entities/user.entity';
 import { UserStore } from '../relations/userstores/entities/userstore.entity';
@@ -22,6 +23,9 @@ import { CashClosingsController } from './cash-closings.controller';
 import { CashRegisterSessionUsersController } from './cash-register-session-users.controller';
 import { CashDenominationsController } from './cash-denominations.controller';
 import { CashCountsController } from './cash-counts.controller';
+import { CashTransfersController } from './cash-transfers.controller';
+import { CashReportsController } from './cash-reports.controller';
+import { StoreCashReportsController } from './store-cash-reports.controller';
 import { CashRegistersService } from './cash-registers.service';
 import { CashMovementsService } from './cash-movements.service';
 import { PaymentsService } from './payments.service';
@@ -31,6 +35,8 @@ import { CashClosingsService } from './cash-closings.service';
 import { CashRegisterSessionUsersService } from './cash-register-session-users.service';
 import { CashDenominationsService } from './cash-denominations.service';
 import { CashCountsService } from './cash-counts.service';
+import { CashTransfersService } from './cash-transfers.service';
+import { CashReportsService } from './cash-reports.service';
 import { UserstoresModule } from '../relations/userstores/userstores.module';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 
@@ -48,6 +54,7 @@ import { MultitenantModule } from '../multitenant/multitenant.module';
       CashDenomination,
       CashCount,
       CashCountItem,
+      CashTransfer,
       Store,
       User,
       UserStore,
@@ -64,6 +71,9 @@ import { MultitenantModule } from '../multitenant/multitenant.module';
     CashRegisterSessionUsersController,
     CashDenominationsController,
     CashCountsController,
+    CashTransfersController,
+    CashReportsController,
+    StoreCashReportsController,
   ],
   providers: [
     CashRegistersService,
@@ -75,6 +85,8 @@ import { MultitenantModule } from '../multitenant/multitenant.module';
     CashRegisterSessionUsersService,
     CashDenominationsService,
     CashCountsService,
+    CashTransfersService,
+    CashReportsService,
   ],
   exports: [CashRegistersService, PaymentsService, TypeOrmModule],
 })

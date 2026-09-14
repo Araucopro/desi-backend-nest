@@ -33,6 +33,7 @@ import {
   attachSessionOperator,
   assertUserCanAccessStore,
   closeSessionOperators,
+  countOpenSessionTransfers,
   sumSessionCashMovements,
   toMoney,
 } from './cash-registers.helpers';
@@ -353,6 +354,19 @@ export class CashRegistersService {
       if (!session) {
         throw new NotFoundException(
           `No existe una sesión abierta activa para cerrar en la caja con ID ${cashRegisterID}`,
+        );
+      }
+
+      // Hito 5: una sesión hermética no puede dejar traslados de fondos en
+      // curso, porque ya no podrían ejecutarse sobre ella.
+      const openTransfers = await countOpenSessionTransfers(
+        manager,
+        tenantID,
+        session.sessionID,
+      );
+      if (openTransfers > 0) {
+        throw new BadRequestException(
+          `La sesión tiene ${openTransfers} transferencia(s) de fondos en curso (PENDING/APPROVED). Complételas, recháncelas o cancélelas antes de cerrar la caja`,
         );
       }
 

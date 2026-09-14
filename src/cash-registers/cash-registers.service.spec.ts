@@ -16,6 +16,7 @@ import {
   CashRegisterSessionStatus,
 } from './entities/cash-register-session.entity';
 import { CashMovement } from './entities/cash-movement.entity';
+import { CashTransfer } from './entities/cash-transfer.entity';
 import { CashRegisterSessionUser } from './entities/cash-register-session-user.entity';
 import { Store } from '../stores/entities/store.entity';
 import { UserstoresService } from '../relations/userstores/userstores.service';
@@ -109,6 +110,10 @@ describe('CashRegistersService (Hito 1)', () => {
     findOne: jest.fn(),
   };
 
+  const mockTransferRepo: { count: jest.Mock } = {
+    count: jest.fn().mockResolvedValue(0),
+  };
+
   const mockSessionUserQueryBuilder: Record<string, jest.Mock> = {};
   for (const method of ['update', 'set', 'where', 'andWhere']) {
     mockSessionUserQueryBuilder[method] = jest
@@ -148,6 +153,7 @@ describe('CashRegistersService (Hito 1)', () => {
       if (entity === CashRegisterSession) return mockSessionRepo;
       if (entity === CashMovement) return mockCashMovementRepo;
       if (entity === CashRegisterSessionUser) return mockSessionUserRepo;
+      if (entity === CashTransfer) return mockTransferRepo;
       if (entity === Store) return mockStoreRepo;
       return null;
     }),
@@ -160,6 +166,7 @@ describe('CashRegistersService (Hito 1)', () => {
       cashIn: '0',
       cashOut: '0',
     });
+    mockTransferRepo.count.mockResolvedValue(0);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -424,6 +431,29 @@ describe('CashRegistersService (Hito 1)', () => {
       expect(result.closedByUserID).toBe(mockUserID);
       expect(result.closingNotes).toBe(closeDto.closingNotes);
       expect(result.closedAt).toBeInstanceOf(Date);
+    });
+
+    it('debe bloquear el cierre directo si la sesión tiene transferencias de fondos en curso (Hito 5)', async () => {
+      mockCashRegisterRepo.findOne.mockResolvedValue({
+        cashRegisterID: mockRegisterID,
+        storeID: mockStoreID,
+      });
+      mockUserstoresService.findStoresByUserId.mockResolvedValue([
+        { store: { storeID: mockStoreID } },
+      ]);
+      mockSessionRepo.findOne.mockResolvedValue({
+        sessionID: mockSessionID,
+        cashRegisterID: mockRegisterID,
+        openingBalance: 50000,
+        status: CashRegisterSessionStatus.OPEN,
+      });
+      mockTransferRepo.count.mockResolvedValue(2);
+
+      await expect(
+        service.closeSession(mockRegisterID, closeDto, mockUser),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockSessionRepo.save).not.toHaveBeenCalled();
     });
 
     it('debe calcular el saldo esperado sumando cobros y retiros de la sesión (Hito 2)', async () => {

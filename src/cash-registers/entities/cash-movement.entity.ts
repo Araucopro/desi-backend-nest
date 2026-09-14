@@ -32,6 +32,8 @@ export enum CashMovementReasonCode {
   REFUND = 'REFUND',
   OPENING_BALANCE = 'OPENING_BALANCE',
   CASH_WITHDRAWAL = 'CASH_WITHDRAWAL',
+  /** Traslado de fondos entre cajas o hacia bóveda/tesorería (Hito 5). */
+  CASH_TRANSFER = 'CASH_TRANSFER',
   PETTY_CASH = 'PETTY_CASH',
   SUPPLIER_PAYMENT = 'SUPPLIER_PAYMENT',
   EXPENSE = 'EXPENSE',
@@ -41,13 +43,14 @@ export enum CashMovementReasonCode {
 }
 
 /**
- * Códigos reservados a los módulos satélite (`sales`, `returns`): no pueden
- * registrarse manualmente porque exigen informar `referenceType` +
- * `referenceID` (Regla 5 del dominio de caja).
+ * Códigos reservados a los módulos satélite (`sales`, `returns` y
+ * `cash-transfers`): no pueden registrarse manualmente porque exigen informar
+ * `referenceType` + `referenceID` (Regla 5 del dominio de caja).
  */
 export const RESERVED_SYSTEM_CASH_MOVEMENT_REASONS: readonly string[] = [
   CashMovementReasonCode.SALE,
   CashMovementReasonCode.REFUND,
+  CashMovementReasonCode.CASH_TRANSFER,
 ];
 
 export enum CashMovementReferenceType {

@@ -48,6 +48,8 @@ export type SystemCashMovementInput = {
   referenceID: string | null;
   description?: string | null;
   createdByUserID: string;
+  /** Momento del hecho físico; por defecto, el instante de registro. */
+  occurredAt?: Date;
 };
 
 export type VoidedCashMovementResult = {
@@ -101,7 +103,7 @@ export class CashMovementsService {
       referenceID: input.referenceID,
       description: input.description?.trim() ?? null,
       createdByUserID: input.createdByUserID,
-      occurredAt: new Date(),
+      occurredAt: input.occurredAt ?? new Date(),
     });
 
     return repository.save(movement);

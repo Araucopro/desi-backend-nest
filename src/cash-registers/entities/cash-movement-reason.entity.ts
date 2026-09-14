@@ -91,6 +91,12 @@ export const DEFAULT_CASH_MOVEMENT_REASONS: readonly DefaultCashMovementReason[]
       requiresApproval: false,
     },
     {
+      code: CashMovementReasonCode.CASH_TRANSFER,
+      name: 'Transferencia entre cajas / bóveda',
+      type: null,
+      requiresApproval: false,
+    },
+    {
       code: CashMovementReasonCode.PETTY_CASH,
       name: 'Caja chica',
       type: CashMovementType.CASH_OUT,

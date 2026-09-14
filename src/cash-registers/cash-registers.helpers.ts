@@ -3,17 +3,25 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { EntityManager, FindOptionsWhere, IsNull } from 'typeorm';
+import { EntityManager, FindOptionsWhere, In, IsNull } from 'typeorm';
 import {
   JwtPayload,
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
 import { UserstoresService } from '../relations/userstores/userstores.service';
+import { Store } from '../stores/entities/store.entity';
 import { UserRole } from '../users/entities/user.entity';
+import { CashPaymentMethodTotal } from './entities/cash-register-closing.entity';
 import {
   CashRegisterSessionUser,
   CashRegisterSessionUserRole,
 } from './entities/cash-register-session-user.entity';
+import {
+  CASH_TRANSFER_OPEN_STATUSES,
+  CashTransfer,
+  CashTransferDestinationType,
+  CashTransferStatus,
+} from './entities/cash-transfer.entity';
 import {
   CashMovement,
   CashMovementStatus,
@@ -24,6 +32,8 @@ import {
   CashRegisterSession,
   CashRegisterSessionStatus,
 } from './entities/cash-register-session.entity';
+import { Payment, PaymentStatus } from './entities/payment.entity';
+import { PaymentMethod } from './entities/payment-method.entity';
 
 export function toMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -282,4 +292,207 @@ export async function closeSessionOperators(
     .where('"sessionID" = :sessionID', { sessionID })
     .andWhere('"leftAt" IS NULL')
     .execute();
+}
+
+export async function findStoreOrFail(
+  manager: EntityManager,
+  storeID: string,
+  tenantID?: string,
+): Promise<Store> {
+  const where: FindOptionsWhere<Store> = { storeID };
+  if (tenantID) where.tenantID = tenantID;
+
+  const store = await manager.getRepository(Store).findOne({ where });
+
+  if (!store) {
+    throw new NotFoundException(`Tienda con ID ${storeID} no encontrada`);
+  }
+
+  return store;
+}
+
+/**
+ * Suma los cobros `COMPLETED` de una sesión agrupados por medio de pago.
+ * Alimenta la fotografía de arqueo (Hito 3) y los reportes analíticos de caja
+ * (Hito 5), de modo que la conciliación y el reporte usan exactamente el mismo
+ * criterio contable.
+ */
+export async function sumSessionPaymentsByMethod(
+  manager: EntityManager,
+  sessionID: string,
+): Promise<CashPaymentMethodTotal[]> {
+  const rows = await manager
+    .getRepository(Payment)
+    .createQueryBuilder('payment')
+    .innerJoin(
+      PaymentMethod,
+      'method',
+      'method.paymentMethodID = payment.paymentMethodID',
+    )
+    .select('payment.paymentMethodID', 'paymentMethodID')
+    .addSelect('method.code', 'code')
+    .addSelect('method.name', 'name')
+    .addSelect('method.affectsCash', 'affectsCash')
+    .addSelect('COUNT(*)', 'paymentCount')
+    .addSelect('COALESCE(SUM(payment.amount), 0)', 'amount')
+    .where('payment.sessionID = :sessionID', { sessionID })
+    .andWhere('payment.status = :status', {
+      status: PaymentStatus.COMPLETED,
+    })
+    .groupBy('payment.paymentMethodID')
+    .addGroupBy('method.code')
+    .addGroupBy('method.name')
+    .addGroupBy('method.affectsCash')
+    .orderBy('method.code', 'ASC')
+    .getRawMany<{
+      paymentMethodID: string;
+      code: string;
+      name: string;
+      affectsCash: boolean | string;
+      paymentCount: string;
+      amount: string;
+    }>();
+
+  return rows.map((row) => ({
+    paymentMethodID: row.paymentMethodID,
+    code: row.code,
+    name: row.name,
+    affectsCash: row.affectsCash === true || row.affectsCash === 'true',
+    paymentCount: Number(row.paymentCount ?? 0),
+    amount: toMoney(Number(row.amount ?? 0)),
+  }));
+}
+
+export type SessionTransferTotals = {
+  /** Efectivo ya enviado desde la sesión (transferencias `COMPLETED`). */
+  outCount: number;
+  outAmount: number;
+  toRegisterCount: number;
+  toRegisterAmount: number;
+  toVaultCount: number;
+  toVaultAmount: number;
+  /** Efectivo recibido en la sesión desde otra caja (`COMPLETED`). */
+  inCount: number;
+  inAmount: number;
+  /** Transferencias solicitadas o aprobadas que aún no mueven efectivo. */
+  pendingCount: number;
+  pendingAmount: number;
+};
+
+/**
+ * Totales de transferencias de fondos que tocan una sesión: salidas y entradas
+ * `COMPLETED` (efectivo ya movido) y solicitudes abiertas (`PENDING` /
+ * `APPROVED`) que todavía no afectan el saldo esperado de la caja.
+ */
+export async function sumSessionTransferTotals(
+  manager: EntityManager,
+  params: { tenantID: string; sessionID: string },
+): Promise<SessionTransferTotals> {
+  const { tenantID, sessionID } = params;
+
+  const raw = await manager
+    .getRepository(CashTransfer)
+    .createQueryBuilder('transfer')
+    .select(
+      `COALESCE(SUM(CASE WHEN transfer.sourceSessionID = :sessionID AND transfer.status = :completed THEN 1 ELSE 0 END), 0)`,
+      'outCount',
+    )
+    .addSelect(
+      `COALESCE(SUM(CASE WHEN transfer.sourceSessionID = :sessionID AND transfer.status = :completed THEN transfer.amount ELSE 0 END), 0)`,
+      'outAmount',
+    )
+    .addSelect(
+      `COALESCE(SUM(CASE WHEN transfer.sourceSessionID = :sessionID AND transfer.status = :completed AND transfer.destinationType = :toRegister THEN 1 ELSE 0 END), 0)`,
+      'toRegisterCount',
+    )
+    .addSelect(
+      `COALESCE(SUM(CASE WHEN transfer.sourceSessionID = :sessionID AND transfer.status = :completed AND transfer.destinationType = :toRegister THEN transfer.amount ELSE 0 END), 0)`,
+      'toRegisterAmount',
+    )
+    .addSelect(
+      `COALESCE(SUM(CASE WHEN transfer.sourceSessionID = :sessionID AND transfer.status = :completed AND transfer.destinationType = :toVault THEN 1 ELSE 0 END), 0)`,
+      'toVaultCount',
+    )
+    .addSelect(
+      `COALESCE(SUM(CASE WHEN transfer.sourceSessionID = :sessionID AND transfer.status = :completed AND transfer.destinationType = :toVault THEN transfer.amount ELSE 0 END), 0)`,
+      'toVaultAmount',
+    )
+    .addSelect(
+      `COALESCE(SUM(CASE WHEN transfer.destinationSessionID = :sessionID AND transfer.status = :completed THEN 1 ELSE 0 END), 0)`,
+      'inCount',
+    )
+    .addSelect(
+      `COALESCE(SUM(CASE WHEN transfer.destinationSessionID = :sessionID AND transfer.status = :completed THEN transfer.amount ELSE 0 END), 0)`,
+      'inAmount',
+    )
+    .addSelect(
+      `COALESCE(SUM(CASE WHEN transfer.sourceSessionID = :sessionID AND transfer.status IN (:...openStatuses) THEN 1 ELSE 0 END), 0)`,
+      'pendingCount',
+    )
+    .addSelect(
+      `COALESCE(SUM(CASE WHEN transfer.sourceSessionID = :sessionID AND transfer.status IN (:...openStatuses) THEN transfer.amount ELSE 0 END), 0)`,
+      'pendingAmount',
+    )
+    .where('transfer.tenantID = :tenantID', { tenantID })
+    .andWhere(
+      '(transfer.sourceSessionID = :sessionID OR transfer.destinationSessionID = :sessionID)',
+      { sessionID },
+    )
+    .setParameters({
+      completed: CashTransferStatus.COMPLETED,
+      toRegister: CashTransferDestinationType.CASH_REGISTER,
+      toVault: CashTransferDestinationType.VAULT,
+      openStatuses: [...CASH_TRANSFER_OPEN_STATUSES],
+    })
+    .getRawOne<Record<string, string | number | null>>();
+
+  const numberFrom = (key: string): number => Number(raw?.[key] ?? 0);
+  const moneyFrom = (key: string): number => toMoney(numberFrom(key));
+
+  return {
+    outCount: numberFrom('outCount'),
+    outAmount: moneyFrom('outAmount'),
+    toRegisterCount: numberFrom('toRegisterCount'),
+    toRegisterAmount: moneyFrom('toRegisterAmount'),
+    toVaultCount: numberFrom('toVaultCount'),
+    toVaultAmount: moneyFrom('toVaultAmount'),
+    inCount: numberFrom('inCount'),
+    inAmount: moneyFrom('inAmount'),
+    pendingCount: numberFrom('pendingCount'),
+    pendingAmount: moneyFrom('pendingAmount'),
+  };
+}
+
+/**
+ * Cuenta las transferencias solicitadas o aprobadas que aún no mueven efectivo
+ * sobre una sesión. Se usa al sellar la sesión: una caja no puede cerrarse con
+ * traslados en curso, porque ya no podrían ejecutarse (Regla 2: hermetismo
+ * post-cierre).
+ */
+export async function countOpenSessionTransfers(
+  manager: EntityManager,
+  tenantID: string,
+  sessionID: string,
+): Promise<number> {
+  return manager.getRepository(CashTransfer).count({
+    where: {
+      tenantID,
+      sourceSessionID: sessionID,
+      status: In([...CASH_TRANSFER_OPEN_STATUSES]),
+    },
+  });
+}
+
+/**
+ * Efectivo esperado disponible en una sesión: fondo inicial más movimientos
+ * `POSTED`. Es el techo físico para cualquier salida de efectivo (transferencia
+ * o retiro), porque una caja no puede entregar más de lo que tiene.
+ */
+export async function resolveSessionExpectedCash(
+  manager: EntityManager,
+  session: CashRegisterSession,
+): Promise<number> {
+  const totals = await sumSessionCashMovements(manager, session.sessionID);
+
+  return toMoney(Number(session.openingBalance ?? 0) + totals.net);
 }

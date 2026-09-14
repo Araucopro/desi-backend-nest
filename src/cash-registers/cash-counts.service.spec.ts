@@ -90,8 +90,15 @@ describe('CashCountsService (Hito 4)', () => {
     manager: { transaction: jest.Mock };
   } = {
     findOne: jest.fn(),
-    create: jest.fn((values: object) => ({ ...values })),
-    save: jest.fn((entity: unknown) => Promise.resolve(entity)),
+    // El repositorio real asigna el UUID al persistir; el mock lo replica para
+    // que el servicio pueda releer el conteo recién creado por su ID.
+    create: jest.fn((values: object) => ({
+      cashCountID: mockCountID,
+      ...values,
+    })),
+    save: jest.fn((entity: { cashCountID?: string }) =>
+      Promise.resolve({ cashCountID: mockCountID, ...entity }),
+    ),
     manager: { transaction: jest.fn() },
   };
   const mockItemRepo = {
@@ -244,7 +251,9 @@ describe('CashCountsService (Hito 4)', () => {
 
   describe('start', () => {
     it('debe iniciar un conteo DRAFT sobre el arqueo PENDING de la sesión', async () => {
-      mockCountLookups({ byID: buildCount() });
+      mockCountLookups({
+        byID: buildCount({ notes: 'Arqueo turno tarde' }),
+      });
 
       const result = await service.start(
         mockRegisterID,

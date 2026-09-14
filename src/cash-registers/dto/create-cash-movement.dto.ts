@@ -33,7 +33,7 @@ export class CreateCashMovementDto {
 
   @ApiProperty({
     description:
-      'Código de la razón del movimiento manual según el catálogo del tenant (se normaliza a mayúsculas). SALE y REFUND quedan reservadas a los módulos de ventas y devoluciones; las razones con requiresApproval exigen supervisor.',
+      'Código de la razón del movimiento manual según el catálogo del tenant (se normaliza a mayúsculas). SALE, REFUND y CASH_TRANSFER quedan reservadas a los módulos de ventas, devoluciones y transferencias de fondos; las razones con requiresApproval exigen supervisor.',
     example: 'CASH_WITHDRAWAL',
     maxLength: 50,
   })

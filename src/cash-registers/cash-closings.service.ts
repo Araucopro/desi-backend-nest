@@ -17,12 +17,14 @@ import { UserstoresService } from '../relations/userstores/userstores.service';
 import {
   assertCashApprover,
   assertUserCanAccessStore,
+  countOpenSessionTransfers,
   findCashRegisterOrFail,
   findOpenSessionOrFail,
   findSessionOrFail,
   closeSessionOperators,
   resolveActingUserId,
   sumSessionCashMovements,
+  sumSessionPaymentsByMethod,
   toMoney,
 } from './cash-registers.helpers';
 import { CountCashRegisterClosingDto } from './dto/count-cash-register-closing.dto';
@@ -39,8 +41,6 @@ import {
   CashRegisterClosing,
   CashRegisterClosingStatus,
 } from './entities/cash-register-closing.entity';
-import { Payment, PaymentStatus } from './entities/payment.entity';
-import { PaymentMethod } from './entities/payment-method.entity';
 
 type CashRegisterClosingSnapshot = {
   expectedCashAmount: number;
@@ -174,7 +174,7 @@ export class CashClosingsService {
       manager,
       session.sessionID,
     );
-    const paymentMethodTotals = await this.sumSessionPaymentsByMethod(
+    const paymentMethodTotals = await sumSessionPaymentsByMethod(
       manager,
       session.sessionID,
     );
@@ -254,50 +254,27 @@ export class CashClosingsService {
     return manager.getRepository(CashRegisterClosing).save(updated);
   }
 
-  private async sumSessionPaymentsByMethod(
+  /**
+   * Una sesión no puede sellarse con traslados de fondos en curso: una vez
+   * `CLOSED` la sesión es hermética y la transferencia ya no podría ejecutarse
+   * (Regla 2). El operador debe completarla, rechazarla o cancelarla antes.
+   */
+  private async assertNoOpenTransfers(
     manager: EntityManager,
     sessionID: string,
-  ): Promise<CashPaymentMethodTotal[]> {
-    const rows = await manager
-      .getRepository(Payment)
-      .createQueryBuilder('payment')
-      .innerJoin(
-        PaymentMethod,
-        'method',
-        'method.paymentMethodID = payment.paymentMethodID',
-      )
-      .select('payment.paymentMethodID', 'paymentMethodID')
-      .addSelect('method.code', 'code')
-      .addSelect('method.name', 'name')
-      .addSelect('method.affectsCash', 'affectsCash')
-      .addSelect('COUNT(*)', 'paymentCount')
-      .addSelect('COALESCE(SUM(payment.amount), 0)', 'amount')
-      .where('payment.sessionID = :sessionID', { sessionID })
-      .andWhere('payment.status = :status', {
-        status: PaymentStatus.COMPLETED,
-      })
-      .groupBy('payment.paymentMethodID')
-      .addGroupBy('method.code')
-      .addGroupBy('method.name')
-      .addGroupBy('method.affectsCash')
-      .orderBy('method.code', 'ASC')
-      .getRawMany<{
-        paymentMethodID: string;
-        code: string;
-        name: string;
-        affectsCash: boolean | string;
-        paymentCount: string;
-        amount: string;
-      }>();
+    tenantID: string,
+  ): Promise<void> {
+    const openTransfers = await countOpenSessionTransfers(
+      manager,
+      tenantID,
+      sessionID,
+    );
 
-    return rows.map((row) => ({
-      paymentMethodID: row.paymentMethodID,
-      code: row.code,
-      name: row.name,
-      affectsCash: row.affectsCash === true || row.affectsCash === 'true',
-      paymentCount: Number(row.paymentCount ?? 0),
-      amount: toMoney(Number(row.amount ?? 0)),
-    }));
+    if (openTransfers > 0) {
+      throw new BadRequestException(
+        `La sesión tiene ${openTransfers} transferencia(s) de fondos en curso (PENDING/APPROVED). Complételas, recháncelas o cancélelas antes de cerrar la caja`,
+      );
+    }
   }
 
   /**
@@ -432,6 +409,9 @@ export class CashClosingsService {
         user,
         tenantID,
       );
+
+      // Un traslado en curso ya no podría ejecutarse sobre una sesión sellada.
+      await this.assertNoOpenTransfers(manager, session.sessionID, tenantID);
 
       const closing = await this.findPendingClosingOrFail(
         manager,

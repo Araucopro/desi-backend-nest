@@ -55,11 +55,9 @@ export class CashDenominationsService {
   ): Promise<Map<string, CashDenomination>> {
     if (!cashDenominationIDs.length) return new Map();
 
-    const denominations = await manager
-      .getRepository(CashDenomination)
-      .find({
-        where: { tenantID, cashDenominationID: In(cashDenominationIDs) },
-      });
+    const denominations = await manager.getRepository(CashDenomination).find({
+      where: { tenantID, cashDenominationID: In(cashDenominationIDs) },
+    });
     const denominationMap = new Map(
       denominations.map((denomination) => [
         denomination.cashDenominationID,
