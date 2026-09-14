@@ -18,6 +18,7 @@ import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { InventoryService } from '../inventory/inventory.service';
+import { ClientsService } from '../clients/clients.service';
 import { DispatchGuide } from '../dispatch-guides/entities/dispatch-guide.entity';
 import { DispatchGuideReference } from '../dispatch-guides/entities/dispatch-guide-reference.entity';
 import { DispatchGuideReferenceItem } from '../dispatch-guides/entities/dispatch-guide-reference-item.entity';
@@ -34,6 +35,10 @@ import { Sale, SaleStatus, SaleType } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
 import { CreateSaleDto } from './dto/create-sale.dto';
+import {
+  PaymentsService,
+  ResolvedSalePayments,
+} from '../cash-registers/payments.service';
 import { ListSalesQueryDto } from './dto/list-sales.query.dto';
 import { ConvertSaleDto } from './dto/convert-sale.dto';
 import {
@@ -76,9 +81,11 @@ export class SalesService {
     private readonly dteMapperService: DteMapperService,
     private readonly financialMovementsService: FinancialMovementsService,
     private readonly inventoryService: InventoryService,
+    @Optional() private readonly clientsService?: ClientsService,
     @Optional() private readonly tenantContext?: TenantContextService,
     @Optional() private readonly transactionRunner?: TransactionRunnerService,
     @Optional() private readonly abilityFactory?: AbilityFactory,
+    @Optional() private readonly paymentsService?: PaymentsService,
   ) {}
 
   private runInTransaction<T>(
@@ -93,6 +100,40 @@ export class SalesService {
       : this.dataSource.transaction(callback);
   }
 
+  /**
+   * Resuelve y valida el cobro contra caja de una venta. Devuelve `null`
+   * cuando la venta no informa caja ni pagos (ventas fuera de POS).
+   */
+  private async resolveSalePayments(
+    manager: EntityManager,
+    storeID: string,
+    dto: CreateSaleDto,
+    saleTotal: number,
+    lock: boolean,
+  ): Promise<ResolvedSalePayments | null> {
+    const requiresCashContext = Boolean(
+      dto.cashRegisterID || dto.payments?.length,
+    );
+
+    if (!requiresCashContext) return null;
+
+    if (!this.paymentsService) {
+      throw new InternalServerErrorException(
+        'El módulo de caja no está disponible para registrar el cobro de la venta',
+      );
+    }
+
+    return this.paymentsService.resolveSalePayments(manager, {
+      tenantID: this.tenantContext?.getTenantId() ?? null,
+      storeID,
+      saleTotal,
+      paymentType: dto.paymentType,
+      cashRegisterID: dto.cashRegisterID,
+      payments: dto.payments,
+      lock,
+    });
+  }
+
   private async prepareSale(
     manager: EntityManager,
     storeID: string,
@@ -100,8 +141,45 @@ export class SalesService {
     userId?: string,
   ) {
     const store = await findStoreById(manager, storeID);
+    let receiver = dto.receiver ?? null;
+    let clientID = dto.clientID ?? null;
+
+    if (this.clientsService) {
+      if (clientID && !receiver) {
+        const client = await this.clientsService.findOne(clientID);
+        receiver = {
+          rut: client.rut,
+          name: client.name,
+          giro: client.giro ?? undefined,
+          address: client.address ?? undefined,
+          city: client.city ?? undefined,
+          email: client.email ?? undefined,
+        };
+      }
+
+      const tenantID = this.tenantContext?.getTenantId() ?? store.tenantID;
+      if (receiver?.rut && tenantID) {
+        const client = await this.clientsService.findOrCreate(
+          tenantID,
+          receiver,
+          manager,
+        );
+        if (client) {
+          clientID = client.clientID;
+          receiver = {
+            rut: client.rut,
+            name: client.name,
+            giro: client.giro ?? undefined,
+            address: client.address ?? undefined,
+            city: client.city ?? undefined,
+            email: client.email ?? undefined,
+          };
+        }
+      }
+    }
+
     validateStoreDteCapability(store, dto.saleType);
-    validateFacturaReceiver(dto.saleType, dto.receiver);
+    validateFacturaReceiver(dto.saleType, receiver);
 
     const pricing = await this.pricingService.calculateCart({
       storeID,
@@ -116,7 +194,16 @@ export class SalesService {
       pricingDate: toDateOnly(dto.issueDate ?? new Date()),
     });
 
-    return buildPreparedSale(dto, pricing);
+    const prepared = buildPreparedSale(
+      {
+        ...dto,
+        receiver: receiver ?? undefined,
+        clientID: clientID ?? undefined,
+      },
+      pricing,
+    );
+
+    return prepared;
   }
 
   async create(
@@ -181,6 +268,13 @@ export class SalesService {
       const tenantID = this.tenantContext?.getTenantId();
       const saleID = createSaleId();
       const folio = await nextSaleFolio(manager, storeID, tenantID);
+      const resolvedPayments = await this.resolveSalePayments(
+        manager,
+        storeID,
+        dto,
+        prepared.total,
+        true,
+      );
 
       const sale = createSaleEntity(manager, {
         saleID,
@@ -194,6 +288,7 @@ export class SalesService {
         folio,
         issueDate: prepared.issueDate,
         receiver: prepared.receiver,
+        clientID: prepared.clientID,
         subtotal: prepared.subtotal,
         discount: prepared.discount,
         netTotal: prepared.netTotal,
@@ -201,6 +296,7 @@ export class SalesService {
         total: prepared.total,
         cogsTotal: prepared.cogsTotal,
         idempotencyKey: idempotencyKey ?? null,
+        cashRegisterSessionID: resolvedPayments?.session.sessionID ?? null,
       });
 
       await manager.save(sale);
@@ -229,6 +325,17 @@ export class SalesService {
         taxTotal: sale.taxTotal,
         cogsTotal: sale.cogsTotal,
       });
+
+      if (resolvedPayments) {
+        await this.paymentsService!.persistSalePayments(
+          manager,
+          resolvedPayments,
+          {
+            saleID,
+            createdByUserID: userId ?? sale.userID,
+          },
+        );
+      }
 
       return toSaleView(await loadSale(manager, saleID));
     });
@@ -261,6 +368,13 @@ export class SalesService {
     const prepared = await this.runInTransaction((manager) =>
       this.prepareSale(manager, storeID, dto, userId),
     );
+
+    // Validación temprana del cobro: evita emitir un DTE que después no pueda
+    // registrar su pago. La validación definitiva (con lock) ocurre al persistir.
+    await this.runInTransaction((manager) =>
+      this.resolveSalePayments(manager, storeID, dto, prepared.total, false),
+    );
+
     const documentType = dto.saleType === SaleType.FACTURA ? 33 : 39;
     const store = await this.runInTransaction((manager) =>
       findStoreById(manager, storeID),
@@ -357,6 +471,13 @@ export class SalesService {
 
       const tenantID = this.tenantContext?.getTenantId();
       const saleID = createSaleId();
+      const resolvedPayments = await this.resolveSalePayments(
+        manager,
+        storeID,
+        dto,
+        prepared.total,
+        true,
+      );
       const sale = createSaleEntity(manager, {
         saleID,
         tenantID,
@@ -369,6 +490,7 @@ export class SalesService {
         folio: dteResponse.FOLIO ?? null,
         issueDate: prepared.issueDate,
         receiver: prepared.receiver,
+        clientID: prepared.clientID,
         subtotal: prepared.subtotal,
         discount: prepared.discount,
         netTotal: prepared.netTotal,
@@ -377,6 +499,7 @@ export class SalesService {
         cogsTotal: prepared.cogsTotal,
         dteDocumentID: dteResponse.dteDocumentID,
         idempotencyKey: idempotencyKey ?? null,
+        cashRegisterSessionID: resolvedPayments?.session.sessionID ?? null,
       });
 
       try {
@@ -400,6 +523,17 @@ export class SalesService {
       await manager.save(
         createSaleItems(manager, tenantID, saleID, prepared.items),
       );
+
+      if (resolvedPayments) {
+        await this.paymentsService!.persistSalePayments(
+          manager,
+          resolvedPayments,
+          {
+            saleID,
+            createdByUserID: userId ?? sale.userID,
+          },
+        );
+      }
 
       if (dto.dispatchGuideIDs?.length) {
         const consumptionPlan = await this.planConsumptionForGuides(

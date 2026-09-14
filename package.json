@@ -22,6 +22,7 @@
     "migration:run": "node --env-file=.env node_modules/typeorm/cli.js migration:run -d dist/datasource/data-source.js",
     "migration:revert": "node --env-file=.env node_modules/typeorm/cli.js migration:revert -d dist/datasource/data-source.js",
     "migration:fresh": "pnpm schema:drop && pnpm migration:run",
+    "migration:generate": "node --env-file=.env node_modules/typeorm/cli.js migration:generate -d dist/datasource/data-source.js",
     "schema:drop": "node --env-file=.env node_modules/typeorm/cli.js schema:drop -d dist/datasource/data-source.js"
   },
   "dependencies": {

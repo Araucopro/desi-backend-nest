@@ -14,6 +14,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { CreateDteDocumentDto } from './dto/create-dte-document.dto';
 import { DteDocumentResponseDto } from './dto/dte-document-response.dto';
+import { DteDocumentValue } from './dto/get-dte-document-query.dto';
 import {
   DteDocument,
   DteDocumentPaymentType,
@@ -27,6 +28,8 @@ import { InventoryService } from '../inventory/inventory.service';
 import {
   OpenfacturaCallResult,
   OpenfacturaClientService,
+  OPENFACTURA_DOWNLOAD_TIMEOUT_MS,
+  OpenfacturaDocumentResponse,
 } from './openfactura-client.service';
 import {
   applyFinalStatusToNormalized,
@@ -421,6 +424,56 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
 
   private async resolveApikey(storeID: string): Promise<string> {
     return this.storesService.resolveOpenfacturaKey(storeID);
+  }
+
+  private resolveDownloadTimeout(): number {
+    const configured = Number(
+      this.configService.get<string>(
+        'OPENFACTURA_DOWNLOAD_TIMEOUT_MS',
+        String(OPENFACTURA_DOWNLOAD_TIMEOUT_MS),
+      ),
+    );
+    return Number.isFinite(configured) && configured > 0
+      ? configured
+      : OPENFACTURA_DOWNLOAD_TIMEOUT_MS;
+  }
+
+  async getDocument(
+    dteDocumentID: string,
+    storeID: string,
+    value: DteDocumentValue = DteDocumentValue.JSON,
+  ): Promise<OpenfacturaDocumentResponse> {
+    const document = await this.runInTransaction((manager) =>
+      manager.findOne(DteDocument, {
+        where: { dteDocumentID, storeID },
+      }),
+    );
+
+    if (!document) {
+      throw new NotFoundException(
+        `Documento DTE ${dteDocumentID} no encontrado`,
+      );
+    }
+
+    if (!document.token || document.token.startsWith(LOCAL_TOKEN_PREFIX)) {
+      throw new BadRequestException(
+        'El documento no tiene un TOKEN de Openfactura para consultar',
+      );
+    }
+
+    const apikey = await this.resolveApikey(storeID);
+    const result = await this.openfacturaClient.getOpenfacturaDocument(
+      apikey,
+      document.token,
+      value,
+      this.resolveDownloadTimeout(),
+    );
+
+    if (!result.ok) {
+      throw new BadGatewayException(result.errorDetail);
+    }
+
+    return result.payload;
   }
 
   async create(

@@ -260,8 +260,6 @@ export async function mapToDocumentPayload(
         : {}),
       FchEmis: encabezado.IdDoc.FchEmis,
       IndTraslado: encabezado.IdDoc.IndTraslado ?? '1',
-      DirDest: encabezado.IdDoc.DirDest,
-      CmnaDest: encabezado.IdDoc.CmnaDest,
     };
 
     if (encabezado.Totales) {

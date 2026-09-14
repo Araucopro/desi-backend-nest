@@ -23,6 +23,7 @@ export type PreparedSale = {
   paymentType: SalePaymentType;
   issueDate: Date;
   receiver: SaleReceiver | null;
+  clientID?: string | null;
   items: PreparedSaleItem[];
   subtotal: number;
   discount: number;

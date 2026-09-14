@@ -18,6 +18,7 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { SalePaymentType, SaleType } from '../entities/sale.entity';
 import { IsRut } from '../../common/validators/rut.validator';
+import { SalePaymentInputDto } from '../../cash-registers/dto/sale-payment.dto';
 
 export class CreateSaleReceiverDto {
   @ApiPropertyOptional({
@@ -124,6 +125,14 @@ export class CreateSaleDto {
   @Type(() => CreateSaleReceiverDto)
   receiver?: CreateSaleReceiverDto;
 
+  @ApiPropertyOptional({
+    description: 'ID opcional del cliente registrado',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  })
+  @IsOptional()
+  @IsUUID()
+  clientID?: string;
+
   @ApiProperty({
     description: 'Ítems de la venta',
     type: [CreateSaleItemDto],
@@ -158,4 +167,24 @@ export class CreateSaleDto {
   @ArrayUnique()
   @IsUUID(undefined, { each: true })
   dispatchGuideIDs?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'ID de la caja (CashRegister) desde la que se cobra la venta. Debe tener una sesión OPEN; exige informar payments.',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  })
+  @IsOptional()
+  @IsUUID()
+  cashRegisterID?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Cobros de la venta. La suma de los montos debe igualar el total y cada medio debe existir y estar activo. Obligatorio si se informa cashRegisterID.',
+    type: [SalePaymentInputDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SalePaymentInputDto)
+  payments?: SalePaymentInputDto[];
 }

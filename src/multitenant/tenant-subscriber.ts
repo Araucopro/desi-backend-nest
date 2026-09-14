@@ -1,16 +1,29 @@
 import {
-  EventSubscriber,
   EntitySubscriberInterface,
+  EventSubscriber,
   InsertEvent,
 } from 'typeorm';
-import { TenantContextService } from './tenant-context.service';
+import { tenantContextStorage } from './tenant-context.storage';
 
+/**
+ * Asigna automáticamente `tenantID` en los INSERT de entidades de negocio
+ * cuando la request se ejecuta dentro del contexto tenant (JWT).
+ *
+ * Si la entidad ya trae `tenantID` (patrón explícito usado por varios
+ * servicios), no lo sobrescribe. Si no hay contexto tenant (flujos
+ * master/tests), deja el valor tal cual para no alterar esos flujos.
+ */
 @EventSubscriber()
 export class TenantSubscriber implements EntitySubscriberInterface {
-  constructor(private readonly context: TenantContextService) {}
-  beforeInsert(event: InsertEvent<unknown>): void {
-    const entity = event.entity as Record<string, unknown>;
-    if (!('tenantID' in entity) || entity.tenantID) return;
-    entity.tenantID = this.context.getTenantId();
+  beforeInsert(event: InsertEvent<Record<string, unknown>>): void {
+    if (!event.metadata.hasColumnWithPropertyPath('tenantID')) return;
+
+    const entity = event.entity;
+    if (entity.tenantID != null) return;
+
+    const context = tenantContextStorage.getStore();
+    if (!context) return;
+
+    entity.tenantID = context.tenantId;
   }
 }

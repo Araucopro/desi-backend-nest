@@ -22,6 +22,7 @@ import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { CreateReturnDto } from './dto/create-return.dto';
 import { ListReturnsQueryDto } from './dto/list-returns.query.dto';
 import { Return, ReturnStatus, ReturnType } from './entities/return.entity';
+import { Sale, SaleStatus } from '../sales/entities/sale.entity';
 import { ReturnItem } from './entities/return-item.entity';
 import { ReturnFolioCounter } from './entities/return-folio-counter.entity';
 import { ReturnDteMapperService } from './return-dte-mapper.service';
@@ -573,5 +574,24 @@ export class ReturnsService implements OnModuleInit {
     ret.status = ReturnStatus.COMPLETADA;
     ret.completedAt = new Date();
     await manager.save(ret);
+
+    const targetSaleStatus =
+      ret.returnType === ReturnType.TOTAL
+        ? SaleStatus.ANULADA
+        : ret.returnType === ReturnType.DESCUENTO
+          ? SaleStatus.CORREGIDA
+          : SaleStatus.DEVUELTA;
+
+    const saleRepo = manager.getRepository(Sale);
+    const saleToUpdate =
+      ret.sale ??
+      (await saleRepo.findOne({
+        where: { saleID: ret.saleID },
+      }));
+
+    if (saleToUpdate) {
+      saleToUpdate.status = targetSaleStatus;
+      await manager.save(saleToUpdate);
+    }
   }
 }

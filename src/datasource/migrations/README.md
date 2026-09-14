@@ -11,8 +11,5 @@ activar un bypass mediante una variable de sesión.
 Las validaciones de `supportsOwnScope` permanecen activas también para roles
 privilegiados; un seed debe usar únicamente scopes compatibles con el catálogo.
 
-El datasource CLI usa `migrationsTransactionMode: 'each'`. La migración
-`20260828000300-normalize-system-role` declara además `public transaction =
-false`, porque PostgreSQL no permite consumir un valor enum nuevo antes de que
-termine la transacción que lo agregó. Ejecuta `pnpm build` antes de
+Ejecuta `pnpm build` antes de
 `pnpm migration:run` para que el CLI use la migración compilada actualizada.

@@ -163,6 +163,12 @@ export class DispatchGuideDto {
   @ApiProperty({ type: DispatchGuideReceiverDto })
   receiver!: DispatchGuideReceiver;
 
+  @ApiPropertyOptional({
+    description: 'ID del cliente registrado asociado a la guía, si existe',
+    nullable: true,
+  })
+  clientID!: string | null;
+
   @ApiProperty({ type: DispatchGuideDestinationDto })
   destination!: DispatchGuideDestination;
 

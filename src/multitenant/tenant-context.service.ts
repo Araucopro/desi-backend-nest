@@ -1,34 +1,33 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { DataSource, EntityManager } from 'typeorm';
+import {
+  TenantRequestContext,
+  tenantContextStorage,
+} from './tenant-context.storage';
 
-export interface TenantRequestContext {
-  tenantId: string;
-  timeZone?: string;
-  userId?: string;
-  masterUserId?: string;
-  impersonating: boolean;
-}
+export type { TenantRequestContext } from './tenant-context.storage';
 
 export const DEFAULT_TENANT_TIMEZONE = 'America/Santiago';
 
 @Injectable()
 export class TenantContextService {
-  private readonly storage = new AsyncLocalStorage<TenantRequestContext>();
   constructor(private readonly dataSource: DataSource) {}
 
   run<T>(context: TenantRequestContext, callback: () => T): T {
-    return this.storage.run(context, callback);
+    return tenantContextStorage.run(context, callback);
   }
+
   get(required = true): TenantRequestContext | undefined {
-    const value = this.storage.getStore();
+    const value = tenantContextStorage.getStore();
     if (!value && required)
       throw new BadRequestException('Tenant context is required');
     return value;
   }
+
   getTenantId(): string {
     return this.get()!.tenantId;
   }
+
   getTimeZone(): string {
     const context = this.get(false);
     return context?.timeZone || DEFAULT_TENANT_TIMEZONE;

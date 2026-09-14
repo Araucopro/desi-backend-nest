@@ -31,6 +31,8 @@ import {
   DispatchGuideListResponseDto,
   DispatchGuideResponseDto,
 } from './dto/dispatch-guide-response.dto';
+import { InvoiceDispatchGuidesDto } from './dto/invoice-dispatch-guides.dto';
+import { DteDocumentResponseDto } from '../dte/dto/dte-document-response.dto';
 
 @ApiTags('Guías de Despacho')
 @Controller('dispatch-guides')
@@ -165,6 +167,49 @@ export class DispatchGuidesController {
       dispatchGuideID,
       storeID,
       userId,
+      ability,
+    );
+  }
+
+  @Post(':dispatchGuideID/invoice')
+  @RequirePermission('dispatch-guides:write')
+  @ApiOperation({
+    summary: 'Transformar guía(s) de despacho a Factura Electrónica (33)',
+    description:
+      'Emite una Factura Electrónica (33) que referencia y consume la guía de despacho indicada y opcionalmente guías adicionales del mismo receptor. No descuenta stock nuevamente (reserveStock: false) y registra las referencias en BD.',
+  })
+  @ApiParam({
+    name: 'dispatchGuideID',
+    description: 'UUID de la guía principal',
+  })
+  @ApiHeader({
+    name: 'X-Store-ID',
+    required: true,
+    description: 'Tienda activa',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description: 'Clave de idempotencia para la emisión',
+  })
+  @ApiBody({ type: InvoiceDispatchGuidesDto })
+  @ApiResponse({ status: 201, type: DteDocumentResponseDto })
+  invoice(
+    @Param('dispatchGuideID', ParseUUIDPipe) dispatchGuideID: string,
+    @GetStoreId() storeID: string,
+    @GetUser('userId') userId: string | undefined,
+    @GetUser('masterUserId') impersonatedBy: string | undefined,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @GetAbility() ability: TenantAbility | undefined,
+    @Body() dto: InvoiceDispatchGuidesDto,
+  ) {
+    return this.dispatchGuidesService.invoiceGuides(
+      storeID,
+      dispatchGuideID,
+      dto,
+      userId,
+      impersonatedBy,
+      idempotencyKey,
       ability,
     );
   }

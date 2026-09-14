@@ -61,10 +61,12 @@ export class InventoryService {
         tenantID: this.tenantContext?.getTenantId(),
         allowNegativeStock:
           reason !== InventoryMovementReason.SALE &&
-          reason !== InventoryMovementReason.TRANSFER_OUT,
+          reason !== InventoryMovementReason.TRANSFER_OUT &&
+          reason !== InventoryMovementReason.DISPATCH_GUIDE,
         createIfMissing:
           reason !== InventoryMovementReason.SALE &&
-          reason !== InventoryMovementReason.TRANSFER_OUT,
+          reason !== InventoryMovementReason.TRANSFER_OUT &&
+          reason !== InventoryMovementReason.DISPATCH_GUIDE,
         condition,
       });
 

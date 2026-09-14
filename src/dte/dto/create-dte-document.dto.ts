@@ -11,6 +11,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
@@ -141,25 +142,12 @@ export class DteIdDocGuiaDto {
 
   @ApiProperty({
     description:
-      'Indicador de traslado: 1 venta, 2 venta por encargo, 3 consignación, 4 entrega gratuita, 5 traslados internos',
+      'Indicador de traslado: 1 operación constituye venta, 2 ventas por efectuar, 3 consignaciones, 4 entrega gratuita, 5 traslados internos, 6 otros traslados no venta, 7 guía de devolución, 8 traslado exportación no venta, 9 venta para exportación',
     example: '1',
   })
   @IsString()
-  @IsIn(['1', '2', '3', '4', '5'])
+  @IsIn(['1', '2', '3', '4', '5', '6', '7', '8', '9'])
   IndTraslado!: string;
-
-  @ApiProperty({
-    description: 'Dirección de destino de la mercadería',
-    example: 'ARTURO PRAT 527 CURICO',
-  })
-  @IsString()
-  @IsNotEmpty()
-  DirDest!: string;
-
-  @ApiProperty({ description: 'Comuna de destino', example: 'Curicó' })
-  @IsString()
-  @IsNotEmpty()
-  CmnaDest!: string;
 }
 
 export class DteEmisorBoletaDto {
@@ -700,6 +688,77 @@ export class NotaCreditoEncabezadoDto {
   Totales?: DteTotalesNotaCreditoDto;
 }
 
+export class DteChoferDto {
+  @ApiPropertyOptional({
+    description: 'RUT del chofer o conductor',
+    example: '76123456-7',
+  })
+  @IsOptional()
+  @IsString()
+  RUTChofer?: string;
+
+  @ApiPropertyOptional({
+    description: 'Nombre del chofer o conductor',
+    example: 'Juan Pérez',
+  })
+  @IsOptional()
+  @IsString()
+  NombreChofer?: string;
+}
+
+export class DteTransporteDto {
+  @ApiPropertyOptional({
+    description: 'Patente del vehículo',
+    example: 'AAAA11',
+  })
+  @IsOptional()
+  @IsString()
+  Patente?: string;
+
+  @ApiPropertyOptional({
+    description: 'RUT de la empresa transportista',
+    example: '76123456-7',
+  })
+  @IsOptional()
+  @IsString()
+  RUTTrans?: string;
+
+  @ApiPropertyOptional({
+    description: 'Datos del chofer o conductor',
+    type: DteChoferDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DteChoferDto)
+  Chofer?: DteChoferDto;
+
+  @ApiProperty({
+    description: 'Dirección de destino',
+    example: 'ARTURO PRAT 527 CURICO',
+  })
+  @IsString()
+  @IsNotEmpty()
+  DirDest!: string;
+
+  @ApiProperty({ description: 'Comuna de destino', example: 'Curicó' })
+  @IsString()
+  @IsNotEmpty()
+  CmnaDest!: string;
+
+  @ApiPropertyOptional({ description: 'Ciudad de destino', example: 'Curicó' })
+  @IsOptional()
+  @IsString()
+  CiudadDest?: string;
+
+  @ApiPropertyOptional({
+    description: 'Fecha de salida o traslado (YYYY-MM-DD)',
+    example: '2026-08-25',
+  })
+  @IsOptional()
+  @IsDateString()
+  FchSalida?: string;
+}
+
 export class GuiaEncabezadoDto {
   @ApiProperty({ type: DteIdDocGuiaDto })
   @IsDefined()
@@ -718,6 +777,12 @@ export class GuiaEncabezadoDto {
   @ValidateNested()
   @Type(() => DteReceptorDto)
   Receptor!: DteReceptorDto;
+
+  @ApiProperty({ type: DteTransporteDto })
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => DteTransporteDto)
+  Transporte!: DteTransporteDto;
 
   @ApiPropertyOptional({ type: DteTotalesGuiaDto })
   @IsOptional()
@@ -775,59 +840,34 @@ export class DteReferenciaDto {
   CodRef?: number;
 
   @ApiPropertyOptional({
-    description: 'Razón de la referencia',
+    description: 'Razón de la referencia (máximo 90 caracteres)',
     example: 'Devolución parcial de mercadería',
+    maxLength: 90,
   })
   @IsOptional()
   @IsString()
+  @MaxLength(90)
   RazonRef?: string;
-}
 
-export class DteTransporteDto {
   @ApiPropertyOptional({
-    description: 'Patente del vehículo',
-    example: 'AAAA11',
+    description: 'Código de vendedor asignado (máximo 8 caracteres)',
+    example: 'INTERNET',
+    maxLength: 8,
   })
   @IsOptional()
   @IsString()
-  Patente?: string;
+  @MaxLength(8)
+  CodVndor?: string;
 
   @ApiPropertyOptional({
-    description: 'RUT del transportista o conductor',
-    example: '76123456-7',
+    description: 'Código de caja o terminal (máximo 8 caracteres)',
+    example: 'CAJA01',
+    maxLength: 8,
   })
   @IsOptional()
   @IsString()
-  RUTTrans?: string;
-
-  @ApiPropertyOptional({
-    description: 'Nombre del transportista o conductor',
-    example: 'TRANSPORTES CHILE',
-  })
-  @IsOptional()
-  @IsString()
-  NombreTrans?: string;
-
-  @ApiPropertyOptional({
-    description: 'Dirección de destino',
-    example: 'ARTURO PRAT 527 CURICO',
-  })
-  @IsOptional()
-  @IsString()
-  DirDest?: string;
-
-  @ApiPropertyOptional({ description: 'Comuna de destino', example: 'Curicó' })
-  @IsOptional()
-  @IsString()
-  CmnaDest?: string;
-
-  @ApiPropertyOptional({
-    description: 'Fecha de traslado',
-    example: '2026-08-25',
-  })
-  @IsOptional()
-  @IsDateString()
-  FechaTraslado?: string;
+  @MaxLength(8)
+  CodCaja?: string;
 }
 
 @ApiExtraModels(
@@ -888,15 +928,6 @@ export class DteDto {
   @ValidateNested({ each: true })
   @Type(() => DteReferenciaDto)
   Referencia?: DteReferenciaDto[];
-
-  @ApiPropertyOptional({
-    description: 'Transporte para guías de despacho (DTE 52)',
-    type: DteTransporteDto,
-  })
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => DteTransporteDto)
-  Transporte?: DteTransporteDto;
 }
 
 class DteCustomerDto {
@@ -949,32 +980,6 @@ class DteCustomizePageDto {
   @IsOptional()
   @IsString()
   urlLogo?: string;
-}
-
-class DteDocumentReferenceDto {
-  @ApiPropertyOptional({
-    description: 'Tipo de documento referenciado',
-    example: '801',
-  })
-  @IsOptional()
-  @IsString()
-  type?: string;
-
-  @ApiPropertyOptional({
-    description: 'ID del documento referenciado',
-    example: '334',
-  })
-  @IsOptional()
-  @IsString()
-  id?: string;
-
-  @ApiPropertyOptional({
-    description: 'Fecha del documento referenciado',
-    example: '2025-01-31',
-  })
-  @IsOptional()
-  @IsDateString()
-  date?: string;
 }
 
 export class CreateDteDocumentDto {

@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Get,
   Headers,
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -12,6 +14,7 @@ import {
   ApiHeader,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -20,6 +23,10 @@ import { GetStoreId } from '../common/decorators/get-store-id.decorator';
 import { StoreContextGuard } from '../common/guards/store-context.guard';
 import { CreateDteDocumentDto } from './dto/create-dte-document.dto';
 import { DteDocumentResponseDto } from './dto/dte-document-response.dto';
+import {
+  DteDocumentValue,
+  GetDteDocumentQueryDto,
+} from './dto/get-dte-document-query.dto';
 import { DteService } from './dte.service';
 
 @ApiTags('DTE')
@@ -78,5 +85,46 @@ export class DteController {
     @GetStoreId() storeID: string,
   ) {
     return this.dteService.reconcile(dteDocumentID, storeID);
+  }
+
+  @Get('document/:dteDocumentID')
+  @RequirePermission('dte:read')
+  @ApiOperation({
+    summary: 'Consultar/descargar un documento DTE emitido desde Openfactura',
+    description:
+      'Reenvía la consulta a Openfactura con el valor solicitado (json, pdf, xml, status o cedible). El payload crudo del proveedor se entrega en data; pdf/xml/cedible llegan en base64. El formato de papel (LETTER/80MM) se respeta según lo definido en la emisión.',
+  })
+  @ApiHeader({
+    name: 'X-Store-ID',
+    required: true,
+    description: 'Tienda a la que pertenece el documento',
+  })
+  @ApiParam({
+    name: 'dteDocumentID',
+    required: true,
+    description: 'UUID del documento DTE',
+  })
+  @ApiQuery({
+    name: 'value',
+    required: false,
+    enum: DteDocumentValue,
+    description:
+      'Valor a consultar: json (default), pdf, xml, status o cedible',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Payload crudo de Openfactura (base64 para pdf/xml/cedible)',
+    schema: { type: 'object', additionalProperties: true },
+  })
+  getDocument(
+    @Param('dteDocumentID', ParseUUIDPipe) dteDocumentID: string,
+    @GetStoreId() storeID: string,
+    @Query() query: GetDteDocumentQueryDto,
+  ) {
+    return this.dteService.getDocument(
+      dteDocumentID,
+      storeID,
+      query.value ?? DteDocumentValue.JSON,
+    );
   }
 }

@@ -30,9 +30,6 @@ describe('DispatchGuideDteMapperService', () => {
           baseTotal: 2380,
         },
       ],
-      total: 2380,
-      netTotal: 2000,
-      taxTotal: 380,
       store: {
         storeID: 'store-1',
         rut: '76123456-7',
@@ -49,7 +46,7 @@ describe('DispatchGuideDteMapperService', () => {
     };
   }
 
-  it('construye el payload 52 con IdDoc, emisor, receptor, totales y detalle', () => {
+  it('construye el payload 52 con IdDoc, emisor, receptor, transporte, totales y detalle', () => {
     const dto = service.mapDispatchGuideToDte(input() as any);
 
     expect(dto.response).toContain('FOLIO');
@@ -58,8 +55,6 @@ describe('DispatchGuideDteMapperService', () => {
       Folio: 0,
       FchEmis: '2026-08-25',
       IndTraslado: '1',
-      DirDest: 'Av. Providencia 1234',
-      CmnaDest: 'Providencia',
     });
     expect(dto.dte.Encabezado.Emisor).toMatchObject({
       RUTEmisor: '76123456-7',
@@ -72,6 +67,10 @@ describe('DispatchGuideDteMapperService', () => {
       RznSocRecep: 'Cliente SpA',
       DirRecep: 'Av. Providencia 1234',
       CmnaRecep: 'Providencia',
+    });
+    expect((dto.dte.Encabezado as any).Transporte).toEqual({
+      DirDest: 'Av. Providencia 1234',
+      CmnaDest: 'Providencia',
     });
     expect(dto.dte.Encabezado.Totales).toEqual({
       MntNeto: 2000,
@@ -88,7 +87,46 @@ describe('DispatchGuideDteMapperService', () => {
       MontoItem: 2000,
       CdgItem: { TpoCodigo: 'INT1', VlrCodigo: 'SKU-1' },
     });
-    expect(dto.dte.Transporte).toBeUndefined();
+    expect(dto.dte.Detalle[0].MontoItem).toBe(
+      dto.dte.Detalle[0].PrcItem! * dto.dte.Detalle[0].QtyItem,
+    );
+    expect((dto.dte as any).Transporte).toBeUndefined();
+  });
+
+  it('cuadra PrcItem × QtyItem con MontoItem en el caso OF-10 (qty 10, bruto 15000)', () => {
+    const dto = service.mapDispatchGuideToDte(
+      input({
+        items: [
+          {
+            storeProductID: 'sp-1',
+            variationID: 'var-1',
+            productName: 'Demoo',
+            sku: '1001',
+            quantity: 10,
+            unitPrice: 1500,
+            unitCost: 500,
+            lineTotal: 15000,
+            baseTotal: 15000,
+          },
+        ],
+      }) as any,
+    );
+
+    expect(dto.dte.Detalle[0]).toMatchObject({
+      QtyItem: 10,
+      PrcItem: 1261,
+      MontoItem: 12610,
+    });
+    expect(dto.dte.Detalle[0].MontoItem).toBe(
+      dto.dte.Detalle[0].PrcItem! * dto.dte.Detalle[0].QtyItem,
+    );
+    expect(dto.dte.Encabezado.Totales).toEqual({
+      MntNeto: 12610,
+      TasaIVA: '19',
+      IVA: 2396,
+      MntTotal: 15006,
+      VlrPagar: 15006,
+    });
   });
 
   it('emite sin precios con IndTraslado configurable y totales/detalle en cero', () => {
@@ -113,7 +151,7 @@ describe('DispatchGuideDteMapperService', () => {
     });
   });
 
-  it('agrega Transporte solo cuando el creador lo entregó', () => {
+  it('agrega datos de transporte en Encabezado.Transporte cuando el creador los entregó', () => {
     const dto = service.mapDispatchGuideToDte(
       input({
         transport: {
@@ -125,13 +163,15 @@ describe('DispatchGuideDteMapperService', () => {
       }) as any,
     );
 
-    expect(dto.dte.Transporte).toEqual({
+    expect((dto.dte.Encabezado as any).Transporte).toEqual({
       Patente: 'AAAA11',
-      RUTTrans: '76123456-7',
-      NombreTrans: 'Juan Pérez',
+      Chofer: {
+        RUTChofer: '76123456-7',
+        NombreChofer: 'Juan Pérez',
+      },
       DirDest: 'Av. Providencia 1234',
       CmnaDest: 'Providencia',
-      FechaTraslado: '2026-08-25',
+      FchSalida: '2026-08-25',
     });
   });
 });

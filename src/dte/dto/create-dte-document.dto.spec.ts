@@ -318,7 +318,7 @@ describe('CreateDteDocumentDto', () => {
     expect(errors).toEqual([]);
   });
 
-  it('accepts a guía de despacho (52) with DirDest/CmnaDest', async () => {
+  it('accepts a guía de despacho (52) with Transporte (DirDest/CmnaDest)', async () => {
     const errors = await validateDto(
       basePayload({
         dte: {
@@ -327,8 +327,6 @@ describe('CreateDteDocumentDto', () => {
               TipoDTE: 52,
               FchEmis: '2026-08-25',
               IndTraslado: '1',
-              DirDest: 'ARTURO PRAT 527 CURICO',
-              CmnaDest: 'Curicó',
             },
             Emisor: {
               RUTEmisor: '76123456-7',
@@ -337,6 +335,10 @@ describe('CreateDteDocumentDto', () => {
             Receptor: {
               RUTRecep: '76123456-7',
               RznSocRecep: 'Cliente SpA',
+            },
+            Transporte: {
+              DirDest: 'ARTURO PRAT 527 CURICO',
+              CmnaDest: 'Curicó',
             },
             Totales: {
               MntNeto: 2000,

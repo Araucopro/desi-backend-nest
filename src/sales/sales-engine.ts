@@ -100,6 +100,7 @@ export function buildPreparedSale(
     paymentType: dto.paymentType,
     issueDate: toDateOnly(dto.issueDate ?? new Date()),
     receiver: dto.receiver ?? null,
+    clientID: dto.clientID ?? null,
     items,
     subtotal,
     discount,

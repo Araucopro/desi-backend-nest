@@ -356,6 +356,13 @@ export class SaleDto {
   receiver!: SaleReceiverDto | null;
 
   @ApiProperty({
+    description: 'ID del cliente registrado asociado a la venta, si existe',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    nullable: true,
+  })
+  clientID!: string | null;
+
+  @ApiProperty({
     description: 'Subtotal en CLP (sin impuestos)',
     example: 15980,
   })
@@ -397,6 +404,14 @@ export class SaleDto {
     nullable: true,
   })
   dteDocumentID!: string | null;
+
+  @ApiProperty({
+    description:
+      'ID de la sesión de caja en la que se cobró la venta, si existe',
+    example: 'session-uuid',
+    nullable: true,
+  })
+  cashRegisterSessionID!: string | null;
 
   @ApiProperty({
     description: 'Clave de idempotencia usada para crear la venta',

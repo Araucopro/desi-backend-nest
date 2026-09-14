@@ -15,6 +15,7 @@ import { DteDocument } from '../../dte/entities/dte-document.entity';
 import { ColumnNumericTransformer } from '../../common/transformers/numeric.transformer';
 import { DispatchGuideItem } from './dispatch-guide-item.entity';
 import { DispatchGuideReference } from './dispatch-guide-reference.entity';
+import { Client } from '../../clients/entities/client.entity';
 
 export enum DispatchGuideStatus {
   PENDIENTE = 'PENDIENTE',
@@ -47,6 +48,7 @@ export type DispatchGuideTransport = {
 @Entity({ name: 'DispatchGuide' })
 @Index(['tenantID', 'storeID', 'createdAt'])
 @Index(['tenantID', 'status'])
+@Index(['tenantID', 'clientID'])
 export class DispatchGuide {
   @PrimaryGeneratedColumn('uuid')
   dispatchGuideID!: string;
@@ -100,6 +102,13 @@ export class DispatchGuide {
 
   @Column({ type: 'jsonb' })
   receiver!: DispatchGuideReceiver;
+
+  @Column({ type: 'uuid', nullable: true })
+  clientID!: string | null;
+
+  @ManyToOne(() => Client, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'clientID' })
+  client!: Client | null;
 
   @Column({ type: 'jsonb' })
   destination!: DispatchGuideDestination;

@@ -263,6 +263,7 @@ export function createDispatchGuideEntity(
     userID: string;
     impersonatedBy?: string | null;
     idempotencyKey: string | null;
+    clientID?: string | null;
     prepared: PreparedDispatchGuide;
   },
 ): DispatchGuide {
@@ -274,6 +275,7 @@ export function createDispatchGuideEntity(
     impersonatedBy: input.impersonatedBy ?? null,
     status: input.prepared.status,
     idempotencyKey: input.idempotencyKey,
+    clientID: input.clientID ?? null,
     issueDate: input.prepared.issueDate,
     receiver: input.prepared.receiver,
     destination: input.prepared.destination,

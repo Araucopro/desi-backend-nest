@@ -19,7 +19,6 @@ import { ExpensesModule } from './expenses/expenses.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { PricingModule } from './pricing/pricing.module';
 import { TransfersModule } from './transfers/transfers.module';
-import { SeedModule } from './seed/seed.module';
 import { StoreMonthlyTargetsModule } from './store-monthly-targets/store-monthly-targets.module';
 import { DteModule } from './dte/dte.module';
 import { MultitenantModule } from './multitenant/multitenant.module';
@@ -30,6 +29,8 @@ import { SalesModule } from './sales/sales.module';
 import { ReturnsModule } from './returns/returns.module';
 import { DispatchGuidesModule } from './dispatch-guides/dispatch-guides.module';
 import { RoleAdminModule } from './roles/roles.module';
+import { ClientsModule } from './clients/clients.module';
+import { CashRegistersModule } from './cash-registers/cash-registers.module';
 
 @Module({
   imports: [
@@ -50,7 +51,6 @@ import { RoleAdminModule } from './roles/roles.module';
     InventoryModule,
     PricingModule,
     TransfersModule,
-    SeedModule,
     StoreMonthlyTargetsModule,
     DteModule,
     MultitenantModule,
@@ -60,6 +60,8 @@ import { RoleAdminModule } from './roles/roles.module';
     ReturnsModule,
     DispatchGuidesModule,
     RoleAdminModule,
+    ClientsModule,
+    CashRegistersModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },

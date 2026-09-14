@@ -44,7 +44,6 @@ Scripts importantes:
 - `src/expenses`: gastos.
 - `src/store-monthly-targets`: metas mensuales por tienda.
 - `src/categories`: categorias.
-- `src/seed`: carga inicial (protegida tras autenticacion Master).
 
 ## Bootstrap global
 

@@ -95,6 +95,7 @@ export class StoreMonthlyTargetsService {
         store,
         period: normalizedPeriod,
         targetAmount,
+        tenantID: this.tenantContext?.getTenantId(),
       });
 
       return manager.getRepository(StoreMonthlyTarget).save(target);
@@ -206,6 +207,7 @@ export class StoreMonthlyTargetsService {
         store,
         period: periodStart,
         targetAmount: upsertDto.targetAmount,
+        tenantID: this.tenantContext?.getTenantId(),
       });
 
       return manager.getRepository(StoreMonthlyTarget).save(created);
