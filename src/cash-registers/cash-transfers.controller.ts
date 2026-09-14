@@ -143,6 +143,11 @@ export class CashTransfersController {
     type: CashTransfer,
   })
   @ApiResponse({
+    status: 403,
+    description:
+      'El usuario no tiene rol de supervisor (admin, store_manager o MASTER) para aprobar transferencias.',
+  })
+  @ApiResponse({
     status: 409,
     description: 'La transferencia no está en estado PENDING.',
   })
@@ -216,6 +221,16 @@ export class CashTransfersController {
     status: 201,
     description: 'Transferencia rechazada exitosamente.',
     type: CashTransfer,
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'El usuario no tiene rol de supervisor (admin, store_manager o MASTER) para rechazar transferencias.',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'La transferencia ya fue completada, cancelada o ya estaba rechazada.',
   })
   @CustomMessage('Transferencia de fondos rechazada exitosamente')
   reject(

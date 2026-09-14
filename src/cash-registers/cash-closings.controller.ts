@@ -62,7 +62,7 @@ export class CashClosingsController {
   @ApiOperation({
     summary: 'Registrar el efectivo contado del arqueo',
     description:
-      'Guarda el monto de efectivo físico contado y computa la diferencia contra el saldo esperado (countedCashAmount - expectedCashAmount). La sesión permanece OPEN.',
+      'Guarda el monto de efectivo físico contado y computa la diferencia contra el saldo esperado (`countedCashAmount - expectedCashAmount`). Diferencia positiva = sobrante; negativa = faltante. La sesión permanece OPEN hasta completar el arqueo.',
   })
   @ApiParam({ name: 'cashRegisterID', description: 'ID UUID de la caja' })
   @ApiParam({ name: 'sessionId', description: 'ID UUID de la sesión de caja' })
@@ -141,7 +141,8 @@ export class CashClosingsController {
   })
   @ApiResponse({
     status: 403,
-    description: 'El usuario no tiene facultad de aprobación.',
+    description:
+      'El usuario no tiene rol de supervisor (admin, store_manager o MASTER).',
   })
   @ApiResponse({
     status: 404,
