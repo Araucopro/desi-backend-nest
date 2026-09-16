@@ -33,6 +33,14 @@ export class UserstoresService {
       : callback(this.userStoreRepo);
   }
 
+  private runInTransaction<T>(
+    callback: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    return this.tenantContext
+      ? this.tenantContext.transaction(callback)
+      : this.userStoreRepo.manager.transaction(callback);
+  }
+
   async create(dto: CreateUserstoreDto): Promise<UserStore> {
     const { userID, storeID } = dto;
 
@@ -45,12 +53,20 @@ export class UserstoresService {
     if (!store) {
       throw new NotFoundException(`Store with ID ${storeID} not found`);
     }
-    // Verificar si la relación ya existe
-    return this.withRepository(async (repository) => {
+
+    return this.runInTransaction(async (manager) => {
+      const repository = manager.getRepository(UserStore);
+      const tenantID = this.tenantContext?.get(false)?.tenantId;
+      const scope = {
+        user: { userID: user.userID },
+        store: { storeID: store.storeID },
+        ...(tenantID ? { tenantID } : {}),
+      };
+
+      // Verificar si la relación ya está vigente
       const existingRelation = await repository.findOne({
         where: {
-          user: { userID: user.userID },
-          store: { storeID: store.storeID },
+          ...scope,
           effectiveTo: IsNull(),
           removedAt: IsNull(),
         },
@@ -62,13 +78,43 @@ export class UserstoresService {
         );
       }
 
+      const today = this.getToday();
+
+      // Si el trabajador fue desvinculado hoy (la fila cerrada aún cubre el
+      // día de baja), se reabre esa asignación en vez de insertar una nueva:
+      // ambas cubrirían la misma fecha y el roster lo mostraría duplicado.
+      const reopenableQuery = repository
+        .createQueryBuilder('assignment')
+        .where('assignment.userID = :userID', { userID: user.userID })
+        .andWhere('assignment.storeID = :storeID', {
+          storeID: store.storeID,
+        })
+        .andWhere('assignment.effectiveTo >= :today', { today })
+        .andWhere('assignment.removedAt IS NOT NULL')
+        .orderBy('assignment.effectiveFrom', 'DESC')
+        .setLock('pessimistic_write');
+
+      if (tenantID) {
+        reopenableQuery.andWhere('assignment.tenantID = :tenantID', {
+          tenantID,
+        });
+      }
+
+      const reopenable = await reopenableQuery.getOne();
+
+      if (reopenable) {
+        reopenable.effectiveTo = null;
+        reopenable.removedAt = null;
+        reopenable.user = user;
+        reopenable.store = store;
+        return repository.save(reopenable);
+      }
+
       const userStore = repository.create({
         user,
         store,
-        effectiveFrom: this.getToday(),
-        ...(this.tenantContext
-          ? { tenantID: this.tenantContext.getTenantId() }
-          : {}),
+        effectiveFrom: today,
+        ...(tenantID ? { tenantID } : {}),
       });
 
       return repository.save(userStore);

@@ -15,6 +15,53 @@ export interface RosterEntry {
   effectiveTo: string | null;
 }
 
+/**
+ * Retorna, para una fecha dada, una única asignación por trabajador.
+ *
+ * La cobertura de cada intervalo es inclusiva: `effectiveFrom <= date` y
+ * (`effectiveTo === null` o `effectiveTo >= date`). Si un trabajador tiene más
+ * de una fila cubriendo la fecha (por ejemplo, una desvinculación y una
+ * revinculación el mismo día), se conserva la fila vigente o, en su defecto,
+ * la de `effectiveFrom` más reciente. Se preserva el orden de entrada.
+ */
+export function selectEntriesForDate(
+  entries: RosterEntry[],
+  date: string,
+): RosterEntry[] {
+  const selected = new Map<string, RosterEntry>();
+
+  for (const entry of entries) {
+    if (entry.effectiveFrom > date) continue;
+    if (entry.effectiveTo !== null && entry.effectiveTo < date) continue;
+
+    const current = selected.get(entry.employeeID);
+    if (current && !isPreferredEntry(entry, current)) continue;
+
+    selected.set(entry.employeeID, entry);
+  }
+
+  return Array.from(selected.values());
+}
+
+function isPreferredEntry(
+  candidate: RosterEntry,
+  current: RosterEntry,
+): boolean {
+  const candidateIsActive = candidate.effectiveTo === null;
+  const currentIsActive = current.effectiveTo === null;
+  if (candidateIsActive !== currentIsActive) return candidateIsActive;
+
+  if (candidate.effectiveFrom !== current.effectiveFrom) {
+    return candidate.effectiveFrom > current.effectiveFrom;
+  }
+
+  if (candidate.effectiveTo !== current.effectiveTo) {
+    return (candidate.effectiveTo ?? '') > (current.effectiveTo ?? '');
+  }
+
+  return false;
+}
+
 @Injectable()
 export class RosterService {
   constructor(
@@ -43,7 +90,7 @@ export class RosterService {
   ): Promise<EmployeeSummaryDto[]> {
     parseDateOnly(date, 'date');
     const entries = await this.getEntries(storeID, date, date, employeeID);
-    return entries.map((entry) => ({ ...entry }));
+    return selectEntriesForDate(entries, date).map((entry) => ({ ...entry }));
   }
 
   getEntries(

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { RosterEntry } from '../roster/roster.service';
+import { RosterEntry, selectEntriesForDate } from '../roster/roster.service';
 import { AttendanceOverrideType } from '../attendance-overrides/entities/attendance-override.entity';
 import { eachDate } from '../common/date-range.util';
 
@@ -50,11 +50,7 @@ export class CalendarBuilderService {
     overrides: CalendarOverride[],
   ): CalendarDay[] {
     return eachDate(from, to).map((date) => {
-      const dayRoster = roster.filter(
-        (entry) =>
-          entry.effectiveFrom <= date &&
-          (entry.effectiveTo === null || entry.effectiveTo >= date),
-      );
+      const dayRoster = selectEntriesForDate(roster, date);
       const isClosed = closures.some(
         (closure) => closure.startDate <= date && closure.endDate >= date,
       );
