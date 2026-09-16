@@ -176,6 +176,20 @@ export const PERMISSION_CATALOG: readonly PermissionCatalogEntry[] = [
     supportsOwnScope: false,
     description: 'Administrar clientes',
   },
+  {
+    key: 'hr-attendance:read',
+    subject: 'Attendance',
+    action: 'read',
+    supportsOwnScope: true,
+    description: 'Ver asistencia de trabajadores',
+  },
+  {
+    key: 'hr-attendance:manage',
+    subject: 'Attendance',
+    action: 'manage',
+    supportsOwnScope: false,
+    description: 'Administrar asistencia y cierres de tiendas',
+  },
 ];
 
 /**

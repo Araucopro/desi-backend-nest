@@ -122,7 +122,7 @@ describe('ensureTenantRoles', () => {
     expect(roleQb.where).toHaveBeenCalledTimes(1);
 
     const expectedPermissionInserts =
-      PERMISSION_CATALOG.length + 3 * BASE_PERMISSION_KEYS.length;
+      PERMISSION_CATALOG.length + 3 * BASE_PERMISSION_KEYS.length + 4;
     expect(rolePermissionQb.insert).toHaveBeenCalledTimes(
       expectedPermissionInserts,
     );
@@ -134,7 +134,25 @@ describe('ensureTenantRoles', () => {
       (call) =>
         call[0] as { roleID: string; permissionKey: string; scope: string },
     );
-    expect(inserted.every((item) => item.scope === 'ALL')).toBe(true);
+    expect(
+      inserted
+        .filter(
+          (item) =>
+            item.roleID === 'r-consignado' || item.roleID === 'r-tercero',
+        )
+        .filter((item) => item.permissionKey === 'hr-attendance:read')
+        .every((item) => item.scope === 'OWN'),
+    ).toBe(true);
+    expect(
+      inserted
+        .filter(
+          (item) =>
+            item.permissionKey !== 'hr-attendance:read' ||
+            item.roleID === 'r-admin' ||
+            item.roleID === 'r-sm',
+        )
+        .every((item) => item.scope === 'ALL'),
+    ).toBe(true);
     expect(inserted.some((item) => item.roleID === 'r-system')).toBe(false);
 
     const adminKeys = new Set(
@@ -153,8 +171,16 @@ describe('ensureTenantRoles', () => {
           .filter((item) => item.roleID === roleID)
           .map((item) => item.permissionKey),
       );
-      expect(keys.size).toBe(BASE_PERMISSION_KEYS.length);
-      expect([...keys].sort()).toEqual([...BASE_PERMISSION_KEYS].sort());
+      const expectedKeys =
+        roleID === 'r-sm'
+          ? [
+              ...BASE_PERMISSION_KEYS,
+              'hr-attendance:read',
+              'hr-attendance:manage',
+            ]
+          : [...BASE_PERMISSION_KEYS, 'hr-attendance:read'];
+      expect(keys.size).toBe(expectedKeys.length);
+      expect([...keys].sort()).toEqual(expectedKeys.sort());
     }
   });
 

@@ -33,4 +33,13 @@ export class UserStore {
 
   @UpdateDateColumn({ type: 'timestamp with time zone', name: 'updatedAt' })
   updatedAt!: Date;
+
+  @Column({ type: 'date', default: () => 'CURRENT_DATE' })
+  effectiveFrom!: string;
+
+  @Column({ type: 'date', nullable: true })
+  effectiveTo!: string | null;
+
+  @Column({ type: 'timestamp with time zone', nullable: true })
+  removedAt!: Date | null;
 }

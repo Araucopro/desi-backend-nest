@@ -31,6 +31,7 @@ import { DispatchGuidesModule } from './dispatch-guides/dispatch-guides.module';
 import { RoleAdminModule } from './roles/roles.module';
 import { ClientsModule } from './clients/clients.module';
 import { CashRegistersModule } from './cash-registers/cash-registers.module';
+import { HrModule } from './hr/hr.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { CashRegistersModule } from './cash-registers/cash-registers.module';
     RoleAdminModule,
     ClientsModule,
     CashRegistersModule,
+    HrModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },

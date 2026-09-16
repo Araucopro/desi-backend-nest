@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import {
   DataSource,
   EntityManager,
+  IsNull,
   Repository,
   SelectQueryBuilder,
 } from 'typeorm';
@@ -22,6 +23,7 @@ import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { Tenant } from '../multitenant/entities/tenant.entity';
 import { Role } from '../roles/entities/role.entity';
+import { getZonedParts } from '../common/utils/date-timezone.util';
 
 @Injectable()
 export class UsersService {
@@ -113,6 +115,13 @@ export class UsersService {
           user: savedUser,
           store: savedStore,
           tenantID: tenantId,
+          effectiveFrom: (() => {
+            const parts = getZonedParts(
+              new Date(),
+              this.tenantContext?.getTimeZone(),
+            );
+            return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+          })(),
         });
 
         await userStoreRepository.save(userStore);
@@ -230,7 +239,12 @@ export class UsersService {
       throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
     }
 
-    return user.userStores.map((userStore) => userStore.store);
+    return user.userStores
+      .filter(
+        (userStore) =>
+          userStore.effectiveTo == null && userStore.removedAt == null,
+      )
+      .map((userStore) => userStore.store);
   }
 
   async update(id: string, dto: UpdateUserDto): Promise<User> {
@@ -279,10 +293,25 @@ export class UsersService {
       throw new ForbiddenException('System user cannot be removed');
     user.status = UserStatus.INACTIVE;
     user.sessionVersion += 1;
-    if (this.tenantContext)
-      await this.tenantContext.transaction((manager) =>
-        manager.getRepository(User).save(user),
+
+    const parts = getZonedParts(new Date(), this.tenantContext?.getTimeZone());
+    const effectiveTo = `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+    const run = (callback: (manager: EntityManager) => Promise<void>) =>
+      this.tenantContext
+        ? this.tenantContext.transaction(callback)
+        : this.dataSource.transaction(callback);
+
+    await run(async (manager) => {
+      await manager.getRepository(User).save(user);
+      await manager.getRepository(UserStore).update(
+        {
+          tenantID: user.tenantID,
+          user: { userID: user.userID },
+          effectiveTo: IsNull(),
+          removedAt: IsNull(),
+        },
+        { effectiveTo, removedAt: new Date() },
       );
-    else await this.userRepo.save(user);
+    });
   }
 }

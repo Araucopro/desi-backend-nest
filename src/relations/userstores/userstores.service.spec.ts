@@ -17,6 +17,7 @@ describe('UserstoresService', () => {
     create: jest.fn(),
     save: jest.fn(),
     remove: jest.fn(),
+    manager: undefined as any,
   };
 
   const mockUsersService = {
@@ -37,6 +38,13 @@ describe('UserstoresService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockUserStoreRepository.manager = {
+      transaction: jest.fn(async (callback) =>
+        callback({
+          getRepository: jest.fn().mockReturnValue(mockUserStoreRepository),
+        }),
+      ),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -111,7 +119,10 @@ describe('UserstoresService', () => {
 
       expect(result).toEqual([mockUserStore]);
       expect(mockUserStoreRepository.find).toHaveBeenCalledWith({
-        where: {},
+        where: {
+          effectiveTo: expect.any(Object),
+          removedAt: expect.any(Object),
+        },
         relations: ['user', 'store'],
       });
     });
@@ -125,7 +136,11 @@ describe('UserstoresService', () => {
 
       expect(result).toEqual([mockUserStore]);
       expect(mockUserStoreRepository.find).toHaveBeenCalledWith({
-        where: { user: { userID: 'user-uuid-1' } },
+        where: {
+          user: { userID: 'user-uuid-1' },
+          effectiveTo: expect.any(Object),
+          removedAt: expect.any(Object),
+        },
         relations: ['store'],
       });
     });
@@ -139,21 +154,29 @@ describe('UserstoresService', () => {
 
       expect(result).toEqual([mockUserStore]);
       expect(mockUserStoreRepository.find).toHaveBeenCalledWith({
-        where: { store: { storeID: 'store-uuid-1' } },
+        where: {
+          store: { storeID: 'store-uuid-1' },
+          effectiveTo: expect.any(Object),
+          removedAt: expect.any(Object),
+        },
         relations: ['user'],
       });
     });
   });
 
   describe('remove', () => {
-    it('should remove a user-store relation', async () => {
+    it('should close a user-store relation without deleting it', async () => {
       mockUserStoreRepository.findOne.mockResolvedValue(mockUserStore);
-      mockUserStoreRepository.remove.mockResolvedValue(mockUserStore);
+      mockUserStoreRepository.save.mockResolvedValue(mockUserStore);
 
       await service.remove('userstore-uuid-1');
 
-      expect(mockUserStoreRepository.remove).toHaveBeenCalledWith(
-        mockUserStore,
+      expect(mockUserStoreRepository.remove).not.toHaveBeenCalled();
+      expect(mockUserStoreRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          effectiveTo: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+          removedAt: expect.any(Date),
+        }),
       );
     });
 

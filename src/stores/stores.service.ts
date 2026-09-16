@@ -96,7 +96,12 @@ export class StoresService {
       throw new NotFoundException(`Tienda con ID ${id} no encontrada`);
     }
 
-    return store.userStores.map((userStore: UserStore) => userStore.user);
+    return store.userStores
+      .filter(
+        (userStore: UserStore) =>
+          userStore.effectiveTo == null && userStore.removedAt == null,
+      )
+      .map((userStore: UserStore) => userStore.user);
   }
 
   async update(id: string, dto: UpdateStoreDto): Promise<Store> {

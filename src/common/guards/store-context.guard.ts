@@ -11,6 +11,7 @@ import { UserStore } from '../../relations/userstores/entities/userstore.entity'
 import { STORE_ID_HEADER } from '../../multitenant/multitenant.constants';
 import { TenantContextService } from '../../multitenant/tenant-context.service';
 import { AbilityFactory } from '../../auth/ability/ability.factory';
+import { IsNull } from 'typeorm';
 
 @Injectable()
 export class StoreContextGuard implements CanActivate {
@@ -81,6 +82,8 @@ export class StoreContextGuard implements CanActivate {
             where: {
               user: { userID: userId },
               store: { storeID: storeId },
+              effectiveTo: IsNull(),
+              removedAt: IsNull(),
             },
           }),
         ),

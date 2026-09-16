@@ -67,6 +67,8 @@ describe('StoreContextGuard', () => {
         where: {
           user: { userID: 'user-1' },
           store: { storeID: 'store-1' },
+          effectiveTo: expect.any(Object),
+          removedAt: expect.any(Object),
         },
       }),
     );
