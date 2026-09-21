@@ -37,6 +37,7 @@ describe('UsersService', () => {
   const mockUserStoreTxRepository = {
     create: jest.fn(),
     save: jest.fn(),
+    update: jest.fn(),
   };
 
   const mockQueryBuilder = {
@@ -201,6 +202,7 @@ describe('UsersService', () => {
       expect(mockUserStoreTxRepository.create).toHaveBeenCalledWith({
         user: savedUser,
         store: savedStore,
+        effectiveFrom: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       });
       expect(result.userStores).toHaveLength(1);
       expect(result.userStores?.[0].store).toEqual(savedStore);
@@ -361,7 +363,18 @@ describe('UsersService', () => {
       await service.remove('uuid-1');
 
       expect(mockUser.status).toBe(UserStatus.INACTIVE);
-      expect(mockUserRepository.save).toHaveBeenCalledWith(mockUser);
+      expect(mockUserTxRepository.save).toHaveBeenCalledWith(mockUser);
+      expect(mockUserStoreTxRepository.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user: { userID: mockUser.userID },
+          effectiveTo: expect.any(Object),
+          removedAt: expect.any(Object),
+        }),
+        expect.objectContaining({
+          effectiveTo: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+          removedAt: expect.any(Date),
+        }),
+      );
     });
 
     it('should throw NotFoundException if user not found', async () => {

@@ -1,5 +1,5 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, IsNull } from 'typeorm';
 import { User, UserRole } from '../../users/entities/user.entity';
 import { UserStore } from '../../relations/userstores/entities/userstore.entity';
 import { StoreProduct } from '../../relations/storeproduct/entities/storeproduct.entity';
@@ -46,6 +46,8 @@ export class UserDiscountValidator {
       where: {
         user: { userID },
         store: { storeID: storeProduct.store?.storeID },
+        effectiveTo: IsNull(),
+        removedAt: IsNull(),
       },
     });
 

@@ -17,6 +17,16 @@ describe('UserstoresService', () => {
     create: jest.fn(),
     save: jest.fn(),
     remove: jest.fn(),
+    createQueryBuilder: jest.fn(),
+    manager: undefined as any,
+  };
+
+  const mockQueryBuilder = {
+    where: jest.fn(),
+    andWhere: jest.fn(),
+    orderBy: jest.fn(),
+    setLock: jest.fn(),
+    getOne: jest.fn(),
   };
 
   const mockUsersService = {
@@ -37,6 +47,21 @@ describe('UserstoresService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockQueryBuilder.where.mockReturnValue(mockQueryBuilder);
+    mockQueryBuilder.andWhere.mockReturnValue(mockQueryBuilder);
+    mockQueryBuilder.orderBy.mockReturnValue(mockQueryBuilder);
+    mockQueryBuilder.setLock.mockReturnValue(mockQueryBuilder);
+    mockQueryBuilder.getOne.mockResolvedValue(null);
+    mockUserStoreRepository.createQueryBuilder.mockReturnValue(
+      mockQueryBuilder,
+    );
+    mockUserStoreRepository.manager = {
+      transaction: jest.fn(async (callback) =>
+        callback({
+          getRepository: jest.fn().mockReturnValue(mockUserStoreRepository),
+        }),
+      ),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -82,6 +107,9 @@ describe('UserstoresService', () => {
       expect(result).toEqual(mockUserStore);
       expect(mockUsersService.findOneById).toHaveBeenCalledWith('user-uuid-1');
       expect(mockStoresService.findOne).toHaveBeenCalledWith('store-uuid-1');
+      expect(mockQueryBuilder.setLock).toHaveBeenCalledWith(
+        'pessimistic_write',
+      );
     });
 
     it('should throw ConflictException if relation already exists', async () => {
@@ -92,6 +120,61 @@ describe('UserstoresService', () => {
       await expect(
         service.create({ userID: 'user-uuid-1', storeID: 'store-uuid-1' }),
       ).rejects.toThrow(ConflictException);
+      expect(mockUserStoreRepository.create).not.toHaveBeenCalled();
+      expect(mockQueryBuilder.getOne).not.toHaveBeenCalled();
+    });
+
+    it('should reopen a relation closed today instead of creating a new one', async () => {
+      const closedRelation: Partial<UserStore> = {
+        ...mockUserStore,
+        effectiveFrom: '2026-01-01',
+        effectiveTo: '2026-09-15',
+        removedAt: new Date('2026-09-15T12:00:00Z'),
+      };
+      mockUsersService.findOneById.mockResolvedValue(mockUser);
+      mockStoresService.findOne.mockResolvedValue(mockStore);
+      mockUserStoreRepository.findOne.mockResolvedValue(null);
+      mockQueryBuilder.getOne.mockResolvedValue(closedRelation);
+      mockUserStoreRepository.save.mockImplementation(
+        async (entity: UserStore) => entity,
+      );
+
+      const result = await service.create({
+        userID: 'user-uuid-1',
+        storeID: 'store-uuid-1',
+      });
+
+      expect(mockUserStoreRepository.create).not.toHaveBeenCalled();
+      expect(mockUserStoreRepository.save).toHaveBeenCalledWith(closedRelation);
+      expect(result.effectiveTo).toBeNull();
+      expect(result.removedAt).toBeNull();
+      expect(result.user).toBe(mockUser);
+      expect(result.store).toBe(mockStore);
+    });
+
+    it('should create a new relation when the previous one was closed on an earlier day', async () => {
+      mockUsersService.findOneById.mockResolvedValue(mockUser);
+      mockStoresService.findOne.mockResolvedValue(mockStore);
+      mockUserStoreRepository.findOne.mockResolvedValue(null);
+      // La consulta filtra por effectiveTo >= hoy, así que una fila cerrada
+      // en un día anterior no se considera reabrible.
+      mockQueryBuilder.getOne.mockResolvedValue(null);
+      mockUserStoreRepository.create.mockReturnValue(mockUserStore);
+      mockUserStoreRepository.save.mockResolvedValue(mockUserStore);
+
+      const result = await service.create({
+        userID: 'user-uuid-1',
+        storeID: 'store-uuid-1',
+      });
+
+      expect(result).toEqual(mockUserStore);
+      expect(mockUserStoreRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user: mockUser,
+          store: mockStore,
+          effectiveFrom: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        }),
+      );
     });
 
     it('should throw NotFoundException if user not found', async () => {
@@ -111,7 +194,10 @@ describe('UserstoresService', () => {
 
       expect(result).toEqual([mockUserStore]);
       expect(mockUserStoreRepository.find).toHaveBeenCalledWith({
-        where: {},
+        where: {
+          effectiveTo: expect.any(Object),
+          removedAt: expect.any(Object),
+        },
         relations: ['user', 'store'],
       });
     });
@@ -125,7 +211,11 @@ describe('UserstoresService', () => {
 
       expect(result).toEqual([mockUserStore]);
       expect(mockUserStoreRepository.find).toHaveBeenCalledWith({
-        where: { user: { userID: 'user-uuid-1' } },
+        where: {
+          user: { userID: 'user-uuid-1' },
+          effectiveTo: expect.any(Object),
+          removedAt: expect.any(Object),
+        },
         relations: ['store'],
       });
     });
@@ -139,21 +229,29 @@ describe('UserstoresService', () => {
 
       expect(result).toEqual([mockUserStore]);
       expect(mockUserStoreRepository.find).toHaveBeenCalledWith({
-        where: { store: { storeID: 'store-uuid-1' } },
+        where: {
+          store: { storeID: 'store-uuid-1' },
+          effectiveTo: expect.any(Object),
+          removedAt: expect.any(Object),
+        },
         relations: ['user'],
       });
     });
   });
 
   describe('remove', () => {
-    it('should remove a user-store relation', async () => {
+    it('should close a user-store relation without deleting it', async () => {
       mockUserStoreRepository.findOne.mockResolvedValue(mockUserStore);
-      mockUserStoreRepository.remove.mockResolvedValue(mockUserStore);
+      mockUserStoreRepository.save.mockResolvedValue(mockUserStore);
 
       await service.remove('userstore-uuid-1');
 
-      expect(mockUserStoreRepository.remove).toHaveBeenCalledWith(
-        mockUserStore,
+      expect(mockUserStoreRepository.remove).not.toHaveBeenCalled();
+      expect(mockUserStoreRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          effectiveTo: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+          removedAt: expect.any(Date),
+        }),
       );
     });
 

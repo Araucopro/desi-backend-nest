@@ -104,7 +104,13 @@ export class CashRegisterSessionUsersService {
     userID: string,
   ): Promise<void> {
     const assignment = await manager.getRepository(UserStore).findOne({
-      where: { tenantID, store: { storeID }, user: { userID } },
+      where: {
+        tenantID,
+        store: { storeID },
+        user: { userID },
+        effectiveTo: IsNull(),
+        removedAt: IsNull(),
+      },
       relations: ['user'],
     });
 

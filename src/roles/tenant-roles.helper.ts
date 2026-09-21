@@ -55,7 +55,12 @@ export async function ensureTenantRoles(
         ? [...permissionKeys]
         : role.name === 'system'
           ? []
-          : BASE_PERMISSION_KEYS;
+          : [
+              ...BASE_PERMISSION_KEYS,
+              ...(role.name === 'store_manager'
+                ? ['hr-attendance:read', 'hr-attendance:manage']
+                : ['hr-attendance:read']),
+            ];
     for (const permissionKey of keys) {
       await manager
         .getRepository(RolePermission)
@@ -66,7 +71,11 @@ export async function ensureTenantRoles(
           tenantID,
           roleID: role.id,
           permissionKey,
-          scope: PermissionScope.ALL,
+          scope:
+            permissionKey === 'hr-attendance:read' &&
+            (role.name === 'consignado' || role.name === 'tercero')
+              ? PermissionScope.OWN
+              : PermissionScope.ALL,
         })
         .orIgnore()
         .execute();
