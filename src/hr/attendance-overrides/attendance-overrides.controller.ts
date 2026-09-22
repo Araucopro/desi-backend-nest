@@ -12,7 +12,6 @@ import {
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
-  ApiBearerAuth,
   ApiBody,
   ApiConflictResponse,
   ApiForbiddenResponse,
@@ -37,7 +36,6 @@ import { UpdateAttendanceOverrideDto } from './dto/update-attendance-override.dt
 import { AuditLogQueryDto } from './dto/audit-log-query.dto';
 
 @ApiTags('Recursos Humanos')
-@ApiBearerAuth('access-token')
 @Controller('hr/attendance-overrides')
 @UseGuards(StoreContextGuard)
 export class AttendanceOverridesController {
@@ -176,7 +174,6 @@ export class AttendanceOverridesController {
 }
 
 @ApiTags('Recursos Humanos')
-@ApiBearerAuth('access-token')
 @Controller('hr/attendance-audit-log')
 @UseGuards(StoreContextGuard)
 export class AttendanceAuditLogController {

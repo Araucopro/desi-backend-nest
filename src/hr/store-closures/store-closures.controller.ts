@@ -11,7 +11,6 @@ import {
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
-  ApiBearerAuth,
   ApiBody,
   ApiConflictResponse,
   ApiForbiddenResponse,
@@ -36,7 +35,6 @@ import { StoreClosureQueryDto } from './dto/store-closure-query.dto';
 import { CancelStoreClosureDto } from './dto/cancel-store-closure.dto';
 
 @ApiTags('Recursos Humanos')
-@ApiBearerAuth('access-token')
 @Controller('hr/store-closures')
 @UseGuards(StoreContextGuard)
 export class StoreClosuresController {
