@@ -10,7 +10,6 @@ import {
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
-  ApiBearerAuth,
   ApiBody,
   ApiConflictResponse,
   ApiForbiddenResponse,
@@ -29,7 +28,6 @@ import { Role } from './entities/role.entity';
 import { RolesService } from './roles.service';
 
 @ApiTags('Roles')
-@ApiBearerAuth()
 @Controller('roles')
 @RequirePermission('roles:manage')
 export class RolesController {

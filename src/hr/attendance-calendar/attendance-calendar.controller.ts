@@ -1,7 +1,6 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
-  ApiBearerAuth,
   ApiForbiddenResponse,
   ApiHeader,
   ApiOperation,
@@ -27,7 +26,6 @@ import {
 import { AttendanceCalendarService } from './attendance-calendar.service';
 
 @ApiTags('Recursos Humanos')
-@ApiBearerAuth('access-token')
 @Controller('hr')
 @UseGuards(StoreContextGuard)
 export class AttendanceCalendarController {

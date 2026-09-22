@@ -1,7 +1,6 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
-  ApiBearerAuth,
   ApiForbiddenResponse,
   ApiHeader,
   ApiOperation,
@@ -23,7 +22,6 @@ import { EmployeeSummaryDto } from './dto/employee-summary.dto';
 import { RosterService } from './roster.service';
 
 @ApiTags('Recursos Humanos')
-@ApiBearerAuth('access-token')
 @Controller('hr/employees')
 @UseGuards(StoreContextGuard)
 export class RosterController {
