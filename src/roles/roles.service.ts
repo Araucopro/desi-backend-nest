@@ -30,8 +30,10 @@ export class RolesService {
   ) {}
 
   async findAll(): Promise<Role[]> {
+    const tenantID = this.tenantContext.getTenantId();
     return this.tenantContext.transaction((manager) =>
       manager.getRepository(Role).find({
+        where: { tenantID },
         relations: ['permissions', 'permissions.permission'],
         order: { name: 'ASC' },
       }),
