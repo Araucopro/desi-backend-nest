@@ -89,10 +89,8 @@ export class AttendanceCalendarService {
           employeeID,
         });
       }
-      const [closures, overrides] = await Promise.all([
-        closuresQuery.getMany(),
-        overridesQuery.getMany(),
-      ]);
+      const closures = await closuresQuery.getMany();
+      const overrides = await overridesQuery.getMany();
       return this.builder.buildRange(from, to, roster, closures, overrides);
     });
   }

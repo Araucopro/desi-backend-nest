@@ -117,57 +117,70 @@ export class ReportsService {
       const { storeId, page = 1, limit = 50 } = filter;
       const { from, to } = normalizeDates(filter.from, filter.to, timeZone);
 
-      const [paymentRaw, statusRaw, salePaymentRaw, saleStatusRaw] =
-        await Promise.all([
-          fetchDtePaymentBreakdown(dteRepo, from, to, storeId),
-          fetchDteStatusBreakdown(dteRepo, from, to, storeId),
-          fetchSalePaymentBreakdown(saleRepo, from, to, storeId),
-          fetchSaleStatusBreakdown(saleRepo, from, to, storeId),
-        ]);
+      const paymentRaw = await fetchDtePaymentBreakdown(
+        dteRepo,
+        from,
+        to,
+        storeId,
+      );
+      const statusRaw = await fetchDteStatusBreakdown(
+        dteRepo,
+        from,
+        to,
+        storeId,
+      );
+      const salePaymentRaw = await fetchSalePaymentBreakdown(
+        saleRepo,
+        from,
+        to,
+        storeId,
+      );
+      const saleStatusRaw = await fetchSaleStatusBreakdown(
+        saleRepo,
+        from,
+        to,
+        storeId,
+      );
 
       const { todayStart, tomorrowStart, yesterdayStart, monthStart } =
         buildPeriodBoundaries(new Date(), timeZone);
 
-      const [todaySummary, yesterdaySummary, monthSummary] = await Promise.all([
-        aggregateDteCountAndTotal(
-          dteRepo,
-          todayStart.toISOString(),
-          tomorrowStart.toISOString(),
-          storeId,
-        ),
-        aggregateDteCountAndTotal(
-          dteRepo,
-          yesterdayStart.toISOString(),
-          todayStart.toISOString(),
-          storeId,
-        ),
-        aggregateDteCountAndTotal(
-          dteRepo,
-          monthStart.toISOString(),
-          tomorrowStart.toISOString(),
-          storeId,
-        ),
-      ]);
-      const [todayNotes, yesterdayNotes, monthNotes] = await Promise.all([
-        aggregateSaleNoteCountAndTotal(
-          saleRepo,
-          todayStart.toISOString(),
-          tomorrowStart.toISOString(),
-          storeId,
-        ),
-        aggregateSaleNoteCountAndTotal(
-          saleRepo,
-          yesterdayStart.toISOString(),
-          todayStart.toISOString(),
-          storeId,
-        ),
-        aggregateSaleNoteCountAndTotal(
-          saleRepo,
-          monthStart.toISOString(),
-          tomorrowStart.toISOString(),
-          storeId,
-        ),
-      ]);
+      const todaySummary = await aggregateDteCountAndTotal(
+        dteRepo,
+        todayStart.toISOString(),
+        tomorrowStart.toISOString(),
+        storeId,
+      );
+      const yesterdaySummary = await aggregateDteCountAndTotal(
+        dteRepo,
+        yesterdayStart.toISOString(),
+        todayStart.toISOString(),
+        storeId,
+      );
+      const monthSummary = await aggregateDteCountAndTotal(
+        dteRepo,
+        monthStart.toISOString(),
+        tomorrowStart.toISOString(),
+        storeId,
+      );
+      const todayNotes = await aggregateSaleNoteCountAndTotal(
+        saleRepo,
+        todayStart.toISOString(),
+        tomorrowStart.toISOString(),
+        storeId,
+      );
+      const yesterdayNotes = await aggregateSaleNoteCountAndTotal(
+        saleRepo,
+        yesterdayStart.toISOString(),
+        todayStart.toISOString(),
+        storeId,
+      );
+      const monthNotes = await aggregateSaleNoteCountAndTotal(
+        saleRepo,
+        monthStart.toISOString(),
+        tomorrowStart.toISOString(),
+        storeId,
+      );
 
       const [documents, total] = await fetchDocumentList(
         dteRepo,

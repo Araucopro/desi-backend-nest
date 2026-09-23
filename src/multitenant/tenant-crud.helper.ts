@@ -110,19 +110,18 @@ export async function findAllTenants(
 
   const [tenantsList, total] = await queryBuilder.getManyAndCount();
 
-  const items = await Promise.all(
-    tenantsList.map(async (tenant) => {
-      const { users, stores } = await getTenantUsersAndStores(
-        tenantContext,
-        tenant.tenantID,
-      );
-      return {
-        ...tenant,
-        users,
-        stores,
-      };
-    }),
-  );
+  const items = [];
+  for (const tenant of tenantsList) {
+    const { users, stores } = await getTenantUsersAndStores(
+      tenantContext,
+      tenant.tenantID,
+    );
+    items.push({
+      ...tenant,
+      users,
+      stores,
+    });
+  }
 
   return {
     items,
