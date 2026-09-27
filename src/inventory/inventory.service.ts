@@ -102,6 +102,7 @@ export class InventoryService {
     referenceID: string,
     tenantID: string | undefined,
     reason: InventoryMovementReason = InventoryMovementReason.SALE,
+    allowNegativeStock = false,
   ): Promise<number> {
     return reserveStockAndSnapshotCostsHelper(
       manager,
@@ -110,6 +111,7 @@ export class InventoryService {
       referenceID,
       tenantID,
       reason,
+      allowNegativeStock,
     );
   }
 

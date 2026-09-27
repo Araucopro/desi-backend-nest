@@ -11,6 +11,7 @@ import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
 import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { InventoryService } from '../inventory/inventory.service';
+import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
 import { DispatchGuide } from '../dispatch-guides/entities/dispatch-guide.entity';
 import { DispatchGuideReferenceItem } from '../dispatch-guides/entities/dispatch-guide-reference-item.entity';
 import {
@@ -25,6 +26,8 @@ function createManagerMock(
     folioCounter?: Partial<SaleFolioCounter> | null;
     stock?: number;
     storeHasOpenfacturaKey?: boolean;
+    storeRequireClientForSale?: boolean;
+    storeAllowNegativeStock?: boolean;
     dispatchGuides?: any[];
     consumedReferenceItems?: any[];
   } = {},
@@ -42,6 +45,8 @@ function createManagerMock(
     acteco: '479100',
     location: 'Santiago',
     hasOpenfacturaKey: initial.storeHasOpenfacturaKey ?? true,
+    requireClientForSale: initial.storeRequireClientForSale ?? false,
+    allowNegativeStock: initial.storeAllowNegativeStock ?? false,
   };
   const storeProduct = {
     storeProductID: 'sp-1',
@@ -864,6 +869,159 @@ describe('SalesService', () => {
       await expect(service.convert('sale-1', 'store-1')).rejects.toThrow(
         BadRequestException,
       );
+    });
+  });
+
+  describe('store sale flags', () => {
+    function createServiceWithClients(clientsService: unknown) {
+      return new SalesService(
+        {} as any,
+        {} as any,
+        {} as any,
+        dataSource as any,
+        pricingService as any,
+        dteService as any,
+        dteMapperService as any,
+        financialMovementsService as any,
+        new InventoryService(undefined as any),
+        clientsService as any,
+      );
+    }
+
+    it('rejects a nota de venta without client when the store requires one', async () => {
+      ctx = createManagerMock({ storeRequireClientForSale: true });
+      dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+      const service = createService();
+
+      await expect(
+        service.create('store-1', undefined, notaVentaDto() as any),
+      ).rejects.toThrow(
+        'Esta tienda exige asociar un cliente registrado a toda venta',
+      );
+      expect(ctx.sale()).toBeNull();
+      expect(ctx.storeProduct.stock).toBe(10);
+    });
+
+    it('rejects a boleta without client when the store requires one', async () => {
+      ctx = createManagerMock({ storeRequireClientForSale: true });
+      dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+      const service = createService();
+      const dto = {
+        saleType: SaleType.BOLETA,
+        paymentType: SalePaymentType.CASH,
+        items: [{ storeProductID: 'sp-1', quantity: 1 }],
+      };
+
+      await expect(
+        service.create('store-1', undefined, dto as any),
+      ).rejects.toThrow(BadRequestException);
+      expect(dteService.create).not.toHaveBeenCalled();
+    });
+
+    it('accepts a sale with an explicit client when the store requires one', async () => {
+      ctx = createManagerMock({ storeRequireClientForSale: true });
+      dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+      const service = createService();
+      const dto = { ...notaVentaDto(), clientID: 'client-1' };
+
+      const result = await service.create('store-1', undefined, dto as any);
+
+      expect(result.sale.clientID).toBe('client-1');
+    });
+
+    it('accepts a sale when the receiver rut resolves to a registered client', async () => {
+      ctx = createManagerMock({ storeRequireClientForSale: true });
+      dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+      const clientsService = {
+        findOne: jest.fn(),
+        findOrCreate: jest.fn().mockResolvedValue({
+          clientID: 'client-9',
+          rut: '66666666-6',
+          name: 'Cliente SpA',
+        }),
+      };
+      const service = createServiceWithClients(clientsService);
+      const dto = {
+        ...notaVentaDto(),
+        receiver: { rut: '66666666-6', name: 'Cliente SpA' },
+      };
+
+      const result = await service.create('store-1', undefined, dto as any);
+
+      expect(clientsService.findOrCreate).toHaveBeenCalledWith(
+        'tenant-1',
+        expect.objectContaining({ rut: '66666666-6' }),
+        ctx.manager,
+      );
+      expect(result.sale.clientID).toBe('client-9');
+    });
+
+    it('keeps the current behavior for stores without the client flag', async () => {
+      const service = createService();
+
+      const result = await service.create(
+        'store-1',
+        undefined,
+        notaVentaDto() as any,
+      );
+
+      expect(result.sale.clientID).toBeNull();
+      expect(ctx.storeProduct.stock).toBe(9);
+    });
+
+    it('propagates allowNegativeStock to the nota de venta reservation', async () => {
+      ctx = createManagerMock({ storeAllowNegativeStock: true });
+      dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+      const reserveStockSpy = jest.spyOn(
+        InventoryService.prototype,
+        'reserveStock',
+      );
+      const service = createService();
+
+      try {
+        await service.create('store-1', undefined, notaVentaDto() as any);
+
+        expect(reserveStockSpy).toHaveBeenCalledWith(
+          ctx.manager,
+          'store-1',
+          expect.any(Array),
+          expect.any(String),
+          undefined,
+          InventoryMovementReason.SALE,
+          true,
+        );
+      } finally {
+        reserveStockSpy.mockRestore();
+      }
+    });
+
+    it('does not allow negative stock when the flag is off', async () => {
+      ctx = createManagerMock({ stock: 0 });
+      dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+      const service = createService();
+      const dto = {
+        ...notaVentaDto(),
+        items: [{ storeProductID: 'sp-1', quantity: 1 }],
+      };
+
+      await expect(
+        service.create('store-1', undefined, dto as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('leaves negative stock when the flag is on', async () => {
+      ctx = createManagerMock({ stock: 0, storeAllowNegativeStock: true });
+      dataSource.transaction.mockImplementation((cb) => cb(ctx.manager));
+      const service = createService();
+      const dto = {
+        ...notaVentaDto(),
+        items: [{ storeProductID: 'sp-1', quantity: 1 }],
+      };
+
+      const result = await service.create('store-1', undefined, dto as any);
+
+      expect(result.sale.total).toBe(1190);
+      expect(ctx.storeProduct.stock).toBe(-1);
     });
   });
 

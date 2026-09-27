@@ -18,6 +18,7 @@ import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { InventoryService } from '../inventory/inventory.service';
+import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
 import { ClientsService } from '../clients/clients.service';
 import { DispatchGuide } from '../dispatch-guides/entities/dispatch-guide.entity';
 import { DispatchGuideReference } from '../dispatch-guides/entities/dispatch-guide-reference.entity';
@@ -47,6 +48,7 @@ import {
   resolveConversionDocumentType,
   toDateOnly,
   toDtePaymentType,
+  validateClientRequirement,
   validateFacturaReceiver,
   validateStoreDteCapability,
 } from './sales-engine';
@@ -180,6 +182,7 @@ export class SalesService {
 
     validateStoreDteCapability(store, dto.saleType);
     validateFacturaReceiver(dto.saleType, receiver);
+    validateClientRequirement(store, clientID);
 
     const pricing = await this.pricingService.calculateCart({
       storeID,
@@ -203,7 +206,7 @@ export class SalesService {
       pricing,
     );
 
-    return prepared;
+    return { prepared, store };
   }
 
   async create(
@@ -264,7 +267,12 @@ export class SalesService {
         }
       }
 
-      const prepared = await this.prepareSale(manager, storeID, dto, userId);
+      const { prepared, store } = await this.prepareSale(
+        manager,
+        storeID,
+        dto,
+        userId,
+      );
       const tenantID = this.tenantContext?.getTenantId();
       const saleID = createSaleId();
       const folio = await nextSaleFolio(manager, storeID, tenantID);
@@ -310,6 +318,8 @@ export class SalesService {
         })),
         saleID,
         tenantID,
+        InventoryMovementReason.SALE,
+        store.allowNegativeStock === true,
       );
 
       await manager.save(
@@ -365,7 +375,7 @@ export class SalesService {
       }
     }
 
-    const prepared = await this.runInTransaction((manager) =>
+    const { prepared, store } = await this.runInTransaction((manager) =>
       this.prepareSale(manager, storeID, dto, userId),
     );
 
@@ -376,9 +386,6 @@ export class SalesService {
     );
 
     const documentType = dto.saleType === SaleType.FACTURA ? 33 : 39;
-    const store = await this.runInTransaction((manager) =>
-      findStoreById(manager, storeID),
-    );
 
     let dispatchGuides: DispatchGuide[] = [];
     if (dto.dispatchGuideIDs?.length) {

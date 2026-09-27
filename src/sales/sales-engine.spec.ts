@@ -11,6 +11,7 @@ import {
   toDateOnly,
   toDtePaymentType,
   toMoney,
+  validateClientRequirement,
   validateFacturaReceiver,
   validateStoreDteCapability,
 } from './sales-engine';
@@ -210,5 +211,29 @@ describe('sales-engine', () => {
     expect(() =>
       validateStoreDteCapability({ hasOpenfacturaKey: true }, SaleType.FACTURA),
     ).not.toThrow();
+  });
+
+  describe('validateClientRequirement', () => {
+    it('allows sales without client when the flag is off', () => {
+      expect(() =>
+        validateClientRequirement({ requireClientForSale: false }, null),
+      ).not.toThrow();
+      expect(() => validateClientRequirement({}, undefined)).not.toThrow();
+    });
+
+    it('allows sales with a registered client when the flag is on', () => {
+      expect(() =>
+        validateClientRequirement({ requireClientForSale: true }, 'client-1'),
+      ).not.toThrow();
+    });
+
+    it('rejects sales without client when the flag is on', () => {
+      expect(() =>
+        validateClientRequirement({ requireClientForSale: true }, null),
+      ).toThrow(BadRequestException);
+      expect(() =>
+        validateClientRequirement({ requireClientForSale: true }, undefined),
+      ).toThrow('Esta tienda exige asociar un cliente registrado a toda venta');
+    });
   });
 });

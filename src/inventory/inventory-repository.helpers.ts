@@ -206,6 +206,9 @@ export async function applyInventoryMovement(
 /**
  * Reserva stock de una venta/DTE: valida disponibilidad, descuenta el cache de
  * stock, registra el movimiento SALE y congela el costo (COGS) en los ítems.
+ *
+ * Con `allowNegativeStock` en true la venta puede dejar el stock en negativo
+ * (flag por tienda), pero la fila StoreProduct debe existir igualmente.
  */
 export async function reserveStockAndSnapshotCosts(
   manager: EntityManager,
@@ -214,6 +217,7 @@ export async function reserveStockAndSnapshotCosts(
   referenceID: string,
   tenantID: string | undefined,
   reason: InventoryMovementReason = InventoryMovementReason.SALE,
+  allowNegativeStock = false,
 ): Promise<number> {
   let cogsTotal = 0;
 
@@ -230,7 +234,7 @@ export async function reserveStockAndSnapshotCosts(
       );
     }
 
-    if (Number(storeProduct.stock) < item.QtyItem) {
+    if (!allowNegativeStock && Number(storeProduct.stock) < item.QtyItem) {
       throw new BadRequestException(
         `Stock insuficiente en tienda para VariationID: ${item.variationID}. Solicitado: ${item.QtyItem}, Disponible: ${storeProduct.stock}`,
       );
@@ -253,7 +257,7 @@ export async function reserveStockAndSnapshotCosts(
       quantity: item.QtyItem,
       referenceID,
       tenantID: tenantID ?? storeProduct.tenantID,
-      allowNegativeStock: false,
+      allowNegativeStock,
       createIfMissing: false,
     });
   }

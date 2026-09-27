@@ -254,6 +254,7 @@ export class UsersService {
     if (dto.password) {
       const saltRounds = 10;
       dto.password = await bcrypt.hash(dto.password, saltRounds);
+      user.sessionVersion += 1;
     }
 
     if (dto.roleID || dto.role) {
@@ -284,6 +285,29 @@ export class UsersService {
           manager.getRepository(User).save(user),
         )
       : this.userRepo.save(user);
+  }
+
+  /**
+   * Cambio de contraseña autoservicio. Hashea la nueva contraseña e incrementa
+   * `sessionVersion` para invalidar los tokens emitidos previamente.
+   */
+  async changePassword(userId: string, newPassword: string): Promise<void> {
+    const user = await this.findOneById(userId);
+    if (user.isSystem)
+      throw new ForbiddenException('System user password cannot be changed');
+
+    const saltRounds = 10;
+    user.password = await bcrypt.hash(newPassword, saltRounds);
+    user.sessionVersion += 1;
+
+    const save = (manager: EntityManager) =>
+      manager.getRepository(User).save(user);
+
+    if (this.tenantContext) {
+      await this.tenantContext.transaction(save);
+      return;
+    }
+    await this.dataSource.transaction(save);
   }
 
   async remove(id: string): Promise<void> {

@@ -25,6 +25,7 @@ import { FinancialMovementsService } from '../financial-movements/financial-move
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { InventoryService } from '../inventory/inventory.service';
+import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
 import {
   OpenfacturaCallResult,
   OpenfacturaClientService,
@@ -284,6 +285,13 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (reserveStock) {
+      const reserveReason =
+        options?.reserveReason ?? InventoryMovementReason.SALE;
+      // El flag por tienda permite stock negativo solo en ventas: guías de
+      // despacho y ajustes mantienen el bloqueo de stock insuficiente.
+      const allowNegativeStock =
+        reserveReason === InventoryMovementReason.SALE &&
+        store.allowNegativeStock === true;
       const reservedCogsTotal = await this.inventoryService.reserveStock(
         manager,
         store.storeID,
@@ -293,7 +301,8 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
         ),
         document.dteDocumentID,
         this.tenantContext?.getTenantId(),
-        options?.reserveReason,
+        reserveReason,
+        allowNegativeStock,
       );
       const costsChanged = costSnapshotChanged(
         document,

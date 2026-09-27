@@ -58,6 +58,21 @@ export function validateFacturaReceiver(
   }
 }
 
+/**
+ * Valida el flag por tienda que exige asociar un cliente registrado a la venta.
+ * El `clientID` debe resolverse antes (receptor con RUT o cliente explícito).
+ */
+export function validateClientRequirement(
+  store: { requireClientForSale?: boolean },
+  clientID?: string | null,
+): void {
+  if (store.requireClientForSale && !clientID) {
+    throw new BadRequestException(
+      'Esta tienda exige asociar un cliente registrado a toda venta',
+    );
+  }
+}
+
 export function validateStoreDteCapability(
   store: { hasOpenfacturaKey?: boolean; name?: string },
   saleType: SaleType,

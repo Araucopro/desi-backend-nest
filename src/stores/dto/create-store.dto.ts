@@ -106,6 +106,28 @@ export class CreateStoreDto {
   readonly isCentralStore?: boolean;
 
   @ApiPropertyOptional({
+    description:
+      'Exige asociar un cliente registrado a toda venta emitida desde la tienda (valor por defecto: false)',
+    example: false,
+    default: false,
+    type: Boolean,
+  })
+  @IsOptional()
+  @IsBoolean()
+  readonly requireClientForSale?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Permite que las ventas dejen stock negativo en la tienda (valor por defecto: false)',
+    example: false,
+    default: false,
+    type: Boolean,
+  })
+  @IsOptional()
+  @IsBoolean()
+  readonly allowNegativeStock?: boolean;
+
+  @ApiPropertyOptional({
     description: 'Giro comercial de la tienda para emisión de DTE',
     example: 'VENTA AL POR MENOR DE PRENDAS DE VESTIR',
   })

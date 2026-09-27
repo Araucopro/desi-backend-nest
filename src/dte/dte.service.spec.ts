@@ -16,6 +16,7 @@ import { Product } from '../products/entities/product.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { InventoryService } from '../inventory/inventory.service';
+import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
 import {
   PurchaseOrder,
   PurchaseOrderCommercialStatus,
@@ -80,6 +81,7 @@ function createMockManager(
     existingDocument?: Partial<DteDocument> | null;
     storeProductStock?: number;
     storeProductCost?: number;
+    storeAllowNegativeStock?: boolean;
     saveDocumentError?: unknown;
     documentAfterConflict?: Partial<DteDocument> | null;
     resolveByName?: boolean;
@@ -139,6 +141,7 @@ function createMockManager(
           phone: '+56 2 1234 5678',
           cdgSIISucur: '0',
           location: null,
+          allowNegativeStock: options.storeAllowNegativeStock ?? false,
         };
       }
       if (entity === ProductVariation) {
@@ -1025,6 +1028,46 @@ describe('DteService', () => {
         return typeof saved?.stock === 'number' && saved.stock < 10;
       }),
     ).toBe(false);
+  });
+
+  it('allows negative stock on sales when the store flag is enabled', async () => {
+    manager = createMockManager({
+      storeProductStock: 1,
+      storeAllowNegativeStock: true,
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    const result = await service.create(
+      'store-1',
+      undefined,
+      createDteDto() as any,
+    );
+
+    expect(result.STATUS).toBe('EMITIDO');
+    expect(
+      manager.save.mock.calls.some(([entity]) => {
+        const saved = entity as { reason?: unknown; delta?: unknown };
+        return (
+          saved?.reason === InventoryMovementReason.SALE && saved?.delta === -2
+        );
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps blocking negative stock for dispatch guides even with the flag', async () => {
+    manager = createMockManager({
+      storeProductStock: 1,
+      storeAllowNegativeStock: true,
+    });
+    dataSource.transaction.mockImplementation((cb) => cb(manager));
+
+    const service = createService();
+    await expect(
+      service.create('store-1', undefined, createDteDto() as any, {
+        reserveReason: InventoryMovementReason.DISPATCH_GUIDE,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('does not revert stock when a reserveStock=false DTE ends in ERROR', async () => {
