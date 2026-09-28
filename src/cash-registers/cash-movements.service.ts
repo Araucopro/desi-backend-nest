@@ -13,7 +13,6 @@ import {
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { UserstoresService } from '../relations/userstores/userstores.service';
 import {
   assertUserCanAccessStore,
   findCashRegisterOrFail,
@@ -62,7 +61,6 @@ export class CashMovementsService {
   constructor(
     @InjectRepository(CashMovement)
     private readonly cashMovementRepository: Repository<CashMovement>,
-    private readonly userstoresService: UserstoresService,
     private readonly movementReasonsService: CashMovementReasonsService,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
@@ -183,11 +181,7 @@ export class CashMovementsService {
         cashRegisterID,
         tenantID,
       );
-      await assertUserCanAccessStore(
-        this.userstoresService,
-        user,
-        register.storeID,
-      );
+      await assertUserCanAccessStore(manager, user, register.storeID);
 
       const session = await findOpenSessionOrFail(manager, cashRegisterID, {
         tenantID,
@@ -247,11 +241,7 @@ export class CashMovementsService {
         cashRegisterID,
         tenantID,
       );
-      await assertUserCanAccessStore(
-        this.userstoresService,
-        user,
-        register.storeID,
-      );
+      await assertUserCanAccessStore(manager, user, register.storeID);
 
       const session = await findOpenSessionOrFail(manager, cashRegisterID, {
         tenantID,

@@ -1,14 +1,22 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { EntityManager, FindOptionsWhere, In, IsNull } from 'typeorm';
+import {
+  DeepPartial,
+  EntityManager,
+  FindOptionsWhere,
+  In,
+  IsNull,
+} from 'typeorm';
+import { isUniqueViolation } from '../common/utils/db-errors.util';
 import {
   JwtPayload,
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
-import { UserstoresService } from '../relations/userstores/userstores.service';
+import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { Store } from '../stores/entities/store.entity';
 import { UserRole } from '../users/entities/user.entity';
 import { CashPaymentMethodTotal } from './entities/cash-register-closing.entity';
@@ -37,6 +45,26 @@ import { PaymentMethod } from './entities/payment-method.entity';
 
 export function toMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Encabezado con el que se marca una sesión cerrada por la vía forzada. El
+ * prefijo es estable a propósito: permite distinguir en una consulta SQL los
+ * cierres sin arqueo de los cierres normales, algo que un texto libre no permite.
+ */
+export const FORCE_CLOSE_NOTE_PREFIX = '[CIERRE FORZADO]';
+
+/**
+ * Compone la nota de cierre forzado. La marca de tiempo va dentro de la nota
+ * porque `CashRegisterSession` no tiene una columna `forceClosedAt` y no vale la
+ * pena una migración de esquema solo para esto: `closingNotes` ya es el campo de
+ * auditoría del cierre y `closedAt` guarda el instante exacto.
+ */
+export function buildForceCloseNote(
+  reason: string,
+  now: Date = new Date(),
+): string {
+  return `${FORCE_CLOSE_NOTE_PREFIX} ${now.toISOString()} — ${reason}`;
 }
 
 export function resolveActingUserId(
@@ -75,9 +103,15 @@ export function assertCashApprover(
 /**
  * Valida que el usuario pueda operar sobre la tienda de la caja. Usuarios
  * MASTER y ADMIN del tenant acceden siempre; el resto requiere `UserStore`.
+ *
+ * La lectura de `UserStore` se hace **con el `EntityManager` recibido**: así
+ * corre en la conexión de la transacción en curso, con `app.tenant_id` ya
+ * aplicado. Resolverlo con el repositorio global abriría una segunda conexión
+ * del pool sin contexto tenant, y con RLS forzado sobre `UserStore` la consulta
+ * devolvería 0 filas: el usuario recibiría un 403 intermitente.
  */
 export async function assertUserCanAccessStore(
-  userstoresService: UserstoresService,
+  manager: EntityManager,
   user: JwtPayload | MasterJwtPayload,
   storeID: string,
 ): Promise<void> {
@@ -86,14 +120,18 @@ export async function assertUserCanAccessStore(
   const tenantUser = user;
   if (tenantUser.role === UserRole.ADMIN) return;
 
-  const assignedStores = await userstoresService.findStoresByUserId(
-    tenantUser.userId || tenantUser.id,
-  );
-  const hasAccess = assignedStores.some(
-    (userStore) => userStore.store?.storeID === storeID,
-  );
+  const userID = tenantUser.userId || tenantUser.id;
 
-  if (!hasAccess) {
+  const userStore = await manager
+    .getRepository(UserStore)
+    .createQueryBuilder('userStore')
+    .where('userStore.userID = :userID', { userID })
+    .andWhere('userStore.storeID = :storeID', { storeID })
+    .andWhere('userStore.effectiveTo IS NULL')
+    .andWhere('userStore.removedAt IS NULL')
+    .getOne();
+
+  if (!userStore) {
     throw new ForbiddenException(
       'El usuario no tiene asignada la tienda correspondiente a esta caja',
     );
@@ -235,6 +273,12 @@ export async function sumSessionCashMovements(
  * abrir la sesión para dejar trazabilidad inmediata de quién atiende la caja;
  * si el operador ya tiene un registro activo se devuelve el existente para
  * mantener la operación idempotente.
+ *
+ * **Contrato de atomicidad:** esta función corre dentro de la transacción de
+ * `openSession`, justo después de guardar la sesión. Si falla, la transacción
+ * completa revierte y **la apertura no queda persistida**: no puede existir una
+ * sesión `OPEN` sin su operador en turno. El llamador no debe intentar compensar
+ * ni reintentar por su cuenta — la sesión simplemente no se creó.
  */
 export async function attachSessionOperator(
   manager: EntityManager,
@@ -309,6 +353,46 @@ export async function findStoreOrFail(
   }
 
   return store;
+}
+
+/**
+ * Guarda una entidad recién creada traduciendo la violación de unicidad
+ * (`23505`) a un `409`. Existe porque el patrón `create` + `save` + `catch` con
+ * un mensaje de dominio se repite en casi todos los servicios de caja, y en cada
+ * copia es fácil olvidar el `throw error` final y convertir un `23505` no
+ * relacionado —o un error de conexión— en un `409` con la causa equivocada.
+ *
+ * **Contrato:** solo traduce `23505`. Cualquier otro error se propaga intacto,
+ * porque la causa real (permisos, RLS, tipo de dato, FK) tiene otro diagnóstico y
+ * otro código HTTP. El llamador decide el mensaje de conflicto, que es lo único
+ * realmente específico del dominio.
+ *
+ * Uso:
+ * ```ts
+ * return saveOrConflict(
+ *   repository,
+ *   repository.create({ tenantID, code }),
+ *   `Ya existe un medio de pago con el código "${code}"`,
+ * );
+ * ```
+ *
+ * Cuando el mensaje depende del índice violado (por ejemplo el de sesión abierta
+ * comparte `23505` con el de operador activo), usar `resolveDbConstraint` antes
+ * de llamar aquí y no delegar la distinción a este helper.
+ */
+export async function saveOrConflict<T extends object>(
+  repository: { save: (entity: DeepPartial<T>) => Promise<T> },
+  entity: DeepPartial<T>,
+  conflictMessage: string,
+): Promise<T> {
+  try {
+    return await repository.save(entity);
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new ConflictException(conflictMessage);
+    }
+    throw error;
+  }
 }
 
 /**

@@ -118,6 +118,20 @@ export class Store {
   })
   hasOpenfacturaKey!: boolean;
 
+  @Column({
+    type: 'boolean',
+    default: false,
+    name: 'requireClientForSale',
+  })
+  requireClientForSale!: boolean;
+
+  @Column({
+    type: 'boolean',
+    default: false,
+    name: 'allowNegativeStock',
+  })
+  allowNegativeStock!: boolean;
+
   @OneToMany('UserStore', 'store')
   userStores!: UserStore[];
 

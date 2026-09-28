@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 import * as bcrypt from 'bcrypt';
 import { Tenant, TenantStatus } from '../multitenant/entities/tenant.entity';
@@ -110,5 +111,14 @@ export class AuthService {
       },
       accessToken: await this.jwtService.signAsync(payload),
     };
+  }
+
+  /**
+   * Cambio de contraseña autoservicio. El `userId` proviene del token y la
+   * persistencia (hash + sessionVersion) queda en UsersService.
+   */
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    await this.usersService.changePassword(userId, dto.newPassword);
+    return { changed: true };
   }
 }

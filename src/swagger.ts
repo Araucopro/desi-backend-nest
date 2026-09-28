@@ -39,8 +39,8 @@ export const swaggerConfig = (
     apiReference({
       title: 'Documentación Backend',
       theme: 'bluePlanet',
+      showDeveloperTools: 'always',
       withFastify: true,
-      showDeveloperTools: 'never',
       spec: {
         content: document,
       },

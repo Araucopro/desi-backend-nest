@@ -9,7 +9,6 @@ import {
   DEFAULT_TENANT_TIMEZONE,
   TenantContextService,
 } from '../multitenant/tenant-context.service';
-import { UserstoresService } from '../relations/userstores/userstores.service';
 import {
   assertUserCanAccessStore,
   findCashRegisterOrFail,
@@ -311,7 +310,6 @@ export class CashReportsService {
   constructor(
     @InjectRepository(CashRegister)
     private readonly cashRegisterRepository: Repository<CashRegister>,
-    private readonly userstoresService: UserstoresService,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
@@ -353,11 +351,7 @@ export class CashReportsService {
         cashRegisterID,
         tenantID,
       );
-      await assertUserCanAccessStore(
-        this.userstoresService,
-        user,
-        register.storeID,
-      );
+      await assertUserCanAccessStore(manager, user, register.storeID);
 
       const session = await findSessionOrFail(
         manager,
@@ -525,11 +519,7 @@ export class CashReportsService {
 
     return this.runInTransaction(async (manager) => {
       const store = await findStoreOrFail(manager, storeID, tenantID);
-      await assertUserCanAccessStore(
-        this.userstoresService,
-        user,
-        store.storeID,
-      );
+      await assertUserCanAccessStore(manager, user, store.storeID);
 
       const sessionRows = await this.fetchSessionRows(manager, {
         tenantID,

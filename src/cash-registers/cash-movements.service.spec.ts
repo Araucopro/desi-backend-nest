@@ -7,7 +7,7 @@ import {
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { UserstoresService } from '../relations/userstores/userstores.service';
+import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { UserRole } from '../users/entities/user.entity';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { CashMovementReasonsService } from './cash-movement-reasons.service';
@@ -74,19 +74,29 @@ describe('CashMovementsService (Hito 2)', () => {
   const mockRegisterRepo: { findOne: jest.Mock } = { findOne: jest.fn() };
   const mockSessionRepo: { findOne: jest.Mock } = { findOne: jest.fn() };
 
+  /**
+   * `assertUserCanAccessStore` resuelve la asignación con el `EntityManager` de
+   * la transacción, así que el mock vive en el manager y no en un servicio.
+   */
+  const mockUserStoreQueryBuilder = {
+    where: jest.fn(),
+    andWhere: jest.fn(),
+    getOne: jest.fn(),
+  };
+  mockUserStoreQueryBuilder.where.mockReturnValue(mockUserStoreQueryBuilder);
+  mockUserStoreQueryBuilder.andWhere.mockReturnValue(mockUserStoreQueryBuilder);
+  const mockUserStoreRepo = {
+    createQueryBuilder: jest.fn(() => mockUserStoreQueryBuilder),
+  };
+
   const mockEntityManager: { getRepository: jest.Mock } = {
     getRepository: jest.fn((entity: unknown) => {
       if (entity === CashRegister) return mockRegisterRepo;
       if (entity === CashRegisterSession) return mockSessionRepo;
       if (entity === CashMovement) return mockMovementRepo;
+      if (entity === UserStore) return mockUserStoreRepo;
       return null;
     }),
-  };
-
-  const mockUserstoresService = {
-    findStoresByUserId: jest
-      .fn()
-      .mockResolvedValue([{ store: { storeID: mockStoreID } }]),
   };
 
   const mockCashMovementReasonsService = {
@@ -112,9 +122,10 @@ describe('CashMovementsService (Hito 2)', () => {
       cashRegisterID: mockRegisterID,
       status: CashRegisterSessionStatus.OPEN,
     });
-    mockUserstoresService.findStoresByUserId.mockResolvedValue([
-      { store: { storeID: mockStoreID } },
-    ]);
+    mockUserStoreQueryBuilder.getOne.mockResolvedValue({
+      userStoreID: 'user-store-uuid-8888',
+      storeID: mockStoreID,
+    });
     mockCashMovementReasonsService.getActiveByCodeOrFail.mockImplementation(
       (
         _manager: unknown,
@@ -139,10 +150,6 @@ describe('CashMovementsService (Hito 2)', () => {
         {
           provide: getRepositoryToken(CashMovement),
           useValue: mockMovementRepo,
-        },
-        {
-          provide: UserstoresService,
-          useValue: mockUserstoresService,
         },
         {
           provide: CashMovementReasonsService,
@@ -192,9 +199,7 @@ describe('CashMovementsService (Hito 2)', () => {
     });
 
     it('debe rechazar movimientos si el usuario no pertenece a la tienda', async () => {
-      mockUserstoresService.findStoresByUserId.mockResolvedValue([
-        { store: { storeID: 'otra-tienda' } },
-      ]);
+      mockUserStoreQueryBuilder.getOne.mockResolvedValue(null);
 
       await expect(
         service.createManualMovement(

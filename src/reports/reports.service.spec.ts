@@ -12,9 +12,20 @@ function createRepositoryMock(
   rowsByAlias: Record<string, Array<Record<string, unknown>>>,
   options?: {
     rawOne?: Record<string, Record<string, unknown>>;
+    onQueryStart?: () => void;
+    onQueryEnd?: () => void;
   },
 ) {
   const builders: BuilderState[] = [];
+  const executeQuery = async <T>(result: T): Promise<T> => {
+    options?.onQueryStart?.();
+    try {
+      await Promise.resolve();
+      return result;
+    } finally {
+      options?.onQueryEnd?.();
+    }
+  };
 
   const repository = {
     createQueryBuilder: jest.fn().mockImplementation((alias: string) => {
@@ -56,9 +67,9 @@ function createRepositoryMock(
         addOrderBy() {
           return this;
         },
-        getRawMany: async () => rowsByAlias[alias] ?? [],
+        getRawMany: async () => executeQuery(rowsByAlias[alias] ?? []),
         getRawOne: async () =>
-          options?.rawOne?.[alias] ?? { count: '0', total: '0' },
+          executeQuery(options?.rawOne?.[alias] ?? { count: '0', total: '0' }),
         leftJoinAndSelect() {
           return this;
         },
@@ -409,6 +420,33 @@ describe('ReportsService', () => {
         select.expr.includes('documentType IS DISTINCT FROM 61'),
       ),
     ).toBe(true);
+  });
+
+  it('runs sales report database queries one at a time', async () => {
+    let activeQueries = 0;
+    let maxActiveQueries = 0;
+    const queryHooks = {
+      onQueryStart: () => {
+        activeQueries += 1;
+        maxActiveQueries = Math.max(maxActiveQueries, activeQueries);
+      },
+      onQueryEnd: () => {
+        activeQueries -= 1;
+      },
+    };
+    const documentsRepo = createRepositoryMock({ document: [] }, queryHooks);
+    const movementsRepo = createRepositoryMock({ movement: [] });
+    const saleRepo = createRepositoryMock({ sale: [] }, queryHooks);
+    const service = new ReportsService(
+      documentsRepo as any,
+      movementsRepo as any,
+      saleRepo as any,
+    );
+
+    await service.getSalesReport({});
+
+    expect(maxActiveQueries).toBe(1);
+    expect(activeQueries).toBe(0);
   });
 
   it('defaults to the current year when year is omitted', async () => {

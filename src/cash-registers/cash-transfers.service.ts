@@ -13,7 +13,6 @@ import {
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { UserstoresService } from '../relations/userstores/userstores.service';
 import {
   assertCashApprover,
   assertUserCanAccessStore,
@@ -61,7 +60,6 @@ export class CashTransfersService {
   constructor(
     @InjectRepository(CashTransfer)
     private readonly cashTransferRepository: Repository<CashTransfer>,
-    private readonly userstoresService: UserstoresService,
     private readonly cashMovementsService: CashMovementsService,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
@@ -99,11 +97,7 @@ export class CashTransfersService {
       cashRegisterID,
       tenantID,
     );
-    await assertUserCanAccessStore(
-      this.userstoresService,
-      user,
-      register.storeID,
-    );
+    await assertUserCanAccessStore(manager, user, register.storeID);
 
     const session = await findOpenSessionOrFail(manager, cashRegisterID, {
       tenantID,
@@ -135,11 +129,7 @@ export class CashTransfersService {
       cashRegisterID,
       tenantID,
     );
-    await assertUserCanAccessStore(
-      this.userstoresService,
-      user,
-      register.storeID,
-    );
+    await assertUserCanAccessStore(manager, user, register.storeID);
 
     const session = await findSessionOrFail(
       manager,
@@ -265,7 +255,7 @@ export class CashTransfersService {
           );
         }
         await assertUserCanAccessStore(
-          this.userstoresService,
+          manager,
           user,
           destinationRegister.storeID,
         );
@@ -424,7 +414,7 @@ export class CashTransfersService {
           tenantID,
         );
         await assertUserCanAccessStore(
-          this.userstoresService,
+          manager,
           user,
           destinationRegister.storeID,
         );

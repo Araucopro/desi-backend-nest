@@ -1,8 +1,12 @@
+import { BadRequestException } from '@nestjs/common';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { InventoryMovement } from './entities/inventory-movement.entity';
 import { InventoryMovementReason } from './entities/inventory-movement.entity';
 import { ReturnItemCondition } from '../returns/entities/return-item.entity';
-import { applyInventoryMovement } from './inventory-repository.helpers';
+import {
+  applyInventoryMovement,
+  reserveStockAndSnapshotCosts,
+} from './inventory-repository.helpers';
 
 function createMockManager(existing: Partial<StoreProduct> | null = null) {
   let storeProductState: Partial<StoreProduct> | null = existing
@@ -104,5 +108,59 @@ describe('applyInventoryMovement', () => {
       InventoryMovement,
       expect.objectContaining({ condition: ReturnItemCondition.DEFECTIVE }),
     );
+  });
+});
+
+describe('reserveStockAndSnapshotCosts', () => {
+  function createReservationManager(stock: number) {
+    return createMockManager({
+      storeProductID: 'sp-1',
+      tenantID: 'tenant-1',
+      store: { storeID: 'store-1' } as any,
+      variation: { variationID: 'var-1' } as any,
+      stock,
+      stockDefective: 0,
+      priceCost: 100,
+    });
+  }
+
+  it('keeps rejecting insufficient stock by default', async () => {
+    const manager = createReservationManager(1);
+
+    await expect(
+      reserveStockAndSnapshotCosts(
+        manager as any,
+        'store-1',
+        [{ variationID: 'var-1', QtyItem: 2 }],
+        'ref-1',
+        'tenant-1',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('allows negative stock and records the SALE movement when enabled', async () => {
+    const manager = createReservationManager(1);
+    const item = { variationID: 'var-1', QtyItem: 3 };
+
+    const cogsTotal = await reserveStockAndSnapshotCosts(
+      manager as any,
+      'store-1',
+      [item],
+      'ref-1',
+      'tenant-1',
+      InventoryMovementReason.SALE,
+      true,
+    );
+
+    expect(cogsTotal).toBe(300);
+    expect(item).toMatchObject({ costPrice: 100, costTotal: 300 });
+    const movement = manager.create.mock.calls.find(
+      ([entity]) => entity === InventoryMovement,
+    )?.[1] as Record<string, unknown>;
+    expect(movement).toMatchObject({
+      delta: -3,
+      reason: InventoryMovementReason.SALE,
+      referenceID: 'ref-1',
+    });
   });
 });

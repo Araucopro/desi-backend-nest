@@ -11,16 +11,15 @@ import {
   JwtPayload,
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
-import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { UserStore } from '../relations/userstores/entities/userstore.entity';
-import { UserstoresService } from '../relations/userstores/userstores.service';
 import { UserStatus } from '../users/entities/user.entity';
 import {
   assertUserCanAccessStore,
   findCashRegisterOrFail,
   findOpenSessionOrFail,
   resolveActingUserId,
+  saveOrConflict,
 } from './cash-registers.helpers';
 import { AssignCashSessionUserDto } from './dto/assign-cash-session-user.dto';
 import { QueryCashSessionUsersDto } from './dto/query-cash-session-users.dto';
@@ -37,7 +36,6 @@ export class CashRegisterSessionUsersService {
   constructor(
     @InjectRepository(CashRegisterSessionUser)
     private readonly sessionUserRepository: Repository<CashRegisterSessionUser>,
-    private readonly userstoresService: UserstoresService,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
@@ -74,11 +72,7 @@ export class CashRegisterSessionUsersService {
       cashRegisterID,
       tenantID,
     );
-    await assertUserCanAccessStore(
-      this.userstoresService,
-      user,
-      register.storeID,
-    );
+    await assertUserCanAccessStore(manager, user, register.storeID);
 
     const session = await findOpenSessionOrFail(manager, cashRegisterID, {
       tenantID,
@@ -195,16 +189,11 @@ export class CashRegisterSessionUsersService {
         notes: dto.notes?.trim() || null,
       });
 
-      try {
-        return await repository.save(record);
-      } catch (error) {
-        if (isUniqueViolation(error)) {
-          throw new ConflictException(
-            'El usuario ya está en turno en esta sesión',
-          );
-        }
-        throw error;
-      }
+      return saveOrConflict(
+        repository,
+        record,
+        'El usuario ya está en turno en esta sesión',
+      );
     });
   }
 

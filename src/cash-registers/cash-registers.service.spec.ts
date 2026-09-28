@@ -18,11 +18,16 @@ import {
 import { CashMovement } from './entities/cash-movement.entity';
 import { CashTransfer } from './entities/cash-transfer.entity';
 import { CashRegisterSessionUser } from './entities/cash-register-session-user.entity';
+import { CashRegisterClosing } from './entities/cash-register-closing.entity';
 import { Store } from '../stores/entities/store.entity';
-import { UserstoresService } from '../relations/userstores/userstores.service';
+import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { UserRole } from '../users/entities/user.entity';
-import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import {
+  JwtPayload,
+  MasterJwtPayload,
+} from '../auth/interfaces/jwt-payload.interface';
+import { FORCE_CLOSE_NOTE_PREFIX } from './cash-registers.helpers';
 
 describe('CashRegistersService (Hito 1)', () => {
   let service: CashRegistersService;
@@ -114,6 +119,14 @@ describe('CashRegistersService (Hito 1)', () => {
     count: jest.fn().mockResolvedValue(0),
   };
 
+  /**
+   * El cierre forzado consulta si hay un arqueo `PENDING` antes de sellar: un
+   * arqueo en curso sobre una sesión que se fuerza a `CLOSED` quedaría colgado.
+   */
+  const mockClosingRepo: { findOne: jest.Mock } = {
+    findOne: jest.fn().mockResolvedValue(null),
+  };
+
   const mockSessionUserQueryBuilder: Record<string, jest.Mock> = {};
   for (const method of ['update', 'set', 'where', 'andWhere']) {
     mockSessionUserQueryBuilder[method] = jest
@@ -136,8 +149,18 @@ describe('CashRegistersService (Hito 1)', () => {
     createQueryBuilder: jest.fn(() => mockSessionUserQueryBuilder),
   };
 
-  const mockUserstoresService = {
-    findStoresByUserId: jest.fn(),
+  /**
+   * `assertUserCanAccessStore` resuelve la asignación con el `EntityManager` de
+   * la transacción, así que el mock vive en el manager y no en un servicio.
+   */
+  const mockUserStoreQueryBuilder: Record<string, jest.Mock> = {};
+  for (const method of ['where', 'andWhere']) {
+    mockUserStoreQueryBuilder[method] = jest
+      .fn()
+      .mockReturnValue(mockUserStoreQueryBuilder);
+  }
+  const mockUserStoreRepo: { createQueryBuilder: jest.Mock } = {
+    createQueryBuilder: jest.fn(() => mockUserStoreQueryBuilder),
   };
 
   const mockTenantContext = {
@@ -154,7 +177,9 @@ describe('CashRegistersService (Hito 1)', () => {
       if (entity === CashMovement) return mockCashMovementRepo;
       if (entity === CashRegisterSessionUser) return mockSessionUserRepo;
       if (entity === CashTransfer) return mockTransferRepo;
+      if (entity === CashRegisterClosing) return mockClosingRepo;
       if (entity === Store) return mockStoreRepo;
+      if (entity === UserStore) return mockUserStoreRepo;
       return null;
     }),
   };
@@ -167,6 +192,11 @@ describe('CashRegistersService (Hito 1)', () => {
       cashOut: '0',
     });
     mockTransferRepo.count.mockResolvedValue(0);
+    mockClosingRepo.findOne.mockResolvedValue(null);
+    mockUserStoreQueryBuilder.getOne = jest.fn().mockResolvedValue({
+      userStoreID: 'user-store-uuid-8888',
+      storeID: mockStoreID,
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -182,10 +212,6 @@ describe('CashRegistersService (Hito 1)', () => {
         {
           provide: getRepositoryToken(Store),
           useValue: mockStoreRepo,
-        },
-        {
-          provide: UserstoresService,
-          useValue: mockUserstoresService,
         },
         {
           provide: TenantContextService,
@@ -282,9 +308,7 @@ describe('CashRegistersService (Hito 1)', () => {
         storeID: mockStoreID,
       });
       // El usuario está asignado a otra tienda diferente
-      mockUserstoresService.findStoresByUserId.mockResolvedValue([
-        { store: { storeID: 'otra-tienda-uuid' } },
-      ]);
+      mockUserStoreQueryBuilder.getOne.mockResolvedValue(null);
 
       await expect(
         service.openSession(mockRegisterID, openDto, mockUser),
@@ -315,26 +339,156 @@ describe('CashRegistersService (Hito 1)', () => {
       );
 
       expect(result).toEqual(newSession);
-      expect(mockUserstoresService.findStoresByUserId).not.toHaveBeenCalled();
+      expect(mockUserStoreRepo.createQueryBuilder).not.toHaveBeenCalled();
     });
 
-    it('debe lanzar ConflictException si ya existe una sesión abierta para la caja', async () => {
+    it('debe bloquear la fila de la caja al abrir para serializar aperturas concurrentes', async () => {
       mockCashRegisterRepo.findOne.mockResolvedValue({
         cashRegisterID: mockRegisterID,
         status: CashRegisterStatus.ACTIVE,
         storeID: mockStoreID,
       });
-      mockUserstoresService.findStoresByUserId.mockResolvedValue([
-        { store: { storeID: mockStoreID } },
-      ]);
+      mockSessionRepo.findOne.mockResolvedValue(null);
+
+      const createdSession = {
+        sessionID: mockSessionID,
+        cashRegisterID: mockRegisterID,
+        businessDate: '2026-09-13',
+        openingBalance: 50000,
+        status: CashRegisterSessionStatus.OPEN,
+      };
+      mockSessionRepo.create.mockReturnValue(createdSession);
+      mockSessionRepo.save.mockResolvedValue(createdSession);
+
+      await service.openSession(mockRegisterID, openDto, mockUser);
+
+      expect(mockCashRegisterRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          lock: { mode: 'pessimistic_write' },
+        }),
+      );
+    });
+
+    it('debe lanzar ConflictException si otro usuario ya tiene la caja abierta', async () => {
+      mockCashRegisterRepo.findOne.mockResolvedValue({
+        cashRegisterID: mockRegisterID,
+        status: CashRegisterStatus.ACTIVE,
+        storeID: mockStoreID,
+      });
       mockSessionRepo.findOne.mockResolvedValue({
         sessionID: 'existing-open-session',
         status: CashRegisterSessionStatus.OPEN,
+        openedByUserID: 'otro-cajero-uuid',
+        businessDate: '2026-09-13',
       });
 
       await expect(
         service.openSession(mockRegisterID, openDto, mockUser),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('debe lanzar ConflictException si el mismo cajero abre una fecha contable distinta', async () => {
+      mockCashRegisterRepo.findOne.mockResolvedValue({
+        cashRegisterID: mockRegisterID,
+        status: CashRegisterStatus.ACTIVE,
+        storeID: mockStoreID,
+      });
+      mockSessionRepo.findOne.mockResolvedValue({
+        sessionID: 'existing-open-session',
+        status: CashRegisterSessionStatus.OPEN,
+        openedByUserID: mockUserID,
+        businessDate: '2026-09-12',
+      });
+
+      await expect(
+        service.openSession(mockRegisterID, openDto, mockUser),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('debe ser idempotente: reintento del mismo cajero y fecha devuelve la sesión existente', async () => {
+      mockCashRegisterRepo.findOne.mockResolvedValue({
+        cashRegisterID: mockRegisterID,
+        status: CashRegisterStatus.ACTIVE,
+        storeID: mockStoreID,
+      });
+      const existingSession = {
+        sessionID: 'existing-open-session',
+        status: CashRegisterSessionStatus.OPEN,
+        openedByUserID: mockUserID,
+        businessDate: '2026-09-13',
+      };
+      mockSessionRepo.findOne.mockResolvedValue(existingSession);
+
+      const result = await service.openSession(
+        mockRegisterID,
+        openDto,
+        mockUser,
+      );
+
+      expect(result).toBe(existingSession);
+      expect(mockSessionRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('debe traducir una violación de unicidad del INSERT a ConflictException', async () => {
+      mockCashRegisterRepo.findOne.mockResolvedValue({
+        cashRegisterID: mockRegisterID,
+        status: CashRegisterStatus.ACTIVE,
+        storeID: mockStoreID,
+      });
+      mockSessionRepo.findOne.mockResolvedValue(null);
+
+      const createdSession = {
+        sessionID: mockSessionID,
+        cashRegisterID: mockRegisterID,
+        businessDate: '2026-09-13',
+        openingBalance: 50000,
+        status: CashRegisterSessionStatus.OPEN,
+      };
+      mockSessionRepo.create.mockReturnValue(createdSession);
+      mockSessionRepo.save.mockRejectedValue(
+        Object.assign(new Error('duplicate key value'), {
+          code: '23505',
+          driverError: {
+            code: '23505',
+            constraint: 'IDX_unique_open_session_per_register',
+          },
+        }),
+      );
+
+      await expect(
+        service.openSession(mockRegisterID, openDto, mockUser),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('debe reportar el conflicto real cuando el índice violado es el de operador activo', async () => {
+      mockCashRegisterRepo.findOne.mockResolvedValue({
+        cashRegisterID: mockRegisterID,
+        status: CashRegisterStatus.ACTIVE,
+        storeID: mockStoreID,
+      });
+      mockSessionRepo.findOne.mockResolvedValue(null);
+
+      const createdSession = {
+        sessionID: mockSessionID,
+        cashRegisterID: mockRegisterID,
+        businessDate: '2026-09-13',
+        openingBalance: 50000,
+        status: CashRegisterSessionStatus.OPEN,
+      };
+      mockSessionRepo.create.mockReturnValue(createdSession);
+      mockSessionRepo.save.mockRejectedValue(
+        Object.assign(new Error('duplicate key value'), {
+          code: '23505',
+          driverError: {
+            code: '23505',
+            constraint: 'IDX_unique_active_session_user',
+          },
+        }),
+      );
+
+      await expect(
+        service.openSession(mockRegisterID, openDto, mockUser),
+      ).rejects.toThrow(/operador ya está registrado/);
     });
 
     it('debe abrir la sesión exitosamente con fondo inicial y fecha contable', async () => {
@@ -343,9 +497,6 @@ describe('CashRegistersService (Hito 1)', () => {
         status: CashRegisterStatus.ACTIVE,
         storeID: mockStoreID,
       });
-      mockUserstoresService.findStoresByUserId.mockResolvedValue([
-        { store: { storeID: mockStoreID } },
-      ]);
       mockSessionRepo.findOne.mockResolvedValue(null);
 
       const createdSession = {
@@ -388,9 +539,10 @@ describe('CashRegistersService (Hito 1)', () => {
         cashRegisterID: mockRegisterID,
         storeID: mockStoreID,
       });
-      mockUserstoresService.findStoresByUserId.mockResolvedValue([
-        { store: { storeID: mockStoreID } },
-      ]);
+      mockUserStoreQueryBuilder.getOne.mockResolvedValue({
+        userStoreID: 'user-store-uuid-8888',
+        storeID: mockStoreID,
+      });
       mockSessionRepo.findOne.mockResolvedValue(null);
 
       await expect(
@@ -403,9 +555,10 @@ describe('CashRegistersService (Hito 1)', () => {
         cashRegisterID: mockRegisterID,
         storeID: mockStoreID,
       });
-      mockUserstoresService.findStoresByUserId.mockResolvedValue([
-        { store: { storeID: mockStoreID } },
-      ]);
+      mockUserStoreQueryBuilder.getOne.mockResolvedValue({
+        userStoreID: 'user-store-uuid-8888',
+        storeID: mockStoreID,
+      });
 
       const activeSession = {
         sessionID: mockSessionID,
@@ -438,9 +591,10 @@ describe('CashRegistersService (Hito 1)', () => {
         cashRegisterID: mockRegisterID,
         storeID: mockStoreID,
       });
-      mockUserstoresService.findStoresByUserId.mockResolvedValue([
-        { store: { storeID: mockStoreID } },
-      ]);
+      mockUserStoreQueryBuilder.getOne.mockResolvedValue({
+        userStoreID: 'user-store-uuid-8888',
+        storeID: mockStoreID,
+      });
       mockSessionRepo.findOne.mockResolvedValue({
         sessionID: mockSessionID,
         cashRegisterID: mockRegisterID,
@@ -461,9 +615,10 @@ describe('CashRegistersService (Hito 1)', () => {
         cashRegisterID: mockRegisterID,
         storeID: mockStoreID,
       });
-      mockUserstoresService.findStoresByUserId.mockResolvedValue([
-        { store: { storeID: mockStoreID } },
-      ]);
+      mockUserStoreQueryBuilder.getOne.mockResolvedValue({
+        userStoreID: 'user-store-uuid-8888',
+        storeID: mockStoreID,
+      });
       mockSessionRepo.findOne.mockResolvedValue({
         sessionID: mockSessionID,
         cashRegisterID: mockRegisterID,
@@ -492,6 +647,252 @@ describe('CashRegistersService (Hito 1)', () => {
         'movement.status = :posted',
         expect.anything(),
       );
+    });
+  });
+
+  describe('forceCloseSession (Fase 4.2)', () => {
+    const forceCloseDto = {
+      reason:
+        'Sesión huérfana del turno anterior: el cajero no registró el cierre',
+    };
+
+    /**
+     * Sesión colgada típica: abierta, con movimientos y sin arqueo. Es el caso
+     * que el endpoint viene a resolver.
+     *
+     * Es una fábrica y no una constante a propósito: `sealSession` **muta** la
+     * entidad que recibe, así que reutilizar el mismo objeto haría que el test
+     * siguiente encontrara la sesión ya en `CLOSED`.
+     */
+    const buildOrphanSession = () => ({
+      sessionID: mockSessionID,
+      cashRegisterID: mockRegisterID,
+      tenantID: mockTenantID,
+      businessDate: '2026-09-22',
+      openingBalance: 50000,
+      // La abrió un cajero que ya no está; el aprobador es otro usuario.
+      openedByUserID: 'cajero-original-uuid',
+      status: CashRegisterSessionStatus.OPEN,
+    });
+
+    const arrangeRegisterAndAccess = () => {
+      mockCashRegisterRepo.findOne.mockResolvedValue({
+        cashRegisterID: mockRegisterID,
+        storeID: mockStoreID,
+      });
+      mockUserStoreQueryBuilder.getOne.mockResolvedValue({
+        userStoreID: 'user-store-uuid-8888',
+        storeID: mockStoreID,
+      });
+    };
+
+    it('debe lanzar ForbiddenException si el usuario no es aprobador', async () => {
+      const cashier: JwtPayload = { ...mockUser, role: UserRole.CONSIGNADO };
+
+      await expect(
+        service.forceCloseSession(
+          mockRegisterID,
+          mockSessionID,
+          forceCloseDto,
+          cashier,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      // El permiso se valida antes de abrir la transacción: no toca la base.
+      expect(mockCashRegisterRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('debe permitir el cierre a un token MASTER impersonando el tenant', async () => {
+      arrangeRegisterAndAccess();
+      mockSessionRepo.findOne
+        .mockResolvedValueOnce(buildOrphanSession()) // findSessionOrFail
+        .mockResolvedValueOnce(buildOrphanSession()); // lock por ID
+      mockSessionRepo.save.mockImplementation((session: object) =>
+        Promise.resolve(session),
+      );
+
+      const masterUser = {
+        type: 'master',
+        masterUserId: 'master-uuid-9999',
+        role: 'SUPER_ADMIN',
+        sessionVersion: 1,
+        impersonatingTenantId: mockTenantID,
+      } as MasterJwtPayload;
+
+      const result = await service.forceCloseSession(
+        mockRegisterID,
+        mockSessionID,
+        forceCloseDto,
+        masterUser,
+      );
+
+      expect(result.status).toBe(CashRegisterSessionStatus.CLOSED);
+      expect(result.closedByUserID).toBe('master-uuid-9999');
+    });
+
+    it('debe lanzar NotFoundException si la sesión no existe en la caja', async () => {
+      arrangeRegisterAndAccess();
+      mockSessionRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.forceCloseSession(
+          mockRegisterID,
+          mockSessionID,
+          forceCloseDto,
+          mockAdminUser,
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('debe lanzar ConflictException si la sesión ya está cerrada', async () => {
+      arrangeRegisterAndAccess();
+      mockSessionRepo.findOne.mockResolvedValue({
+        ...buildOrphanSession(),
+        status: CashRegisterSessionStatus.CLOSED,
+      });
+
+      await expect(
+        service.forceCloseSession(
+          mockRegisterID,
+          mockSessionID,
+          forceCloseDto,
+          mockAdminUser,
+        ),
+      ).rejects.toThrow(/solo puede forzarse el cierre de una sesión abierta/);
+    });
+
+    it('debe rechazar el cierre forzado si hay transferencias de fondos en curso', async () => {
+      arrangeRegisterAndAccess();
+      mockSessionRepo.findOne.mockResolvedValue(buildOrphanSession());
+      mockTransferRepo.count.mockResolvedValue(1);
+
+      await expect(
+        service.forceCloseSession(
+          mockRegisterID,
+          mockSessionID,
+          forceCloseDto,
+          mockAdminUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockSessionRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('debe rechazar el cierre forzado si la sesión tiene un arqueo en curso', async () => {
+      arrangeRegisterAndAccess();
+      mockSessionRepo.findOne.mockResolvedValue(buildOrphanSession());
+      mockClosingRepo.findOne.mockResolvedValue({
+        closingID: 'closing-uuid-7777',
+      });
+
+      await expect(
+        service.forceCloseSession(
+          mockRegisterID,
+          mockSessionID,
+          forceCloseDto,
+          mockAdminUser,
+        ),
+      ).rejects.toThrow(/arqueo en curso \(ID: closing-uuid-7777\)/);
+
+      expect(mockSessionRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('debe sellar la sesión sin conteo y dejar la diferencia en null', async () => {
+      arrangeRegisterAndAccess();
+      mockSessionRepo.findOne
+        .mockResolvedValueOnce(buildOrphanSession())
+        .mockResolvedValueOnce(buildOrphanSession());
+      mockSessionRepo.save.mockImplementation((session: object) =>
+        Promise.resolve(session),
+      );
+      // 50000 de fondo + 15000 de cobros en efectivo = 65000 esperado.
+      mockCashMovementQueryBuilder.getRawOne.mockResolvedValue({
+        net: '15000',
+        cashIn: '15000',
+        cashOut: '0',
+      });
+
+      const result = await service.forceCloseSession(
+        mockRegisterID,
+        mockSessionID,
+        forceCloseDto,
+        mockAdminUser,
+      );
+
+      expect(result.status).toBe(CashRegisterSessionStatus.CLOSED);
+      expect(result.expectedCashBalance).toBe(65000);
+      // Sin conteo físico no se inventa un arqueo en cero.
+      expect(result.countedCashBalance).toBeNull();
+      expect(result.cashDifference).toBeNull();
+      expect(result.closedByUserID).toBe(mockUserID);
+      expect(result.closedAt).toBeInstanceOf(Date);
+    });
+
+    it('debe guardar la traza de auditoría: motivo, aprobador y marca de tiempo', async () => {
+      arrangeRegisterAndAccess();
+      mockSessionRepo.findOne
+        .mockResolvedValueOnce(buildOrphanSession())
+        .mockResolvedValueOnce(buildOrphanSession());
+      mockSessionRepo.save.mockImplementation((session: object) =>
+        Promise.resolve(session),
+      );
+
+      const result = await service.forceCloseSession(
+        mockRegisterID,
+        mockSessionID,
+        forceCloseDto,
+        mockAdminUser,
+      );
+
+      expect(result.closingNotes).toContain(FORCE_CLOSE_NOTE_PREFIX);
+      expect(result.closingNotes).toContain(forceCloseDto.reason);
+      // El aprobador queda como responsable del cierre, no el cajero original.
+      expect(result.closedByUserID).toBe(mockUserID);
+      expect(result.closedByUserID).not.toBe('cajero-original-uuid');
+    });
+
+    it('debe cerrar los turnos de los operadores activos al sellar', async () => {
+      arrangeRegisterAndAccess();
+      mockSessionRepo.findOne
+        .mockResolvedValueOnce(buildOrphanSession())
+        .mockResolvedValueOnce(buildOrphanSession());
+      mockSessionRepo.save.mockImplementation((session: object) =>
+        Promise.resolve(session),
+      );
+
+      await service.forceCloseSession(
+        mockRegisterID,
+        mockSessionID,
+        forceCloseDto,
+        mockAdminUser,
+      );
+
+      expect(mockSessionUserQueryBuilder.execute).toHaveBeenCalled();
+      expect(mockSessionUserQueryBuilder.andWhere).toHaveBeenCalledWith(
+        '"leftAt" IS NULL',
+      );
+    });
+
+    it('debe bloquear la sesión por ID antes de sellarla', async () => {
+      arrangeRegisterAndAccess();
+      mockSessionRepo.findOne
+        .mockResolvedValueOnce(buildOrphanSession())
+        .mockResolvedValueOnce(buildOrphanSession());
+      mockSessionRepo.save.mockImplementation((session: object) =>
+        Promise.resolve(session),
+      );
+
+      await service.forceCloseSession(
+        mockRegisterID,
+        mockSessionID,
+        forceCloseDto,
+        mockAdminUser,
+      );
+
+      expect(mockSessionRepo.findOne).toHaveBeenLastCalledWith({
+        where: { sessionID: mockSessionID, tenantID: mockTenantID },
+        lock: { mode: 'pessimistic_write' },
+      });
     });
   });
 });

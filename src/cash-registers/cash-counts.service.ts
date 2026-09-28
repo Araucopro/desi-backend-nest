@@ -11,9 +11,7 @@ import {
   JwtPayload,
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
-import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { UserstoresService } from '../relations/userstores/userstores.service';
 import { CashClosingsService } from './cash-closings.service';
 import { CashDenominationsService } from './cash-denominations.service';
 import {
@@ -22,6 +20,7 @@ import {
   findOpenSessionOrFail,
   findSessionOrFail,
   resolveActingUserId,
+  saveOrConflict,
   toMoney,
 } from './cash-registers.helpers';
 import { CancelCashCountDto } from './dto/cancel-cash-count.dto';
@@ -56,7 +55,6 @@ export class CashCountsService {
     private readonly cashCountRepository: Repository<CashCount>,
     private readonly cashClosingsService: CashClosingsService,
     private readonly cashDenominationsService: CashDenominationsService,
-    private readonly userstoresService: UserstoresService,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
@@ -93,11 +91,7 @@ export class CashCountsService {
       cashRegisterID,
       tenantID,
     );
-    await assertUserCanAccessStore(
-      this.userstoresService,
-      user,
-      register.storeID,
-    );
+    await assertUserCanAccessStore(manager, user, register.storeID);
 
     const session = await findOpenSessionOrFail(manager, cashRegisterID, {
       tenantID,
@@ -249,21 +243,13 @@ export class CashCountsService {
         notes: dto.notes?.trim() || null,
       });
 
-      try {
-        const saved = await repository.save(count);
-        return await this.findCountWithItems(
-          manager,
-          saved.cashCountID,
-          tenantID,
-        );
-      } catch (error) {
-        if (isUniqueViolation(error)) {
-          throw new ConflictException(
-            'El arqueo ya tiene un conteo detallado en curso',
-          );
-        }
-        throw error;
-      }
+      const saved = await saveOrConflict(
+        repository,
+        count,
+        'El arqueo ya tiene un conteo detallado en curso',
+      );
+
+      return this.findCountWithItems(manager, saved.cashCountID, tenantID);
     });
   }
 

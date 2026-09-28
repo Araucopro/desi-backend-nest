@@ -3,7 +3,7 @@ import { UsersService } from './users.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { User, UserRole, UserStatus } from './entities/user.entity';
 import { DataSource, Repository } from 'typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { Store, StoreType } from '../stores/entities/store.entity';
 import { UserStore } from '../relations/userstores/entities/userstore.entity';
@@ -352,6 +352,64 @@ describe('UsersService', () => {
       await service.update('uuid-1', { password: 'newPassword' });
 
       expect(bcrypt.hash).toHaveBeenCalledWith('newPassword', 10);
+    });
+
+    it('should invalidate sessions when the password is reset by an admin', async () => {
+      const user = { ...mockUser };
+      mockUserRepository.findOne.mockResolvedValue(user);
+      mockUserRepository.save.mockResolvedValue(user);
+
+      await service.update('uuid-1', { password: 'newPassword' });
+
+      expect(user.sessionVersion).toBe(2);
+      expect(mockUserRepository.save).toHaveBeenCalledWith(user);
+    });
+  });
+
+  describe('changePassword', () => {
+    const realBcrypt = jest.requireActual<typeof import('bcrypt')>('bcrypt');
+
+    it('hashes the new password and bumps sessionVersion', async () => {
+      const user = { ...mockUser };
+      mockUserRepository.findOne.mockResolvedValue(user);
+      (bcrypt.hash as jest.Mock).mockImplementation(
+        (value: string, rounds: number) => realBcrypt.hash(value, rounds),
+      );
+
+      await service.changePassword('uuid-1', 'newPassword123');
+
+      expect(bcrypt.hash).toHaveBeenCalledWith('newPassword123', 10);
+      const saved = mockUserTxRepository.save.mock.calls[0][0];
+      expect(saved).toMatchObject({
+        userID: 'uuid-1',
+        sessionVersion: 2,
+      });
+      await expect(
+        realBcrypt.compare('newPassword123', saved.password),
+      ).resolves.toBe(true);
+      await expect(
+        realBcrypt.compare('oldPassword', saved.password),
+      ).resolves.toBe(false);
+    });
+
+    it('rejects system users', async () => {
+      mockUserRepository.findOne.mockResolvedValue({
+        ...mockUser,
+        isSystem: true,
+      });
+
+      await expect(
+        service.changePassword('uuid-1', 'newPassword123'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockUserTxRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when the user does not exist', async () => {
+      mockUserRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.changePassword('not-found', 'newPassword123'),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 

@@ -11,9 +11,7 @@ import {
   JwtPayload,
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
-import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { UserstoresService } from '../relations/userstores/userstores.service';
 import {
   assertCashApprover,
   assertUserCanAccessStore,
@@ -23,6 +21,7 @@ import {
   findSessionOrFail,
   closeSessionOperators,
   resolveActingUserId,
+  saveOrConflict,
   sumSessionCashMovements,
   sumSessionPaymentsByMethod,
   toMoney,
@@ -56,7 +55,6 @@ export class CashClosingsService {
   constructor(
     @InjectRepository(CashRegisterClosing)
     private readonly cashRegisterClosingRepository: Repository<CashRegisterClosing>,
-    private readonly userstoresService: UserstoresService,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
@@ -93,11 +91,7 @@ export class CashClosingsService {
       cashRegisterID,
       tenantID,
     );
-    await assertUserCanAccessStore(
-      this.userstoresService,
-      user,
-      register.storeID,
-    );
+    await assertUserCanAccessStore(manager, user, register.storeID);
 
     const session = await findOpenSessionOrFail(manager, cashRegisterID, {
       tenantID,
@@ -324,16 +318,11 @@ export class CashClosingsService {
         notes: dto.notes?.trim() ?? null,
       });
 
-      try {
-        return await repository.save(closing);
-      } catch (error) {
-        if (isUniqueViolation(error)) {
-          throw new ConflictException(
-            'La sesión ya tiene un arqueo en curso (PENDING)',
-          );
-        }
-        throw error;
-      }
+      return saveOrConflict(
+        repository,
+        closing,
+        'La sesión ya tiene un arqueo en curso (PENDING)',
+      );
     });
   }
 
@@ -514,11 +503,7 @@ export class CashClosingsService {
         cashRegisterID,
         tenantID,
       );
-      await assertUserCanAccessStore(
-        this.userstoresService,
-        user,
-        register.storeID,
-      );
+      await assertUserCanAccessStore(manager, user, register.storeID);
 
       const session = await findSessionOrFail(
         manager,

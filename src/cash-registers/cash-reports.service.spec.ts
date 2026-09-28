@@ -3,7 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { UserstoresService } from '../relations/userstores/userstores.service';
+import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { UserRole } from '../users/entities/user.entity';
 import { CashReportsService } from './cash-reports.service';
 import { CashCount } from './entities/cash-count.entity';
@@ -41,11 +41,13 @@ const createQueryBuilderMock = (): QueryBuilderMock => {
     'addGroupBy',
     'orderBy',
     'addOrderBy',
+    'getOne',
   ]) {
     queryBuilder[method] = jest.fn(() => queryBuilder);
   }
   queryBuilder.getRawMany = jest.fn().mockResolvedValue([]);
   queryBuilder.getRawOne = jest.fn().mockResolvedValue({});
+  queryBuilder.getOne = jest.fn().mockResolvedValue(null);
 
   return queryBuilder;
 };
@@ -125,6 +127,11 @@ describe('CashReportsService (Hito 5)', () => {
     ),
   };
 
+  const userStoreQueryBuilder = createQueryBuilderMock();
+  const mockUserStoreRepo: { createQueryBuilder: jest.Mock } = {
+    createQueryBuilder: jest.fn(() => userStoreQueryBuilder),
+  };
+
   const mockEntityManager: { getRepository: jest.Mock } = {
     getRepository: jest.fn((entity: unknown) => {
       if (entity === CashRegister) return mockRegisterRepo;
@@ -136,14 +143,9 @@ describe('CashReportsService (Hito 5)', () => {
       if (entity === CashRegisterClosing) return mockClosingRepo;
       if (entity === CashRegisterSessionUser) return mockSessionUserRepo;
       if (entity === CashCount) return mockCountRepo;
+      if (entity === UserStore) return mockUserStoreRepo;
       return null;
     }),
-  };
-
-  const mockUserstoresService = {
-    findStoresByUserId: jest
-      .fn()
-      .mockResolvedValue([{ store: { storeID: mockStoreID } }]),
   };
 
   const mockTenantContext = {
@@ -211,6 +213,7 @@ describe('CashReportsService (Hito 5)', () => {
       paymentQueryBuilder,
       sessionUserQueryBuilder,
       countQueryBuilder,
+      userStoreQueryBuilder,
       ...transferQueryBuilders,
     ]) {
       queryBuilder.getRawMany.mockReset();
@@ -230,9 +233,10 @@ describe('CashReportsService (Hito 5)', () => {
     mockClosingRepo.findOne.mockResolvedValue(null);
     mockSessionUserRepo.find.mockResolvedValue([]);
     mockCountRepo.findOne.mockResolvedValue(null);
-    mockUserstoresService.findStoresByUserId.mockResolvedValue([
-      { store: { storeID: mockStoreID } },
-    ]);
+    userStoreQueryBuilder.getOne.mockResolvedValue({
+      userStoreID: 'user-store-uuid-8888',
+      storeID: mockStoreID,
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -240,10 +244,6 @@ describe('CashReportsService (Hito 5)', () => {
         {
           provide: getRepositoryToken(CashRegister),
           useValue: mockRegisterRepo,
-        },
-        {
-          provide: UserstoresService,
-          useValue: mockUserstoresService,
         },
         {
           provide: TenantContextService,
