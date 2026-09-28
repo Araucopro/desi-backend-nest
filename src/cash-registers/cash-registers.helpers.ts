@@ -8,7 +8,7 @@ import {
   JwtPayload,
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
-import { UserstoresService } from '../relations/userstores/userstores.service';
+import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { Store } from '../stores/entities/store.entity';
 import { UserRole } from '../users/entities/user.entity';
 import { CashPaymentMethodTotal } from './entities/cash-register-closing.entity';
@@ -75,9 +75,15 @@ export function assertCashApprover(
 /**
  * Valida que el usuario pueda operar sobre la tienda de la caja. Usuarios
  * MASTER y ADMIN del tenant acceden siempre; el resto requiere `UserStore`.
+ *
+ * La lectura de `UserStore` se hace **con el `EntityManager` recibido**: así
+ * corre en la conexión de la transacción en curso, con `app.tenant_id` ya
+ * aplicado. Resolverlo con el repositorio global abriría una segunda conexión
+ * del pool sin contexto tenant, y con RLS forzado sobre `UserStore` la consulta
+ * devolvería 0 filas: el usuario recibiría un 403 intermitente.
  */
 export async function assertUserCanAccessStore(
-  userstoresService: UserstoresService,
+  manager: EntityManager,
   user: JwtPayload | MasterJwtPayload,
   storeID: string,
 ): Promise<void> {
@@ -86,14 +92,18 @@ export async function assertUserCanAccessStore(
   const tenantUser = user;
   if (tenantUser.role === UserRole.ADMIN) return;
 
-  const assignedStores = await userstoresService.findStoresByUserId(
-    tenantUser.userId || tenantUser.id,
-  );
-  const hasAccess = assignedStores.some(
-    (userStore) => userStore.store?.storeID === storeID,
-  );
+  const userID = tenantUser.userId || tenantUser.id;
 
-  if (!hasAccess) {
+  const userStore = await manager
+    .getRepository(UserStore)
+    .createQueryBuilder('userStore')
+    .where('userStore.userID = :userID', { userID })
+    .andWhere('userStore.storeID = :storeID', { storeID })
+    .andWhere('userStore.effectiveTo IS NULL')
+    .andWhere('userStore.removedAt IS NULL')
+    .getOne();
+
+  if (!userStore) {
     throw new ForbiddenException(
       'El usuario no tiene asignada la tienda correspondiente a esta caja',
     );

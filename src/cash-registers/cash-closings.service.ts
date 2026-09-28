@@ -13,7 +13,6 @@ import {
 } from '../auth/interfaces/jwt-payload.interface';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { UserstoresService } from '../relations/userstores/userstores.service';
 import {
   assertCashApprover,
   assertUserCanAccessStore,
@@ -56,7 +55,6 @@ export class CashClosingsService {
   constructor(
     @InjectRepository(CashRegisterClosing)
     private readonly cashRegisterClosingRepository: Repository<CashRegisterClosing>,
-    private readonly userstoresService: UserstoresService,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
@@ -93,11 +91,7 @@ export class CashClosingsService {
       cashRegisterID,
       tenantID,
     );
-    await assertUserCanAccessStore(
-      this.userstoresService,
-      user,
-      register.storeID,
-    );
+    await assertUserCanAccessStore(manager, user, register.storeID);
 
     const session = await findOpenSessionOrFail(manager, cashRegisterID, {
       tenantID,
@@ -514,11 +508,7 @@ export class CashClosingsService {
         cashRegisterID,
         tenantID,
       );
-      await assertUserCanAccessStore(
-        this.userstoresService,
-        user,
-        register.storeID,
-      );
+      await assertUserCanAccessStore(manager, user, register.storeID);
 
       const session = await findSessionOrFail(
         manager,

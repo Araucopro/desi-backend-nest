@@ -8,7 +8,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { UserstoresService } from '../relations/userstores/userstores.service';
+import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { UserRole } from '../users/entities/user.entity';
 import { CashClosingsService } from './cash-closings.service';
 import { CashRegister } from './entities/cash-register.entity';
@@ -143,6 +143,20 @@ describe('CashClosingsService (Hito 3)', () => {
     createQueryBuilder: jest.fn(() => mockSessionUserQueryBuilder),
   };
 
+  /**
+   * `assertUserCanAccessStore` resuelve la asignación con el `EntityManager` de
+   * la transacción, así que el mock vive en el manager y no en un servicio.
+   */
+  const mockUserStoreQueryBuilder: Record<string, jest.Mock> = {};
+  for (const method of ['where', 'andWhere']) {
+    mockUserStoreQueryBuilder[method] = jest
+      .fn()
+      .mockReturnValue(mockUserStoreQueryBuilder);
+  }
+  const mockUserStoreRepo: { createQueryBuilder: jest.Mock } = {
+    createQueryBuilder: jest.fn(() => mockUserStoreQueryBuilder),
+  };
+
   const mockEntityManager: { getRepository: jest.Mock } = {
     getRepository: jest.fn((entity: unknown) => {
       if (entity === CashRegister) return mockRegisterRepo;
@@ -153,14 +167,9 @@ describe('CashClosingsService (Hito 3)', () => {
       if (entity === CashCount) return mockCashCountRepo;
       if (entity === CashTransfer) return mockTransferRepo;
       if (entity === CashRegisterSessionUser) return mockSessionUserRepo;
+      if (entity === UserStore) return mockUserStoreRepo;
       return null;
     }),
-  };
-
-  const mockUserstoresService = {
-    findStoresByUserId: jest
-      .fn()
-      .mockResolvedValue([{ store: { storeID: mockStoreID } }]),
   };
 
   const mockTenantContext = {
@@ -205,9 +214,10 @@ describe('CashClosingsService (Hito 3)', () => {
       status: 'ACTIVE',
     });
     mockSessionRepo.findOne.mockResolvedValue(buildSession());
-    mockUserstoresService.findStoresByUserId.mockResolvedValue([
-      { store: { storeID: mockStoreID } },
-    ]);
+    mockUserStoreQueryBuilder.getOne = jest.fn().mockResolvedValue({
+      userStoreID: 'user-store-uuid-8888',
+      storeID: mockStoreID,
+    });
     mockClosingRepo.findOne.mockResolvedValue(null);
     mockCashCountRepo.findOne.mockResolvedValue(null);
     mockTransferRepo.count.mockResolvedValue(0);
@@ -232,10 +242,6 @@ describe('CashClosingsService (Hito 3)', () => {
         {
           provide: getRepositoryToken(CashRegisterClosing),
           useValue: mockClosingRepo,
-        },
-        {
-          provide: UserstoresService,
-          useValue: mockUserstoresService,
         },
         {
           provide: TenantContextService,
@@ -342,9 +348,7 @@ describe('CashClosingsService (Hito 3)', () => {
     });
 
     it('debe lanzar ForbiddenException si el usuario no pertenece a la tienda', async () => {
-      mockUserstoresService.findStoresByUserId.mockResolvedValue([
-        { store: { storeID: 'otra-tienda' } },
-      ]);
+      mockUserStoreQueryBuilder.getOne.mockResolvedValue(null);
 
       await expect(
         service.startClosing(

@@ -37,7 +37,6 @@ import { CashDenominationsService } from './cash-denominations.service';
 import { CashCountsService } from './cash-counts.service';
 import { CashTransfersService } from './cash-transfers.service';
 import { CashReportsService } from './cash-reports.service';
-import { UserstoresModule } from '../relations/userstores/userstores.module';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 
 @Module({
@@ -59,7 +58,6 @@ import { MultitenantModule } from '../multitenant/multitenant.module';
       User,
       UserStore,
     ]),
-    UserstoresModule,
     MultitenantModule,
   ],
   controllers: [

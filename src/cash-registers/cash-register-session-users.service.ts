@@ -14,7 +14,6 @@ import {
 import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { UserStore } from '../relations/userstores/entities/userstore.entity';
-import { UserstoresService } from '../relations/userstores/userstores.service';
 import { UserStatus } from '../users/entities/user.entity';
 import {
   assertUserCanAccessStore,
@@ -37,7 +36,6 @@ export class CashRegisterSessionUsersService {
   constructor(
     @InjectRepository(CashRegisterSessionUser)
     private readonly sessionUserRepository: Repository<CashRegisterSessionUser>,
-    private readonly userstoresService: UserstoresService,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
@@ -74,11 +72,7 @@ export class CashRegisterSessionUsersService {
       cashRegisterID,
       tenantID,
     );
-    await assertUserCanAccessStore(
-      this.userstoresService,
-      user,
-      register.storeID,
-    );
+    await assertUserCanAccessStore(manager, user, register.storeID);
 
     const session = await findOpenSessionOrFail(manager, cashRegisterID, {
       tenantID,

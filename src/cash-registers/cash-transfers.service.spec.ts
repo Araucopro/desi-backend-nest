@@ -8,7 +8,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { UserstoresService } from '../relations/userstores/userstores.service';
+import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { UserRole } from '../users/entities/user.entity';
 import { CashTransfersService } from './cash-transfers.service';
 import { CashMovementsService } from './cash-movements.service';
@@ -153,12 +153,27 @@ describe('CashTransfersService (Hito 5)', () => {
     manager: { transaction: jest.fn() },
   };
 
+  /**
+   * `assertUserCanAccessStore` resuelve la asignación con el `EntityManager` de
+   * la transacción, así que el mock vive en el manager y no en un servicio.
+   */
+  const mockUserStoreQueryBuilder: Record<string, jest.Mock> = {};
+  for (const method of ['where', 'andWhere']) {
+    mockUserStoreQueryBuilder[method] = jest
+      .fn()
+      .mockReturnValue(mockUserStoreQueryBuilder);
+  }
+  const mockUserStoreRepo: { createQueryBuilder: jest.Mock } = {
+    createQueryBuilder: jest.fn(() => mockUserStoreQueryBuilder),
+  };
+
   const mockEntityManager: { getRepository: jest.Mock } = {
     getRepository: jest.fn((entity: unknown) => {
       if (entity === CashRegister) return mockRegisterRepo;
       if (entity === CashRegisterSession) return mockSessionRepo;
       if (entity === CashMovement) return mockMovementRepo;
       if (entity === CashTransfer) return mockTransferRepo;
+      if (entity === UserStore) return mockUserStoreRepo;
       return null;
     }),
   };
@@ -166,12 +181,6 @@ describe('CashTransfersService (Hito 5)', () => {
   mockTransferRepo.manager.transaction = jest.fn(
     (callback: (manager: unknown) => unknown) => callback(mockEntityManager),
   );
-
-  const mockUserstoresService = {
-    findStoresByUserId: jest
-      .fn()
-      .mockResolvedValue([{ store: { storeID: mockStoreID } }]),
-  };
 
   const mockTenantContext = {
     getTenantId: jest.fn().mockReturnValue(mockTenantID),
@@ -205,9 +214,10 @@ describe('CashTransfersService (Hito 5)', () => {
 
     mockRegisterRepo.findOne.mockResolvedValue(buildRegister());
     mockSessionRepo.findOne.mockResolvedValue(buildSession());
-    mockUserstoresService.findStoresByUserId.mockResolvedValue([
-      { store: { storeID: mockStoreID } },
-    ]);
+    mockUserStoreQueryBuilder.getOne = jest.fn().mockResolvedValue({
+      userStoreID: 'user-store-uuid-8888',
+      storeID: mockStoreID,
+    });
     mockTransferRepo.findOne.mockResolvedValue(buildTransfer());
     mockTransferRepo.save.mockImplementation((entity: unknown) =>
       Promise.resolve(entity),
@@ -234,10 +244,6 @@ describe('CashTransfersService (Hito 5)', () => {
         {
           provide: getRepositoryToken(CashTransfer),
           useValue: mockTransferRepo,
-        },
-        {
-          provide: UserstoresService,
-          useValue: mockUserstoresService,
         },
         {
           provide: CashMovementsService,

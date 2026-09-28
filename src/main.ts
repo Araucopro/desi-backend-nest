@@ -1,5 +1,6 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { HttpAdapterHost, NestFactory, Reflector } from '@nestjs/core';
+import { randomUUID } from 'node:crypto';
 import { AppModule } from './app.module';
 import {
   FastifyAdapter,
@@ -9,6 +10,11 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 import { AllExceptionsFilter } from './common/filters/exceptions';
 import { swaggerConfig } from './swagger';
 import { FastifyReply, FastifyRequest } from 'fastify';
+
+/** El filtro global de errores lee `requestId` para correlacionar respuesta y log. */
+type RequestWithId = FastifyRequest & { requestId?: string };
+
+const REQUEST_ID_HEADER = 'x-request-id';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -22,6 +28,22 @@ async function bootstrap() {
   app.useLogger(logger);
 
   const fastify = app.getHttpAdapter().getInstance();
+  // Correlación request↔log: se acepta el id que envíe el cliente (proxy, app
+  // móvil) o se genera uno. Queda en la respuesta para poder cruzar un error
+  // reportado por el usuario con la línea exacta del backend.
+  fastify.addHook(
+    'onRequest',
+    (request: RequestWithId, reply: FastifyReply, done) => {
+      const incoming = request.headers[REQUEST_ID_HEADER];
+      const requestId =
+        (Array.isArray(incoming) ? incoming[0] : incoming)?.trim() ||
+        randomUUID();
+
+      request.requestId = requestId;
+      reply.header(REQUEST_ID_HEADER, requestId);
+      done();
+    },
+  );
   fastify.addHook(
     'onRequest',
     (request: FastifyRequest, _reply: FastifyReply, done) => {

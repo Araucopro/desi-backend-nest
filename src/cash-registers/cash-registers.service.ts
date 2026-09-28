@@ -16,7 +16,6 @@ import {
   CashRegisterSessionStatus,
 } from './entities/cash-register-session.entity';
 import { Store } from '../stores/entities/store.entity';
-import { UserstoresService } from '../relations/userstores/userstores.service';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { CreateCashRegisterDto } from './dto/create-cash-register.dto';
 import { UpdateCashRegisterDto } from './dto/update-cash-register.dto';
@@ -24,7 +23,10 @@ import { OpenCashSessionDto } from './dto/open-cash-session.dto';
 import { CloseCashSessionDto } from './dto/close-cash-session.dto';
 import { QueryCashRegistersDto } from './dto/query-cash-registers.dto';
 import { QueryCashSessionsDto } from './dto/query-cash-sessions.dto';
-import { isUniqueViolation } from '../common/utils/db-errors.util';
+import {
+  isUniqueViolation,
+  resolveDbConstraint,
+} from '../common/utils/db-errors.util';
 import {
   JwtPayload,
   MasterJwtPayload,
@@ -34,9 +36,20 @@ import {
   assertUserCanAccessStore,
   closeSessionOperators,
   countOpenSessionTransfers,
+  resolveActingUserId,
   sumSessionCashMovements,
   toMoney,
 } from './cash-registers.helpers';
+
+/**
+ * Índice único parcial de operador activo por sesión
+ * (`CashRegisterSessionUser`). Comparte el código `23505` con el índice de
+ * sesión abierta por caja, por eso se distingue por nombre al traducir el error.
+ */
+const SESSION_OPERATOR_CONSTRAINT = 'IDX_unique_active_session_user';
+
+/** Índice único parcial de una sola sesión `OPEN` por caja. */
+const SINGLE_OPEN_SESSION_CONSTRAINT = 'IDX_unique_open_session_per_register';
 
 @Injectable()
 export class CashRegistersService {
@@ -47,7 +60,6 @@ export class CashRegistersService {
     private readonly sessionRepository: Repository<CashRegisterSession>,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
-    private readonly userstoresService: UserstoresService,
     @Optional() private readonly tenantContext?: TenantContextService,
   ) {}
 
@@ -65,13 +77,6 @@ export class CashRegistersService {
       throw new BadRequestException('Contexto tenant no disponible');
     }
     return tenantId;
-  }
-
-  private async assertUserCanAccessStore(
-    user: JwtPayload | MasterJwtPayload,
-    storeID: string,
-  ): Promise<void> {
-    return assertUserCanAccessStore(this.userstoresService, user, storeID);
   }
 
   async create(dto: CreateCashRegisterDto): Promise<CashRegister> {
@@ -218,14 +223,17 @@ export class CashRegistersService {
     user: JwtPayload | MasterJwtPayload,
   ): Promise<CashRegisterSession> {
     const tenantID = this.getEffectiveTenantId();
-    const userId =
-      user.type === 'master'
-        ? (user as MasterJwtPayload).masterUserId
-        : user.userId || user.id;
+    const userId = resolveActingUserId(user);
 
     return this.runInTransaction(async (manager) => {
+      // El lock sobre la caja serializa las aperturas concurrentes: la segunda
+      // transacción espera al commit de la primera y vuelve a leer la sesión ya
+      // creada, en vez de chocar contra el índice único parcial. Es la misma
+      // fila que bloquea closeSession, así que no introduce un orden de lock
+      // nuevo. El catch de `23505` sigue siendo la garantía real.
       const register = await manager.getRepository(CashRegister).findOne({
         where: { cashRegisterID, tenantID },
+        lock: { mode: 'pessimistic_write' },
       });
 
       if (!register) {
@@ -240,7 +248,7 @@ export class CashRegistersService {
         );
       }
 
-      await this.assertUserCanAccessStore(user, register.storeID);
+      await assertUserCanAccessStore(manager, user, register.storeID);
 
       const activeSession = await manager
         .getRepository(CashRegisterSession)
@@ -253,9 +261,7 @@ export class CashRegistersService {
         });
 
       if (activeSession) {
-        throw new ConflictException(
-          `La caja ya tiene una sesión abierta activa (ID: ${activeSession.sessionID})`,
-        );
+        return this.resolveExistingOpenSession(activeSession, userId, dto);
       }
 
       const session = manager.getRepository(CashRegisterSession).create({
@@ -276,9 +282,7 @@ export class CashRegistersService {
           .save(session);
       } catch (error) {
         if (isUniqueViolation(error)) {
-          throw new ConflictException(
-            'Ya existe una sesión abierta activa para esta caja',
-          );
+          throw this.buildOpenSessionConflict(error);
         }
         throw error;
       }
@@ -295,6 +299,52 @@ export class CashRegistersService {
 
       return savedSession;
     });
+  }
+
+  /**
+   * Decide qué hacer cuando la caja ya tiene una sesión `OPEN`. Un reintento del
+   * mismo usuario para la misma fecha contable es idempotente y devuelve la
+   * sesión existente (evita el falso error del doble envío); cualquier otro caso
+   * es un conflicto legítimo y el mensaje incluye el ID para que el cliente
+   * pueda recuperar la sesión en curso.
+   */
+  private resolveExistingOpenSession(
+    activeSession: CashRegisterSession,
+    userId: string,
+    dto: OpenCashSessionDto,
+  ): CashRegisterSession {
+    const isSameOperator = activeSession.openedByUserID === userId;
+    const isSameBusinessDate = activeSession.businessDate === dto.businessDate;
+
+    if (isSameOperator && isSameBusinessDate) {
+      return activeSession;
+    }
+
+    throw new ConflictException(
+      `La caja ya tiene una sesión abierta activa (ID: ${activeSession.sessionID})`,
+    );
+  }
+
+  /**
+   * Traduce la violación de unicidad del `INSERT` de sesión. El mismo código
+   * `23505` lo emiten dos índices distintos: el parcial de sesión abierta por
+   * caja y el de operador activo por sesión (`attachSessionOperator`). Sin mirar
+   * el constraint, el segundo caso reportaría una causa falsa.
+   */
+  private buildOpenSessionConflict(error: unknown): ConflictException {
+    const constraint = resolveDbConstraint(error);
+
+    if (constraint === SESSION_OPERATOR_CONSTRAINT) {
+      return new ConflictException(
+        'El operador ya está registrado como activo en una sesión de esta caja',
+      );
+    }
+
+    return new ConflictException(
+      constraint === SINGLE_OPEN_SESSION_CONSTRAINT || !constraint
+        ? 'Ya existe una sesión abierta activa para esta caja'
+        : 'Ya existe una sesión abierta activa para esta caja (conflicto de unicidad)',
+    );
   }
 
   async getActiveSession(cashRegisterID: string): Promise<CashRegisterSession> {
@@ -339,7 +389,7 @@ export class CashRegistersService {
         );
       }
 
-      await this.assertUserCanAccessStore(user, register.storeID);
+      await assertUserCanAccessStore(manager, user, register.storeID);
 
       const session = await manager.getRepository(CashRegisterSession).findOne({
         where: {

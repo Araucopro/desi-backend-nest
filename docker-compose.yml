@@ -1,4 +1,26 @@
 services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: araucotest
+    ports:
+      # Puerto distinto del 5432 local para no chocar con una instancia propia.
+      - '5433:5432'
+    volumes:
+      # Se ejecuta una sola vez, al inicializar el volumen. Aporta `uuid-ossp`,
+      # que las migraciones usan pero no declaran.
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # Comprueba el servidor contra la base `postgres`, no contra `d3si_test`:
+      # si el healthcheck apuntara a la base de tests y ésta no existiera, el
+      # contenedor quedaría `unhealthy` para siempre aunque Postgres esté sano.
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   api:
     build:
       context: .

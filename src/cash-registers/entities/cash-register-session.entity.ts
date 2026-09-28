@@ -17,6 +17,25 @@ export enum CashRegisterSessionStatus {
   CLOSED = 'CLOSED',
 }
 
+/**
+ * Sesión operativa de una caja.
+ *
+ * Invariante no expresable hoy con `@Index` sin arriesgar un
+ * `migration:generate` incorrecto: existe **una sola** sesión `OPEN` por caja y
+ * tenant, garantizada por el índice único parcial
+ * `IDX_unique_open_session_per_register` creado en
+ * `1788880000000-CreateCashRegistersAndSessions.ts`:
+ *
+ * ```sql
+ * CREATE UNIQUE INDEX "IDX_unique_open_session_per_register"
+ *   ON "CashRegisterSession" ("tenantID", "cashRegisterID")
+ *   WHERE status = 'OPEN';
+ * ```
+ *
+ * `CashRegistersService.openSession` lo traduce a un `409`. Si se toca el enum
+ * de estado, hay que recrear el índice: referencia el tipo
+ * `CashRegisterSession_status_enum`, no texto libre.
+ */
 @Entity({ name: 'CashRegisterSession' })
 @Index(['tenantID', 'sessionID'])
 @Index(['tenantID', 'cashRegisterID'])

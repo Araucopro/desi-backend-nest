@@ -9,7 +9,6 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { UserStore } from '../relations/userstores/entities/userstore.entity';
-import { UserstoresService } from '../relations/userstores/userstores.service';
 import { UserRole, UserStatus } from '../users/entities/user.entity';
 import { CashRegisterSessionUsersService } from './cash-register-session-users.service';
 import {
@@ -66,7 +65,18 @@ describe('CashRegisterSessionUsersService (Hito 4)', () => {
 
   const mockRegisterRepo = { findOne: jest.fn() };
   const mockSessionRepo = { findOne: jest.fn() };
-  const mockUserStoreRepo = { findOne: jest.fn() };
+  const mockUserStoreQueryBuilder: Record<string, jest.Mock> = {};
+  for (const method of ['where', 'andWhere']) {
+    mockUserStoreQueryBuilder[method] = jest
+      .fn()
+      .mockReturnValue(mockUserStoreQueryBuilder);
+  }
+  // `assertUserCanAccessStore` resuelve la asignación con el `EntityManager` de
+  // la transacción; `assertOperatorBelongsToStore` usa el mismo repositorio.
+  const mockUserStoreRepo = {
+    findOne: jest.fn(),
+    createQueryBuilder: jest.fn(() => mockUserStoreQueryBuilder),
+  };
 
   const mockEntityManager: { getRepository: jest.Mock } = {
     getRepository: jest.fn((entity: unknown) => {
@@ -80,12 +90,6 @@ describe('CashRegisterSessionUsersService (Hito 4)', () => {
   mockSessionUserRepo.manager.transaction = jest.fn(
     (callback: (manager: unknown) => unknown) => callback(mockEntityManager),
   );
-
-  const mockUserstoresService = {
-    findStoresByUserId: jest
-      .fn()
-      .mockResolvedValue([{ store: { storeID: mockStoreID } }]),
-  };
 
   const mockTenantContext = {
     getTenantId: jest.fn().mockReturnValue(mockTenantID),
@@ -117,9 +121,10 @@ describe('CashRegisterSessionUsersService (Hito 4)', () => {
       userStoreID: 'user-store-uuid-1',
       user: { userID: mockOperatorID, status: UserStatus.ACTIVE },
     });
-    mockUserstoresService.findStoresByUserId.mockResolvedValue([
-      { store: { storeID: mockStoreID } },
-    ]);
+    mockUserStoreQueryBuilder.getOne = jest.fn().mockResolvedValue({
+      userStoreID: 'user-store-uuid-8888',
+      storeID: mockStoreID,
+    });
     mockQueryBuilder.getMany.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
@@ -128,10 +133,6 @@ describe('CashRegisterSessionUsersService (Hito 4)', () => {
         {
           provide: getRepositoryToken(CashRegisterSessionUser),
           useValue: mockSessionUserRepo,
-        },
-        {
-          provide: UserstoresService,
-          useValue: mockUserstoresService,
         },
         {
           provide: TenantContextService,
@@ -245,7 +246,7 @@ describe('CashRegisterSessionUsersService (Hito 4)', () => {
     });
 
     it('debe lanzar ForbiddenException si el usuario no pertenece a la tienda de la caja', async () => {
-      mockUserstoresService.findStoresByUserId.mockResolvedValue([]);
+      mockUserStoreQueryBuilder.getOne.mockResolvedValue(null);
 
       await expect(
         service.assign(
