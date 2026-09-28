@@ -11,7 +11,6 @@ import {
   JwtPayload,
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
-import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { UserStore } from '../relations/userstores/entities/userstore.entity';
 import { UserStatus } from '../users/entities/user.entity';
@@ -20,6 +19,7 @@ import {
   findCashRegisterOrFail,
   findOpenSessionOrFail,
   resolveActingUserId,
+  saveOrConflict,
 } from './cash-registers.helpers';
 import { AssignCashSessionUserDto } from './dto/assign-cash-session-user.dto';
 import { QueryCashSessionUsersDto } from './dto/query-cash-session-users.dto';
@@ -189,16 +189,11 @@ export class CashRegisterSessionUsersService {
         notes: dto.notes?.trim() || null,
       });
 
-      try {
-        return await repository.save(record);
-      } catch (error) {
-        if (isUniqueViolation(error)) {
-          throw new ConflictException(
-            'El usuario ya está en turno en esta sesión',
-          );
-        }
-        throw error;
-      }
+      return saveOrConflict(
+        repository,
+        record,
+        'El usuario ya está en turno en esta sesión',
+      );
     });
   }
 

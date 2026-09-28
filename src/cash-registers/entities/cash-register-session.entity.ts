@@ -11,9 +11,15 @@ import {
 import { CashRegister } from './cash-register.entity';
 import { ColumnNumericTransformer } from '../../common/transformers/numeric.transformer';
 
+/**
+ * Estados de sesión de caja. `SUSPENDED` se eliminó del tipo en
+ * `1788891000000-DropCashRegisterSessionSuspendedStatus.ts`: nunca se asignó
+ * desde el código y, al quedar fuera del índice parcial `WHERE status = 'OPEN'`,
+ * una sesión en ese estado era invisible para `openSession`, que rechazaba la
+ * apertura de la caja de forma permanente.
+ */
 export enum CashRegisterSessionStatus {
   OPEN = 'OPEN',
-  SUSPENDED = 'SUSPENDED',
   CLOSED = 'CLOSED',
 }
 
@@ -34,7 +40,14 @@ export enum CashRegisterSessionStatus {
  *
  * `CashRegistersService.openSession` lo traduce a un `409`. Si se toca el enum
  * de estado, hay que recrear el índice: referencia el tipo
- * `CashRegisterSession_status_enum`, no texto libre.
+ * `CashRegisterSession_status_enum`, no texto libre — es exactamente lo que
+ * hace la migración que quitó `SUSPENDED`.
+ *
+ * Como `synchronize` está en `false` y `migrationsRun` también, un restore o un
+ * `migration:fresh` pueden dejar el índice ausente **en silencio** y el síntoma
+ * reaparecería como dos sesiones simultáneas sobre la misma caja.
+ * `CashRegisterSchemaGuardService` verifica al arranque que exista, sea `UNIQUE`
+ * y siga siendo parcial.
  */
 @Entity({ name: 'CashRegisterSession' })
 @Index(['tenantID', 'sessionID'])

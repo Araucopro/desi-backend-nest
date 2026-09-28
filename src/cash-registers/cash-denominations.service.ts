@@ -7,9 +7,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
-import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { toMoney } from './cash-registers.helpers';
+import { saveOrConflict, toMoney } from './cash-registers.helpers';
 import { CreateCashDenominationDto } from './dto/create-cash-denomination.dto';
 import { QueryCashDenominationsDto } from './dto/query-cash-denominations.dto';
 import { UpdateCashDenominationDto } from './dto/update-cash-denomination.dto';
@@ -109,16 +108,11 @@ export class CashDenominationsService {
         active: dto.active ?? true,
       });
 
-      try {
-        return await repository.save(denomination);
-      } catch (error) {
-        if (isUniqueViolation(error)) {
-          throw new ConflictException(
-            `Ya existe una denominación de ${value} (${dto.type}) en el catálogo`,
-          );
-        }
-        throw error;
-      }
+      return saveOrConflict(
+        repository,
+        denomination,
+        `Ya existe una denominación de ${value} (${dto.type}) en el catálogo`,
+      );
     });
   }
 

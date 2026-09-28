@@ -37,6 +37,7 @@ import { CashDenominationsService } from './cash-denominations.service';
 import { CashCountsService } from './cash-counts.service';
 import { CashTransfersService } from './cash-transfers.service';
 import { CashReportsService } from './cash-reports.service';
+import { CashRegisterSchemaGuardService } from './cash-register-schema-guard.service';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 
 @Module({
@@ -85,6 +86,7 @@ import { MultitenantModule } from '../multitenant/multitenant.module';
     CashCountsService,
     CashTransfersService,
     CashReportsService,
+    CashRegisterSchemaGuardService,
   ],
   exports: [CashRegistersService, PaymentsService, TypeOrmModule],
 })

@@ -264,7 +264,7 @@ export async function findStoreIDOfRegister(
   const rows = (await context.owner.query(
     `SELECT "storeID" FROM "CashRegister" WHERE "cashRegisterID" = $1`,
     [cashRegisterID],
-  )) as Array<{ storeID: string }>;
+  )) as unknown as Array<{ storeID: string }>;
 
   return rows[0].storeID;
 }
@@ -276,7 +276,95 @@ export async function countSessions(
   const rows = (await context.owner.query(
     `SELECT COUNT(*)::int AS total FROM "CashRegisterSession" WHERE "cashRegisterID" = $1`,
     [cashRegisterID],
-  )) as Array<{ total: number }>;
+  )) as unknown as Array<{ total: number }>;
 
   return rows[0]?.total ?? 0;
+}
+
+/**
+ * Inserta directamente una sesión de caja. Permite fijar `status` y
+ * `businessDate`, que es lo que hace falta para reproducir una sesión huérfana
+ * sin depender del reloj del test.
+ */
+export async function seedCashRegisterSession(
+  context: TestDatabase,
+  params: {
+    cashRegisterID: string;
+    openedByUserID: string;
+    businessDate: string;
+    openingBalance?: number;
+    status?: string;
+  },
+): Promise<string> {
+  const sessionID = randomUUID();
+
+  await context.owner.query(
+    `INSERT INTO "CashRegisterSession"
+       ("sessionID", "tenantID", "cashRegisterID", "businessDate", "openedByUserID",
+        "openedAt", "openingBalance", "status")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      sessionID,
+      context.tenantID,
+      params.cashRegisterID,
+      params.businessDate,
+      params.openedByUserID,
+      new Date(),
+      params.openingBalance ?? 50000,
+      params.status ?? 'OPEN',
+    ],
+  );
+
+  return sessionID;
+}
+
+export async function findSessionStatus(
+  context: TestDatabase,
+  sessionID: string,
+): Promise<Record<string, unknown> | undefined> {
+  const rows = (await context.owner.query(
+    `SELECT "status", "expectedCashBalance", "countedCashBalance", "cashDifference",
+            "closedByUserID", "closedAt", "closingNotes"
+       FROM "CashRegisterSession" WHERE "sessionID" = $1`,
+    [sessionID],
+  )) as unknown as Array<Record<string, unknown>>;
+
+  return rows[0];
+}
+
+/**
+ * Inserta una transferencia de fondos en curso sobre la sesión origen. Se usa
+ * para verificar que una sesión con traslados sin resolver no puede sellarse ni
+ * por la vía normal ni por la forzada.
+ *
+ * `destinationType = VAULT` evita la FK de caja destino y el `CHECK` de que el
+ * destino difiera del origen, que es lo que pide este escenario.
+ */
+export async function seedPendingCashTransfer(
+  context: TestDatabase,
+  params: {
+    storeID: string;
+    cashRegisterID: string;
+    sourceSessionID: string;
+    requestedByUserID: string;
+  },
+): Promise<string> {
+  const cashTransferID = randomUUID();
+
+  await context.owner.query(
+    `INSERT INTO "CashTransfer"
+       ("cashTransferID", "tenantID", "storeID", "sourceCashRegisterID", "sourceSessionID",
+        "destinationType", "amount", "status", "requestedByUserID", "requestedAt", "notes")
+     VALUES ($1, $2, $3, $4, $5, 'VAULT', 10000, 'PENDING', $6, now(), 'Prueba de integración')`,
+    [
+      cashTransferID,
+      context.tenantID,
+      params.storeID,
+      params.cashRegisterID,
+      params.sourceSessionID,
+      params.requestedByUserID,
+    ],
+  );
+
+  return cashTransferID;
 }

@@ -15,7 +15,11 @@
  * no hereda el reemplazo de forma confiable), y un `DataSource` mal inyectado
  * solo se manifiesta más tarde como un error de conexión sin contexto.
  */
-import { ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -28,14 +32,21 @@ import { CashRegister } from '../../cash-registers/entities/cash-register.entity
 import { Store } from '../../stores/entities/store.entity';
 import { TenantContextService } from '../../multitenant/tenant-context.service';
 import { UserRole } from '../../users/entities/user.entity';
-import { JwtPayload } from '../../auth/interfaces/jwt-payload.interface';
+import {
+  JwtPayload,
+  MasterJwtPayload,
+} from '../../auth/interfaces/jwt-payload.interface';
+import { FORCE_CLOSE_NOTE_PREFIX } from '../../cash-registers/cash-registers.helpers';
 import {
   buildAppDataSource,
   countSessions,
   enableCashRls,
+  findSessionStatus,
   findStoreIDOfRegister,
   prepareTestDatabase,
   seedCashRegister,
+  seedCashRegisterSession,
+  seedPendingCashTransfer,
   seedStore,
   seedUserWithStore,
   teardownTestDatabase,
@@ -43,6 +54,8 @@ import {
 } from './database.util';
 
 const BUSINESS_DATE = '2026-09-13';
+/** Fecha contable de una sesión huérfana: anterior a la del test de reapertura. */
+const ORPHAN_BUSINESS_DATE = '2026-09-01';
 
 describe('Apertura de caja (integración)', () => {
   let context: TestDatabase;
@@ -298,6 +311,261 @@ describe('Apertura de caja (integración)', () => {
 
       expect(reopened.sessionID).not.toBe(opened.sessionID);
       await expect(countSessions(context, cashRegisterID)).resolves.toBe(2);
+    });
+  });
+
+  /**
+   * Fase 4.2. El escenario que este endpoint resuelve no es reproducible con
+   * mocks: la caja rechaza aperturas legítimas porque el índice único parcial ve
+   * una sesión `OPEN` que nadie cerró, y la única forma de comprobar que el
+   * cierre forzado **libera** la caja es abrirla después contra la base real.
+   */
+  describe('cierre forzado de sesión huérfana (Fase 4.2)', () => {
+    const forceCloseDto = {
+      reason:
+        'Sesión huérfana del turno anterior: el cajero no registró el cierre de caja',
+    };
+
+    /** Tienda + caja + sesión colgada de una fecha contable anterior. */
+    const seedOrphanRegister = async (label: string) => {
+      const storeID = await seedStore(context, { name: `Tienda ${label}` });
+      const cajeroUserID = await seedUserWithStore(context, { storeID });
+      const cashRegisterID = await seedCashRegister(context, {
+        storeID,
+        code: label,
+      });
+      const sessionID = await seedCashRegisterSession(context, {
+        cashRegisterID,
+        openedByUserID: cajeroUserID,
+        businessDate: ORPHAN_BUSINESS_DATE,
+      });
+
+      return { storeID, cashRegisterID, sessionID, cajeroUserID };
+    };
+
+    it('sella la sesión huérfana y la caja vuelve a aceptar aperturas', async () => {
+      const { cashRegisterID, sessionID, storeID } =
+        await seedOrphanRegister('ORPH-1');
+      const approverUserID = await seedUserWithStore(context, {
+        storeID,
+        role: UserRole.STORE_MANAGER,
+      });
+
+      // El síntoma original: la caja está bloqueada para una apertura legítima.
+      await expect(
+        asRequest(() =>
+          service.openSession(
+            cashRegisterID,
+            { businessDate: BUSINESS_DATE, openingBalance: 50000 },
+            buildUser(approverUserID),
+          ),
+        ),
+      ).rejects.toThrow(ConflictException);
+
+      const closed = await asRequest(() =>
+        service.forceCloseSession(
+          cashRegisterID,
+          sessionID,
+          forceCloseDto,
+          buildUser(approverUserID),
+        ),
+      );
+
+      expect(closed.status).toBe(CashRegisterSessionStatus.CLOSED);
+      expect(closed.closedByUserID).toBe(approverUserID);
+
+      // Y ahora sí se puede abrir el turno siguiente.
+      const reopened = await asRequest(() =>
+        service.openSession(
+          cashRegisterID,
+          { businessDate: BUSINESS_DATE, openingBalance: 50000 },
+          buildUser(approverUserID),
+        ),
+      );
+      expect(reopened.status).toBe(CashRegisterSessionStatus.OPEN);
+      await expect(countSessions(context, cashRegisterID)).resolves.toBe(2);
+    });
+
+    it('no inventa arqueo: el esperado se calcula y no hay monto contado', async () => {
+      const { cashRegisterID, sessionID, storeID } =
+        await seedOrphanRegister('ORPH-2');
+      const approverUserID = await seedUserWithStore(context, {
+        storeID,
+        role: UserRole.STORE_MANAGER,
+      });
+
+      const closed = await asRequest(() =>
+        service.forceCloseSession(
+          cashRegisterID,
+          sessionID,
+          forceCloseDto,
+          buildUser(approverUserID),
+        ),
+      );
+
+      // Fondo inicial 50000 sin movimientos: el esperado es derivable.
+      expect(closed.expectedCashBalance).toBe(50000);
+      // Ausencia de conteo explícita, no un cero que aparente conciliación.
+      expect(closed.countedCashBalance).toBeNull();
+      expect(closed.cashDifference).toBeNull();
+
+      const persisted = await findSessionStatus(context, sessionID);
+      expect(persisted?.countedCashBalance).toBeNull();
+      expect(persisted?.cashDifference).toBeNull();
+    });
+
+    it('deja la traza de auditoría con el motivo y el aprobador', async () => {
+      const { cashRegisterID, sessionID, storeID, cajeroUserID } =
+        await seedOrphanRegister('ORPH-3');
+      const approverUserID = await seedUserWithStore(context, {
+        storeID,
+        role: UserRole.STORE_MANAGER,
+      });
+
+      await asRequest(() =>
+        service.forceCloseSession(
+          cashRegisterID,
+          sessionID,
+          forceCloseDto,
+          buildUser(approverUserID),
+        ),
+      );
+
+      const persisted = await findSessionStatus(context, sessionID);
+      expect(persisted?.closingNotes).toContain(FORCE_CLOSE_NOTE_PREFIX);
+      expect(persisted?.closingNotes).toContain(forceCloseDto.reason);
+      // El responsable del cierre es el aprobador, no el cajero que la abrió.
+      expect(persisted?.closedByUserID).toBe(approverUserID);
+      expect(persisted?.closedByUserID).not.toBe(cajeroUserID);
+      expect(persisted?.closedAt).toBeInstanceOf(Date);
+    });
+
+    it('rechaza con 403 a un usuario sin facultad de aprobación', async () => {
+      const { cashRegisterID, sessionID, storeID } =
+        await seedOrphanRegister('ORPH-4');
+      const cashierUserID = await seedUserWithStore(context, {
+        storeID,
+        role: UserRole.CONSIGNADO,
+      });
+
+      await expect(
+        asRequest(() =>
+          service.forceCloseSession(
+            cashRegisterID,
+            sessionID,
+            forceCloseDto,
+            buildUser(cashierUserID, UserRole.CONSIGNADO),
+          ),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      // La sesión sigue abierta: el rechazo no dejó efectos.
+      const persisted = await findSessionStatus(context, sessionID);
+      expect(persisted?.status).toBe(CashRegisterSessionStatus.OPEN);
+    });
+
+    it('rechaza con 400 si la sesión tiene transferencias de fondos en curso', async () => {
+      const { cashRegisterID, sessionID, storeID, cajeroUserID } =
+        await seedOrphanRegister('ORPH-5');
+      const approverUserID = await seedUserWithStore(context, {
+        storeID,
+        role: UserRole.STORE_MANAGER,
+      });
+      await seedPendingCashTransfer(context, {
+        storeID,
+        cashRegisterID,
+        sourceSessionID: sessionID,
+        requestedByUserID: cajeroUserID,
+      });
+
+      await expect(
+        asRequest(() =>
+          service.forceCloseSession(
+            cashRegisterID,
+            sessionID,
+            forceCloseDto,
+            buildUser(approverUserID),
+          ),
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      const persisted = await findSessionStatus(context, sessionID);
+      expect(persisted?.status).toBe(CashRegisterSessionStatus.OPEN);
+    });
+
+    it('rechaza con 409 si la sesión ya estaba cerrada', async () => {
+      const { cashRegisterID, storeID, cajeroUserID } =
+        await seedOrphanRegister('ORPH-6');
+      const approverUserID = await seedUserWithStore(context, {
+        storeID,
+        role: UserRole.STORE_MANAGER,
+      });
+      const closedSessionID = await seedCashRegisterSession(context, {
+        cashRegisterID,
+        openedByUserID: cajeroUserID,
+        businessDate: ORPHAN_BUSINESS_DATE,
+        status: CashRegisterSessionStatus.CLOSED,
+      });
+
+      await expect(
+        asRequest(() =>
+          service.forceCloseSession(
+            cashRegisterID,
+            closedSessionID,
+            forceCloseDto,
+            buildUser(approverUserID),
+          ),
+        ),
+      ).rejects.toThrow(/solo puede forzarse el cierre de una sesión abierta/);
+    });
+
+    it('no deja que un aprobador cierre una sesión de una tienda que no es la suya', async () => {
+      const { sessionID, storeID } = await seedOrphanRegister('ORPH-7');
+      const other = await seedOrphanRegister('ORPH-7B');
+      const approverUserID = await seedUserWithStore(context, {
+        storeID,
+        role: UserRole.STORE_MANAGER,
+      });
+
+      // El aprobador está asignado a la tienda de `storeID`, no a la de `other`:
+      // el rechazo es por alcance y ocurre antes de mirar la sesión.
+      await expect(
+        asRequest(() =>
+          service.forceCloseSession(
+            other.cashRegisterID,
+            sessionID,
+            forceCloseDto,
+            buildUser(approverUserID),
+          ),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      const persisted = await findSessionStatus(context, sessionID);
+      expect(persisted?.status).toBe(CashRegisterSessionStatus.OPEN);
+    });
+
+    it('un token MASTER impersonando el tenant también puede forzar el cierre', async () => {
+      const { cashRegisterID, sessionID } = await seedOrphanRegister('ORPH-8');
+
+      const masterUser: MasterJwtPayload = {
+        type: 'master',
+        masterUserId: 'master-uuid-integration',
+        role: 'SUPER_ADMIN',
+        sessionVersion: 1,
+        impersonatingTenantId: context.tenantID,
+      };
+
+      const closed = await asRequest(() =>
+        service.forceCloseSession(
+          cashRegisterID,
+          sessionID,
+          forceCloseDto,
+          masterUser,
+        ),
+      );
+
+      expect(closed.status).toBe(CashRegisterSessionStatus.CLOSED);
+      expect(closed.closedByUserID).toBe('master-uuid-integration');
     });
   });
 

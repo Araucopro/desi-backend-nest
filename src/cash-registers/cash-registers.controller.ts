@@ -14,6 +14,7 @@ import { CreateCashRegisterDto } from './dto/create-cash-register.dto';
 import { UpdateCashRegisterDto } from './dto/update-cash-register.dto';
 import { OpenCashSessionDto } from './dto/open-cash-session.dto';
 import { CloseCashSessionDto } from './dto/close-cash-session.dto';
+import { ForceCloseCashSessionDto } from './dto/force-close-cash-session.dto';
 import { QueryCashRegistersDto } from './dto/query-cash-registers.dto';
 import { QueryCashSessionsDto } from './dto/query-cash-sessions.dto';
 import { CashRegister } from './entities/cash-register.entity';
@@ -165,6 +166,58 @@ export class CashRegistersController {
     @GetUser() user: JwtPayload | MasterJwtPayload,
   ) {
     return this.cashRegistersService.closeSession(id, dto, user);
+  }
+
+  @Post(':id/sessions/:sessionId/force-close')
+  @ApiOperation({
+    summary: 'Forzar el cierre de una sesión de caja huérfana',
+    description:
+      'Sella una sesión que quedó abierta porque su cierre nunca se registró, ' +
+      'desbloqueando la caja para una apertura nueva. Requiere rol de aprobador ' +
+      '(administrador o jefe de tienda) y un motivo obligatorio. No registra ' +
+      'arqueo: el saldo esperado se recalcula desde los movimientos y ' +
+      '`countedCashBalance` queda en `null` para que la ausencia de conteo sea ' +
+      'visible en lugar de aparentar una conciliación. Rechaza la operación si ' +
+      'la sesión tiene transferencias de fondos en curso o un arqueo `PENDING`.',
+  })
+  @ApiParam({ name: 'id', description: 'ID UUID de la caja' })
+  @ApiParam({ name: 'sessionId', description: 'ID UUID de la sesión a cerrar' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Sesión cerrada forzosamente. La caja vuelve a aceptar aperturas.',
+    type: CashRegisterSession,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'La sesión tiene transferencias de fondos en curso.',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'El usuario no es aprobador o no tiene acceso a la tienda.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'La caja o la sesión no existen en el tenant.',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'La sesión no está abierta o tiene un arqueo en curso (PENDING).',
+  })
+  @CustomMessage('Sesión de caja cerrada forzosamente')
+  forceCloseSession(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('sessionId', ParseUUIDPipe) sessionId: string,
+    @Body() dto: ForceCloseCashSessionDto,
+    @GetUser() user: JwtPayload | MasterJwtPayload,
+  ) {
+    return this.cashRegistersService.forceCloseSession(
+      id,
+      sessionId,
+      dto,
+      user,
+    );
   }
 
   @Get(':id/sessions')

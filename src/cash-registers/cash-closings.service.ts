@@ -11,7 +11,6 @@ import {
   JwtPayload,
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
-import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import {
   assertCashApprover,
@@ -22,6 +21,7 @@ import {
   findSessionOrFail,
   closeSessionOperators,
   resolveActingUserId,
+  saveOrConflict,
   sumSessionCashMovements,
   sumSessionPaymentsByMethod,
   toMoney,
@@ -318,16 +318,11 @@ export class CashClosingsService {
         notes: dto.notes?.trim() ?? null,
       });
 
-      try {
-        return await repository.save(closing);
-      } catch (error) {
-        if (isUniqueViolation(error)) {
-          throw new ConflictException(
-            'La sesión ya tiene un arqueo en curso (PENDING)',
-          );
-        }
-        throw error;
-      }
+      return saveOrConflict(
+        repository,
+        closing,
+        'La sesión ya tiene un arqueo en curso (PENDING)',
+      );
     });
   }
 

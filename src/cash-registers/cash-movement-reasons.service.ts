@@ -7,8 +7,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
-import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { TenantContextService } from '../multitenant/tenant-context.service';
+import { saveOrConflict } from './cash-registers.helpers';
 import { CreateCashMovementReasonDto } from './dto/create-cash-movement-reason.dto';
 import { QueryCashMovementReasonsDto } from './dto/query-cash-movement-reasons.dto';
 import { UpdateCashMovementReasonDto } from './dto/update-cash-movement-reason.dto';
@@ -100,16 +100,11 @@ export class CashMovementReasonsService {
         active: dto.active ?? true,
       });
 
-      try {
-        return await repository.save(reason);
-      } catch (error) {
-        if (isUniqueViolation(error)) {
-          throw new ConflictException(
-            `Ya existe una razón de movimiento con el código "${code}"`,
-          );
-        }
-        throw error;
-      }
+      return saveOrConflict(
+        repository,
+        reason,
+        `Ya existe una razón de movimiento con el código "${code}"`,
+      );
     });
   }
 

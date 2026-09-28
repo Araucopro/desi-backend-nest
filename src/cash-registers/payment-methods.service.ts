@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, FindOptionsWhere, Repository } from 'typeorm';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { TenantContextService } from '../multitenant/tenant-context.service';
+import { saveOrConflict } from './cash-registers.helpers';
 import { CreatePaymentMethodDto } from './dto/create-payment-method.dto';
 import { QueryPaymentMethodsDto } from './dto/query-payment-methods.dto';
 import { UpdatePaymentMethodDto } from './dto/update-payment-method.dto';
@@ -130,16 +131,11 @@ export class PaymentMethodsService {
         active: dto.active ?? true,
       });
 
-      try {
-        return await repository.save(paymentMethod);
-      } catch (error) {
-        if (isUniqueViolation(error)) {
-          throw new ConflictException(
-            `Ya existe un medio de pago con el código "${code}"`,
-          );
-        }
-        throw error;
-      }
+      return saveOrConflict(
+        repository,
+        paymentMethod,
+        `Ya existe un medio de pago con el código "${code}"`,
+      );
     });
   }
 

@@ -11,7 +11,6 @@ import {
   JwtPayload,
   MasterJwtPayload,
 } from '../auth/interfaces/jwt-payload.interface';
-import { isUniqueViolation } from '../common/utils/db-errors.util';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { CashClosingsService } from './cash-closings.service';
 import { CashDenominationsService } from './cash-denominations.service';
@@ -21,6 +20,7 @@ import {
   findOpenSessionOrFail,
   findSessionOrFail,
   resolveActingUserId,
+  saveOrConflict,
   toMoney,
 } from './cash-registers.helpers';
 import { CancelCashCountDto } from './dto/cancel-cash-count.dto';
@@ -243,21 +243,13 @@ export class CashCountsService {
         notes: dto.notes?.trim() || null,
       });
 
-      try {
-        const saved = await repository.save(count);
-        return await this.findCountWithItems(
-          manager,
-          saved.cashCountID,
-          tenantID,
-        );
-      } catch (error) {
-        if (isUniqueViolation(error)) {
-          throw new ConflictException(
-            'El arqueo ya tiene un conteo detallado en curso',
-          );
-        }
-        throw error;
-      }
+      const saved = await saveOrConflict(
+        repository,
+        count,
+        'El arqueo ya tiene un conteo detallado en curso',
+      );
+
+      return this.findCountWithItems(manager, saved.cashCountID, tenantID);
     });
   }
 
