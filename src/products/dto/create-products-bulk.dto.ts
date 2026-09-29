@@ -8,6 +8,8 @@ import {
   IsOptional,
   IsString,
   ValidateNested,
+  ValidateIf,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ProductGenre } from '../entities/product.entity';
@@ -24,6 +26,17 @@ export class BulkProductItemDto {
   @IsString()
   @IsNotEmpty()
   name!: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Slug del producto. Si se omite, se genera automáticamente a partir del nombre.',
+    example: 'desi-outdoor-queulat-vantablack-hiking',
+  })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
+  slug?: string;
 
   @ApiPropertyOptional({
     description:

@@ -8,6 +8,8 @@ import {
   ValidateNested,
   ArrayMinSize,
   IsUUID,
+  ValidateIf,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ProductGenre } from '../entities/product.entity';
@@ -21,6 +23,18 @@ export class CreateProductDto {
   @IsString()
   @IsNotEmpty()
   name!: string;
+
+  @ApiProperty({
+    description:
+      'Slug del producto. Si se omite, se genera automáticamente a partir del nombre.',
+    example: 'desi-outdoor-queulat-vantablack-hiking',
+    required: false,
+  })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
+  slug?: string;
 
   @ApiProperty({
     description: 'ID de la categoría a la que pertenece el producto',
