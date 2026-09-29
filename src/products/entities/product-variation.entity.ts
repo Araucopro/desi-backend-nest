@@ -34,10 +34,10 @@ export class ProductVariation {
   sku!: string;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
-  color?: string;
+  variation?: string;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
-  size?: string;
+  subVariation?: string;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   supplierSku?: string | null;

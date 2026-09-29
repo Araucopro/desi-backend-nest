@@ -45,7 +45,8 @@ export class ProductsController {
     summary: 'Crear o actualizar productos masivamente con sus variantes',
     description:
       'Recibe un arreglo de productos con sus variantes. Cada producto se resuelve por nombre (ignorando mayúsculas/minúsculas y espacios): ' +
-      'si ya existe se actualiza y se sincronizan sus variantes por SKU; si no existe, se crea. ' +
+      'si ya existe se actualiza y las variantes recibidas se actualizan o crean por SKU; las variantes existentes omitidas se conservan. ' +
+      'La carga masiva nunca elimina variantes; para eliminar una variante use DELETE /products/{id}/variations/{variationId}. ' +
       'La categoría se resuelve por nombre y, si no existe, se crea automáticamente como categoría raíz. ' +
       'Todo se procesa en una sola transacción: ante cualquier conflicto (nombres o SKUs duplicados, SKU perteneciente a otro producto) el lote se revierte por completo. ' +
       'Máximo 100 productos por llamada.',
@@ -68,8 +69,8 @@ export class ProductsController {
                   priceCost: 8000,
                   priceList: 15000,
                   stock: 50,
-                  color: 'Blanco',
-                  size: 'L',
+                  variation: 'L',
+                  subVariation: 'Blanco',
                 },
               ],
             },
@@ -82,8 +83,8 @@ export class ProductsController {
                   priceCost: 12000,
                   priceList: 22000,
                   stock: 30,
-                  color: 'Azul',
-                  size: 'M',
+                  variation: 'M',
+                  subVariation: 'Azul',
                 },
               ],
             },
@@ -156,6 +157,40 @@ export class ProductsController {
     @Body() updateProductDto: UpdateProductDto,
   ) {
     return this.productsService.update(id, updateProductDto);
+  }
+
+  @Delete(':id/variations/:variationId')
+  @ApiOperation({
+    summary: 'Eliminar una variante de un producto',
+    description:
+      'Elimina la variante indicada solo si pertenece al producto especificado. ' +
+      'La eliminación también elimina en cascada sus registros asociados de tienda e inventario.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID del producto propietario de la variante',
+    type: String,
+  })
+  @ApiParam({
+    name: 'variationId',
+    description: 'ID único de la variante a eliminar',
+    type: String,
+  })
+  @ApiResponse({
+    status: 204,
+    description:
+      'Variante eliminada junto con sus registros asociados de tienda e inventario.',
+  })
+  @ApiResponse({
+    status: 404,
+    description:
+      'El producto o la variante perteneciente al producto no existe.',
+  })
+  removeVariation(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('variationId', ParseUUIDPipe) variationId: string,
+  ) {
+    return this.productsService.removeVariation(id, variationId);
   }
 
   @Delete(':id')

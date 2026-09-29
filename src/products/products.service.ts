@@ -23,7 +23,11 @@ import { PriceType } from '../pricing/entities/price-history.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { Category } from '../categories/entities/category.entity';
-import { buildVariationPlan, VariationPlanAction } from './products-engine';
+import {
+  buildVariationPlan,
+  buildVariationUpsertPlan,
+  VariationPlanAction,
+} from './products-engine';
 import {
   createProductEntity,
   createVariationEntity,
@@ -122,7 +126,7 @@ export class ProductsService {
    *
    * - Los productos se resuelven por nombre normalizado (trim + case-insensitive):
    *   si existe, se actualiza; si no, se crea.
-   * - Las variantes se sincronizan por SKU (misma semántica que el update singular).
+   * - Las variantes incluidas se actualizan o crean por SKU; las omitidas se conservan.
    * - La categoría se resuelve por nombre y, si no existe, se crea como categoría
    *   raíz dentro de la misma transacción.
    * - Si existe tienda central, cada variante genera su StoreProduct y su
@@ -181,7 +185,7 @@ export class ProductsService {
           });
 
           const savedProduct = await saveProduct(manager, product);
-          const plan = buildVariationPlan({
+          const plan = buildVariationUpsertPlan({
             variations: item.variations,
             existing: product.variations,
           });
@@ -202,8 +206,6 @@ export class ProductsService {
                 centralStore?.storeID,
                 tenantID,
               );
-            } else {
-              await manager.remove(action.variation);
             }
           }
 
@@ -617,6 +619,23 @@ export class ProductsService {
   async remove(id: string): Promise<void> {
     return this.runInTransaction(async (manager) => {
       await deleteProductById(manager, id);
+    });
+  }
+
+  async removeVariation(productID: string, variationID: string): Promise<void> {
+    return this.runInTransaction(async (manager) => {
+      const product = await findProductForUpdate(manager, productID);
+      const variation = product.variations.find(
+        (item) => item.variationID === variationID,
+      );
+
+      if (!variation) {
+        throw new NotFoundException(
+          `La variante con ID ${variationID} no pertenece al producto ${productID}`,
+        );
+      }
+
+      await manager.remove(variation);
     });
   }
 }

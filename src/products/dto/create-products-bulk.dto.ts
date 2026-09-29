@@ -68,7 +68,8 @@ export class BulkProductItemDto {
   description?: string;
 
   @ApiProperty({
-    description: 'Lista de variantes del producto. Debe contener al menos una.',
+    description:
+      'Variantes que se crearán o actualizarán por SKU. Las variantes existentes omitidas se conservan. Debe contener al menos una.',
     type: [CreateProductVariationDto],
   })
   @IsArray()
@@ -94,8 +95,8 @@ export class CreateProductsBulkDto {
             priceCost: 8000,
             priceList: 15000,
             stock: 50,
-            color: 'Blanco',
-            size: 'L',
+            variation: 'L',
+            subVariation: 'Blanco',
           },
         ],
       },
@@ -108,8 +109,8 @@ export class CreateProductsBulkDto {
             priceCost: 12000,
             priceList: 22000,
             stock: 30,
-            color: 'Azul',
-            size: 'M',
+            variation: 'M',
+            subVariation: 'Azul',
           },
         ],
       },
