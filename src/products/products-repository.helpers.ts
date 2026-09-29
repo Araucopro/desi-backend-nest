@@ -5,6 +5,7 @@ import { CreateProductVariationDto } from './dto/create-product-variation.dto';
 import { ProductListQueryDto } from './dto/product-list.query.dto';
 import { Product } from './entities/product.entity';
 import { ProductVariation } from './entities/product-variation.entity';
+import { slugifyProductName } from './products-slug';
 
 export async function findProductForUpdate(
   manager: EntityManager,
@@ -153,6 +154,7 @@ export function createProductEntity(
   manager: EntityManager,
   values: {
     name: string;
+    slug?: string;
     tenantID?: string;
     categoryID?: string;
     image?: string;
@@ -163,6 +165,8 @@ export function createProductEntity(
 ): Product {
   return manager.create(Product, {
     ...values,
+    slug:
+      values.slug === undefined ? slugifyProductName(values.name) : values.slug,
     ...(values.tenantID ? { tenantID: values.tenantID } : {}),
   });
 }

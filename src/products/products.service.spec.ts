@@ -263,6 +263,13 @@ describe('ProductsService', () => {
       const result = await service.create(dto);
 
       expect(result).toEqual(expect.objectContaining({ name: 'New Product' }));
+      expect(mockEntityManager.create).toHaveBeenCalledWith(
+        Product,
+        expect.objectContaining({
+          name: 'New Product',
+          slug: 'new-product',
+        }),
+      );
       expect(mockEntityManager.save).toHaveBeenCalledWith(
         expect.objectContaining({
           sku: 'SKU-1',
@@ -354,6 +361,13 @@ describe('ProductsService', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].productID).toBe('product-1');
+      expect(mockEntityManager.create).toHaveBeenCalledWith(
+        Product,
+        expect.objectContaining({
+          name: 'Camiseta Básica',
+          slug: 'camiseta-basica',
+        }),
+      );
       expect(mockEntityManager.save).toHaveBeenCalledWith([
         expect.objectContaining({ name: 'Vestuario' }),
       ]);
@@ -554,6 +568,7 @@ describe('ProductsService', () => {
         existingProduct,
         expect.objectContaining({
           name: 'Camiseta Básica',
+          slug: 'camiseta-basica',
           categoryID: 'cat-1',
         }),
       );
@@ -746,6 +761,14 @@ describe('ProductsService', () => {
       const result = await service.update('1', updateDto);
 
       expect(result).toBeDefined();
+      expect(mockEntityManager.merge).toHaveBeenCalledWith(
+        Product,
+        existingProduct,
+        expect.objectContaining({
+          name: 'Updated Product',
+          slug: 'updated-product',
+        }),
+      );
       expect(pricingService.applyPriceChange).toHaveBeenCalledTimes(2);
       expect(pricingService.applyPriceChange).toHaveBeenCalledWith(
         mockEntityManager,

@@ -46,6 +46,7 @@ export class ProductsController {
     description:
       'Recibe un arreglo de productos con sus variantes. Cada producto se resuelve por nombre (ignorando mayúsculas/minúsculas y espacios): ' +
       'si ya existe se actualiza y las variantes recibidas se actualizan o crean por SKU; las variantes existentes omitidas se conservan. ' +
+      'Si no se envía el slug del producto, se genera automáticamente desde su nombre. ' +
       'La carga masiva nunca elimina variantes; para eliminar una variante use DELETE /products/{id}/variations/{variationId}. ' +
       'La categoría se resuelve por nombre y, si no existe, se crea automáticamente como categoría raíz. ' +
       'Todo se procesa en una sola transacción: ante cualquier conflicto (nombres o SKUs duplicados, SKU perteneciente a otro producto) el lote se revierte por completo. ' +

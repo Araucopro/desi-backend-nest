@@ -39,6 +39,7 @@ import {
   saveProduct,
   saveVariation,
 } from './products-repository.helpers';
+import { slugifyProductName } from './products-slug';
 
 interface NormalizedBulkProductItem extends BulkProductItemDto {
   normalizedName: string;
@@ -126,6 +127,7 @@ export class ProductsService {
    *
    * - Los productos se resuelven por nombre normalizado (trim + case-insensitive):
    *   si existe, se actualiza; si no, se crea.
+   * - Si el slug no se envía, se genera desde el nombre del producto.
    * - Las variantes incluidas se actualizan o crean por SKU; las omitidas se conservan.
    * - La categoría se resuelve por nombre y, si no existe, se crea como categoría
    *   raíz dentro de la misma transacción.
@@ -175,6 +177,7 @@ export class ProductsService {
 
           manager.merge(Product, product, {
             name: item.name,
+            slug: item.slug ?? slugifyProductName(item.name),
             ...(item.image !== undefined ? { image: item.image } : {}),
             ...(item.brand !== undefined ? { brand: item.brand } : {}),
             ...(item.genre !== undefined ? { genre: item.genre } : {}),
@@ -475,7 +478,12 @@ export class ProductsService {
         id,
       );
 
-      transactionalEntityManager.merge(Product, product, productData);
+      transactionalEntityManager.merge(Product, product, {
+        ...productData,
+        ...(productData.name !== undefined && productData.slug === undefined
+          ? { slug: slugifyProductName(productData.name) }
+          : {}),
+      });
       const savedProduct = await saveProduct(
         transactionalEntityManager,
         product,
