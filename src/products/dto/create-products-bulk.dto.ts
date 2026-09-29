@@ -68,7 +68,8 @@ export class BulkProductItemDto {
   description?: string;
 
   @ApiProperty({
-    description: 'Lista de variantes del producto. Debe contener al menos una.',
+    description:
+      'Variantes que se crearán o actualizarán por SKU. Las variantes existentes omitidas se conservan. Debe contener al menos una.',
     type: [CreateProductVariationDto],
   })
   @IsArray()

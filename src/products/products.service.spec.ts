@@ -434,7 +434,7 @@ describe('ProductsService', () => {
       );
     });
 
-    it('updates an existing product by name and applies the variation plan', async () => {
+    it('updates an existing product by name and preserves omitted variations', async () => {
       const existingProduct = {
         productID: 'product-1',
         name: 'Camiseta Básica',
@@ -490,6 +490,7 @@ describe('ProductsService', () => {
                 variations: [
                   { variationID: 'v1', sku: 'SKU-1' },
                   { variationID: 'v2', sku: 'SKU-2' },
+                  { variationID: 'vOld', sku: 'SKU-OLD' },
                 ],
               };
             }
@@ -557,9 +558,7 @@ describe('ProductsService', () => {
         }),
       );
       expect(pricingService.applyPriceChange).toHaveBeenCalledTimes(2);
-      expect(mockEntityManager.remove).toHaveBeenCalledWith(
-        expect.objectContaining({ variationID: 'vOld' }),
-      );
+      expect(mockEntityManager.remove).not.toHaveBeenCalled();
     });
 
     it('skips inventory movements when there is no central store', async () => {
@@ -775,6 +774,43 @@ describe('ProductsService', () => {
       mockEntityManager.findOne.mockResolvedValue(null);
 
       await expect(service.update('1', {})).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('removeVariation', () => {
+    it('removes a variant only through its owning product', async () => {
+      const variation = {
+        variationID: 'variation-1',
+        sku: 'SKU-1',
+      };
+      const product = {
+        productID: 'product-1',
+        variations: [variation],
+      };
+      mockEntityManager.transaction.mockImplementation(async (cb) =>
+        cb(mockEntityManager as any),
+      );
+      mockEntityManager.findOne.mockResolvedValue(product);
+      mockEntityManager.remove.mockResolvedValue(undefined);
+
+      await service.removeVariation('product-1', 'variation-1');
+
+      expect(mockEntityManager.remove).toHaveBeenCalledWith(variation);
+    });
+
+    it('returns not found when the variant does not belong to the product', async () => {
+      mockEntityManager.transaction.mockImplementation(async (cb) =>
+        cb(mockEntityManager as any),
+      );
+      mockEntityManager.findOne.mockResolvedValue({
+        productID: 'product-1',
+        variations: [],
+      });
+
+      await expect(
+        service.removeVariation('product-1', 'variation-elsewhere'),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockEntityManager.remove).not.toHaveBeenCalled();
     });
   });
 });

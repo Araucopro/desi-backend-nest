@@ -10,18 +10,23 @@ export type VariationPlanAction =
     }
   | { kind: 'remove'; variation: ProductVariation };
 
+export type VariationUpsertAction = Exclude<
+  VariationPlanAction,
+  { kind: 'remove' }
+>;
+
 /**
- * Compara las variaciones recibidas con las existentes y devuelve el plan de
- * creación, actualización y eliminación por SKU.
+ * Actualiza por SKU las variantes recibidas y crea las que todavía no existen.
+ * Las variantes existentes que no vienen en el payload se conservan.
  */
-export function buildVariationPlan(input: {
+export function buildVariationUpsertPlan(input: {
   variations: CreateProductVariationDto[];
   existing: ProductVariation[];
-}): VariationPlanAction[] {
+}): VariationUpsertAction[] {
   const existingBySku = new Map<string, ProductVariation>(
     input.existing.map((variation) => [variation.sku, variation]),
   );
-  const actions: VariationPlanAction[] = [];
+  const actions: VariationUpsertAction[] = [];
 
   for (const dto of input.variations) {
     const existing = existingBySku.get(dto.sku);
@@ -33,8 +38,26 @@ export function buildVariationPlan(input: {
     }
   }
 
-  for (const variation of existingBySku.values()) {
-    actions.push({ kind: 'remove', variation });
+  return actions;
+}
+
+/**
+ * Compara las variaciones recibidas con las existentes y devuelve el plan de
+ * creación, actualización y eliminación por SKU.
+ */
+export function buildVariationPlan(input: {
+  variations: CreateProductVariationDto[];
+  existing: ProductVariation[];
+}): VariationPlanAction[] {
+  const actions: VariationPlanAction[] = buildVariationUpsertPlan(input);
+  const receivedSkus = new Set(
+    input.variations.map((variation) => variation.sku),
+  );
+
+  for (const variation of input.existing) {
+    if (!receivedSkus.has(variation.sku)) {
+      actions.push({ kind: 'remove', variation });
+    }
   }
 
   return actions;
