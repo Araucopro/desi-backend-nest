@@ -70,16 +70,16 @@ export class StoreInventoryVariationDto {
   sku!: string;
 
   @ApiPropertyOptional({
-    description: 'Color de la variación',
-    example: 'Gris',
-  })
-  color?: string;
-
-  @ApiPropertyOptional({
-    description: 'Talla de la variación',
+    description: 'Variación del producto',
     example: 'M',
   })
-  size?: string;
+  variation?: string;
+
+  @ApiPropertyOptional({
+    description: 'Subvariación del producto',
+    example: 'Gris',
+  })
+  subVariation?: string;
 
   @ApiPropertyOptional({
     description: 'SKU del proveedor',

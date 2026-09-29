@@ -46,22 +46,22 @@ export class CreateProductVariationDto {
   stock!: number;
 
   @ApiProperty({
-    description: 'Color de la variante',
-    example: 'Rojo',
-    required: false,
-  })
-  @IsString()
-  @IsOptional()
-  color?: string;
-
-  @ApiProperty({
-    description: 'Talla de la variante',
+    description: 'Variación del producto',
     example: 'L',
     required: false,
   })
   @IsString()
   @IsOptional()
-  size?: string;
+  variation?: string;
+
+  @ApiProperty({
+    description: 'Subvariación del producto',
+    example: 'Rojo',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  subVariation?: string;
 
   @ApiProperty({
     description:
