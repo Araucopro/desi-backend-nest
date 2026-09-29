@@ -51,7 +51,7 @@ export class Product {
   })
   genre?: ProductGenre;
 
-  @Column({ type: 'varchar', length: 255, nullable: true })
+  @Column({ type: 'text', nullable: true })
   description?: string;
 
   @OneToMany(() => ProductVariation, (variation) => variation.product, {
