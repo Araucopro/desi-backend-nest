@@ -29,6 +29,7 @@ export type ApplyInventoryMovementInput = {
   priceList?: number;
   skipZeroDelta?: boolean;
   condition?: ReturnItemCondition;
+  lockedStoreProduct?: StoreProduct | null;
 };
 
 export type AppliedInventoryMovement = {
@@ -89,6 +90,7 @@ export type UpsertStoreProductInput = {
   createIfMissing?: boolean;
   allowNegativeStock?: boolean;
   condition?: ReturnItemCondition;
+  lockedStoreProduct?: StoreProduct | null;
 };
 
 /**
@@ -99,11 +101,16 @@ export async function upsertStoreProduct(
   manager: EntityManager,
   input: UpsertStoreProductInput,
 ): Promise<{ storeProduct: StoreProduct; delta: number }> {
-  const existing = await findStoreProductForUpdate(
-    manager,
-    input.storeID,
-    input.variationID,
-  );
+  const existing = Object.prototype.hasOwnProperty.call(
+    input,
+    'lockedStoreProduct',
+  )
+    ? (input.lockedStoreProduct ?? null)
+    : await findStoreProductForUpdate(
+        manager,
+        input.storeID,
+        input.variationID,
+      );
   const availableStock = existing ? Number(existing.stock) : 0;
   const availableDefectiveStock = existing
     ? Number(existing.stockDefective ?? 0)
@@ -183,6 +190,9 @@ export async function applyInventoryMovement(
     createIfMissing: input.createIfMissing ?? true,
     allowNegativeStock: input.allowNegativeStock ?? false,
     condition: input.condition,
+    ...(Object.prototype.hasOwnProperty.call(input, 'lockedStoreProduct')
+      ? { lockedStoreProduct: input.lockedStoreProduct }
+      : {}),
   });
 
   if (delta === 0 && input.skipZeroDelta) {

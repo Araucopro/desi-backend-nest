@@ -188,6 +188,62 @@ describe('OfferService', () => {
     expect(result[0].storeProduct?.store?.storeID).toBe('store-1');
   });
 
+  it('loads offers once and resolves category descendants for a batch of items', async () => {
+    const categoryOffer = offer({
+      targetScope: OfferTargetScope.CATEGORY,
+      categoryID: 'category-parent',
+      storeID: 'store-1',
+      includeSubcategories: true,
+    });
+    mockQueryBuilder([categoryOffer]);
+    categoryRepository.find.mockResolvedValue([
+      { categoryID: 'category-child', parentID: 'category-parent' } as Category,
+    ]);
+
+    const contexts = [
+      {
+        storeID: 'store-1',
+        pricingDate: new Date('2026-09-30T10:00:00.000Z'),
+        items: [
+          {
+            storeProductID: 'sp-child',
+            storeID: 'store-1',
+            productID: 'product-child',
+            variationID: 'variation-child',
+            categoryID: 'category-child',
+            quantity: 1,
+            unitPrice: 100,
+          },
+        ],
+      },
+      {
+        storeID: 'store-1',
+        pricingDate: new Date('2026-09-30T10:00:00.000Z'),
+        items: [
+          {
+            storeProductID: 'sp-other',
+            storeID: 'store-1',
+            productID: 'product-other',
+            variationID: 'variation-other',
+            categoryID: 'category-other',
+            quantity: 1,
+            unitPrice: 100,
+          },
+        ],
+      },
+    ];
+
+    const result = await service.getApplicableOffersForItems(
+      manager as never,
+      contexts,
+    );
+
+    expect(repository.createQueryBuilder).toHaveBeenCalledTimes(1);
+    expect(categoryRepository.find).toHaveBeenCalledTimes(1);
+    expect(result.get('sp-child')).toEqual([categoryOffer]);
+    expect(result.get('sp-other')).toEqual([]);
+  });
+
   it('matches offers by store, product, category with subcategories, brand and model', async () => {
     mockQueryBuilder([
       offer({

@@ -22,6 +22,7 @@ describe('ProductsService', () => {
   let entityManager: EntityManager;
   let pricingService: {
     calculatePrice: jest.Mock;
+    calculatePricesForProductList: jest.Mock;
     applyPriceChange: jest.Mock;
   };
 
@@ -68,6 +69,7 @@ describe('ProductsService', () => {
 
     pricingService = {
       calculatePrice: jest.fn(),
+      calculatePricesForProductList: jest.fn().mockResolvedValue(new Map()),
       applyPriceChange: jest.fn().mockResolvedValue({ historyID: 'history-1' }),
     };
 
@@ -133,6 +135,63 @@ describe('ProductsService', () => {
         'product',
       );
       expect(queryBuilderMock.getManyAndCount).toHaveBeenCalled();
+    });
+
+    it('enriches all StoreProducts with one batched pricing call', async () => {
+      const storeProduct = { storeProductID: 'sp-1' } as StoreProduct;
+      const variation = {
+        variationID: 'variation-1',
+        storeProducts: [storeProduct],
+      } as ProductVariation;
+      const product = {
+        productID: 'product-1',
+        variations: [variation],
+      } as Product;
+      mockEntityManager.transaction.mockImplementation(async (cb) =>
+        cb(mockEntityManager as any),
+      );
+      mockProductRepository.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[product], 1]),
+      });
+      const activeOffer = { offerID: 'offer-1', applied: true };
+      pricingService.calculatePricesForProductList.mockResolvedValue(
+        new Map([
+          [
+            'sp-1',
+            {
+              result: {
+                finalPrice: 900,
+                discountApplied: true,
+                discountsApplied: [activeOffer],
+                discountDetails: activeOffer,
+                breakdown: [{ step: 'offer' }],
+              },
+            },
+          ],
+        ]),
+      );
+
+      const response = await service.findAll({});
+
+      expect(
+        pricingService.calculatePricesForProductList,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        pricingService.calculatePricesForProductList.mock.calls[0][1],
+      ).toEqual([{ storeProduct, variation, product }]);
+      expect(storeProduct).toMatchObject({
+        finalPrice: 900,
+        discountApplied: true,
+        discountsApplied: [activeOffer],
+        activeOffer,
+        pricingBreakdown: [{ step: 'offer' }],
+      });
+      expect(response.products).toEqual([product]);
+      expect(response.meta.total).toBe(1);
     });
 
     it('applies a server-side search across product and variation fields', async () => {
@@ -300,9 +359,22 @@ describe('ProductsService', () => {
         select: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        setLock: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([]),
       });
-      mockEntityManager.find.mockResolvedValue([]);
+      mockEntityManager.find.mockImplementation((entity: unknown) => {
+        if (entity === Product) {
+          return [
+            {
+              productID: 'product-1',
+              name: 'Camiseta Básica',
+              variations: [{ variationID: 'variation-1', sku: 'CAM-BAS-L' }],
+            },
+          ];
+        }
+        return [];
+      });
       mockEntityManager.findOne.mockImplementation((entity: unknown) => {
         if (entity === Store) {
           return { storeID: 'central-1', isCentralStore: true };
@@ -320,21 +392,40 @@ describe('ProductsService', () => {
       mockEntityManager.create.mockImplementation(
         (_entity: unknown, values: object) => ({ ...values }),
       );
-      mockEntityManager.save.mockImplementation(async (entity: unknown) => {
-        if (Array.isArray(entity)) {
-          return entity.map((item, index) => ({
-            categoryID: `cat-${index + 1}`,
-            ...item,
-          }));
-        }
-        const candidate = entity as {
-          productID?: string;
-          variationID?: string;
-        };
-        candidate.productID ??= 'product-1';
-        candidate.variationID ??= 'variation-1';
-        return entity;
-      });
+      mockEntityManager.save.mockImplementation(
+        async (targetOrEntity: unknown, maybeEntities?: unknown) => {
+          if (Array.isArray(maybeEntities)) {
+            return maybeEntities.map((entity, index) => {
+              const candidate = entity as {
+                productID?: string;
+                variationID?: string;
+              };
+              if (targetOrEntity === Product) {
+                candidate.productID ??= `product-${index + 1}`;
+              }
+              if (targetOrEntity === ProductVariation) {
+                candidate.variationID ??= `variation-${index + 1}`;
+              }
+              return entity;
+            });
+          }
+
+          const entity = targetOrEntity;
+          if (Array.isArray(entity)) {
+            return entity.map((item, index) => ({
+              categoryID: `cat-${index + 1}`,
+              ...item,
+            }));
+          }
+          const candidate = entity as {
+            productID?: string;
+            variationID?: string;
+          };
+          candidate.productID ??= 'product-1';
+          candidate.variationID ??= 'variation-1';
+          return entity;
+        },
+      );
       mockEntityManager.createQueryBuilder.mockReturnValue({
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
@@ -381,6 +472,18 @@ describe('ProductsService', () => {
           referenceID: 'product-1',
         }),
       );
+      expect(mockEntityManager.save).toHaveBeenCalledWith(Product, [
+        expect.objectContaining({ name: 'Camiseta Básica' }),
+      ]);
+      expect(mockEntityManager.save).toHaveBeenCalledWith(ProductVariation, [
+        expect.objectContaining({ sku: 'CAM-BAS-L' }),
+      ]);
+      expect(mockEntityManager.save).toHaveBeenCalledWith(StoreProduct, [
+        expect.objectContaining({ stock: 50, priceList: 15000 }),
+      ]);
+      expect(mockEntityManager.save).toHaveBeenCalledWith(InventoryMovement, [
+        expect.objectContaining({ delta: 50 }),
+      ]);
     });
 
     it('reuses an existing category matching case-insensitively', async () => {
@@ -394,9 +497,22 @@ describe('ProductsService', () => {
         select: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        setLock: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([]),
       });
-      mockEntityManager.find.mockResolvedValue([]);
+      mockEntityManager.find.mockImplementation((entity: unknown) =>
+        entity === Product
+          ? [
+              {
+                productID: 'product-1',
+                name: 'Camiseta',
+                categoryID: 'cat-1',
+                variations: [],
+              },
+            ]
+          : [],
+      );
       mockEntityManager.findOne.mockImplementation((entity: unknown) => {
         if (entity === Store) {
           return { storeID: 'central-1', isCentralStore: true };
@@ -416,7 +532,27 @@ describe('ProductsService', () => {
         (_entity: unknown, values: object) => ({ ...values }),
       );
       mockEntityManager.save.mockImplementation(
-        async (entity: unknown) => entity,
+        async (targetOrEntity: unknown, maybeEntities?: unknown) => {
+          if (Array.isArray(maybeEntities)) {
+            return maybeEntities.map((entity, index) => {
+              const candidate = entity as {
+                productID?: string;
+                variationID?: string;
+              };
+              if (targetOrEntity === Product) {
+                candidate.productID ??= `product-${index + 1}`;
+              }
+              if (targetOrEntity === ProductVariation) {
+                candidate.variationID ??= `variation-${index + 1}`;
+              }
+              return entity;
+            });
+          }
+          if (Array.isArray(targetOrEntity)) {
+            return targetOrEntity;
+          }
+          return targetOrEntity;
+        },
       );
       mockEntityManager.createQueryBuilder.mockReturnValue({
         where: jest.fn().mockReturnThis(),
@@ -466,6 +602,15 @@ describe('ProductsService', () => {
           },
         ],
       };
+      const existingStoreProduct = {
+        storeProductID: 'sp-1',
+        tenantID: 'tenant-1',
+        store: { storeID: 'central-1' },
+        variation: { variationID: 'v1' },
+        stock: 5,
+        priceCost: 50,
+        priceList: 60,
+      };
 
       mockEntityManager.transaction.mockImplementation(async (cb) =>
         cb(mockEntityManager as any),
@@ -477,17 +622,22 @@ describe('ProductsService', () => {
         select: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        setLock: jest.fn().mockReturnThis(),
         getMany: jest
           .fn()
           .mockResolvedValue([
             { productID: 'product-1', name: 'Camiseta Básica' },
           ]),
       });
-      mockEntityManager.find.mockImplementation((entity: unknown) =>
-        entity === ProductVariation
-          ? [{ sku: 'SKU-1', product: { productID: 'product-1' } }]
-          : [],
-      );
+      mockEntityManager.find.mockImplementation((entity: unknown) => {
+        if (entity === ProductVariation) {
+          return [{ sku: 'SKU-1', product: { productID: 'product-1' } }];
+        }
+        if (entity === Product) return [existingProduct];
+        if (entity === StoreProduct) return [existingStoreProduct];
+        return [];
+      });
       mockEntityManager.findOne.mockImplementation(
         (entity: unknown, options?: { relations?: string[] }) => {
           if (entity === Store) {
@@ -520,23 +670,38 @@ describe('ProductsService', () => {
       mockEntityManager.create.mockImplementation(
         (_entity: unknown, values: object) => ({ ...values }),
       );
-      mockEntityManager.save.mockImplementation(async (entity: unknown) => {
-        const candidate = entity as { variationID?: string };
-        candidate.variationID ??= 'v2';
-        return entity;
-      });
+      mockEntityManager.save.mockImplementation(
+        async (targetOrEntity: unknown, maybeEntities?: unknown) => {
+          if (Array.isArray(maybeEntities)) {
+            return maybeEntities.map((entity, index) => {
+              const candidate = entity as {
+                productID?: string;
+                variationID?: string;
+              };
+              if (targetOrEntity === Product) {
+                candidate.productID ??= `product-${index + 1}`;
+              }
+              if (targetOrEntity === ProductVariation) {
+                candidate.variationID ??= `v${index + 2}`;
+              }
+              return entity;
+            });
+          }
+          const candidate = targetOrEntity as {
+            productID?: string;
+            variationID?: string;
+          };
+          if (!candidate.productID) candidate.variationID ??= 'v2';
+          return targetOrEntity;
+        },
+      );
       mockEntityManager.remove.mockResolvedValue(undefined);
       mockEntityManager.createQueryBuilder.mockReturnValue({
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
         setLock: jest.fn().mockReturnThis(),
-        getOne: jest.fn().mockResolvedValue({
-          storeProductID: 'sp-1',
-          tenantID: 'tenant-1',
-          stock: 5,
-          priceCost: 50,
-          priceList: 60,
-        }),
+        getMany: jest.fn().mockResolvedValue([existingStoreProduct]),
       });
 
       const result = await service.bulkUpsert({
@@ -585,9 +750,15 @@ describe('ProductsService', () => {
         select: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        setLock: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([]),
       });
-      mockEntityManager.find.mockResolvedValue([]);
+      mockEntityManager.find.mockImplementation((entity: unknown) =>
+        entity === Product
+          ? [{ productID: 'product-1', name: 'Camiseta', variations: [] }]
+          : [],
+      );
       mockEntityManager.findOne.mockImplementation((entity: unknown) => {
         if (entity === Store) return null;
         if (entity === Product) {
@@ -602,15 +773,32 @@ describe('ProductsService', () => {
       mockEntityManager.create.mockImplementation(
         (_entity: unknown, values: object) => ({ ...values }),
       );
-      mockEntityManager.save.mockImplementation(async (entity: unknown) => {
-        const candidate = entity as {
-          productID?: string;
-          variationID?: string;
-        };
-        candidate.productID ??= 'product-1';
-        candidate.variationID ??= 'variation-1';
-        return entity;
-      });
+      mockEntityManager.save.mockImplementation(
+        async (targetOrEntity: unknown, maybeEntities?: unknown) => {
+          if (Array.isArray(maybeEntities)) {
+            return maybeEntities.map((entity, index) => {
+              const candidate = entity as {
+                productID?: string;
+                variationID?: string;
+              };
+              if (targetOrEntity === Product) {
+                candidate.productID ??= `product-${index + 1}`;
+              }
+              if (targetOrEntity === ProductVariation) {
+                candidate.variationID ??= `variation-${index + 1}`;
+              }
+              return entity;
+            });
+          }
+          const candidate = targetOrEntity as {
+            productID?: string;
+            variationID?: string;
+          };
+          candidate.productID ??= 'product-1';
+          candidate.variationID ??= 'variation-1';
+          return targetOrEntity;
+        },
+      );
 
       const result = await service.bulkUpsert({
         items: [
@@ -679,6 +867,8 @@ describe('ProductsService', () => {
         select: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        setLock: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([]),
       });
       mockEntityManager.find.mockResolvedValue([

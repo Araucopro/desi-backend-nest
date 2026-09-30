@@ -9,6 +9,8 @@ import { DataSource, EntityManager, Repository } from 'typeorm';
 import { PriceHistory, PriceType } from './entities/price-history.entity';
 import { UpdatePriceDto } from './dto/update-price.dto';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import { Product } from '../products/entities/product.entity';
+import { ProductVariation } from '../products/entities/product-variation.entity';
 import { DiscountType } from './entities/special-offer.entity';
 import {
   BreakdownEntry,
@@ -41,6 +43,17 @@ import {
   findStoreProductsByStoreAndIDs,
   recordPriceChange,
 } from './pricing-repository.helpers';
+
+export type ProductListPricingTarget = {
+  storeProduct: StoreProduct;
+  variation: ProductVariation;
+  product: Product;
+};
+
+export type ProductListPricingOutcome = {
+  result?: PricingResult;
+  error?: string;
+};
 
 @Injectable()
 export class PricingService {
@@ -319,6 +332,113 @@ export class PricingService {
     };
   }
 
+  /**
+   * Calcula precios aislados para StoreProducts cargados por GET /products.
+   * Reutiliza una carga de ofertas por tienda y conserva la semántica de
+   * calculatePrice: cada StoreProduct se evalúa como una línea individual.
+   */
+  async calculatePricesForProductList(
+    manager: EntityManager,
+    targets: ProductListPricingTarget[],
+  ): Promise<Map<string, ProductListPricingOutcome>> {
+    const outcomes = new Map<string, ProductListPricingOutcome>();
+    if (targets.length === 0) return outcomes;
+
+    const pricingDate = new Date();
+    const productByVariationID = new Map(
+      targets.map(({ variation, product }) => [variation.variationID, product]),
+    );
+    const storeProducts = targets.map((target) => target.storeProduct);
+    const groupedItems = this.groupCartItems(
+      storeProducts.map((storeProduct) => ({
+        storeProductID: storeProduct.storeProductID,
+        quantity: 1,
+      })),
+    );
+    const lines = await this.buildLines(
+      manager,
+      storeProducts,
+      groupedItems,
+      productByVariationID,
+    );
+
+    const offerContexts: OfferCartContext[] = [];
+    for (const line of lines) {
+      if (!line.storeID) {
+        outcomes.set(line.storeProductID, {
+          error: 'Producto de tienda sin tienda asociada',
+        });
+        continue;
+      }
+      offerContexts.push({
+        storeID: line.storeID,
+        pricingDate,
+        items: [this.toOfferCartItem(line)],
+      });
+    }
+
+    const offersByStoreProductID =
+      await this.offerService.getApplicableOffersForItems(
+        manager,
+        offerContexts,
+      );
+
+    for (const line of lines) {
+      if (!line.storeID) continue;
+      try {
+        const offers = offersByStoreProductID.get(line.storeProductID) ?? [];
+        for (const offer of offers) {
+          if (offer.discountType === DiscountType.BUY_X_GET_Y) {
+            applyBuyXGetY([line], offer);
+          } else if (offer.discountType === DiscountType.BUNDLE) {
+            applyBundle([line], offer);
+          } else {
+            applyStandardOffer(line, offer);
+          }
+
+          if (offer.exclusive) break;
+        }
+
+        if (!line.marginExempt) {
+          this.marginValidator.validate(
+            line.unitCost,
+            line.currentTotal / line.quantity,
+          );
+        }
+
+        const automatic = line.discountsApplied.find(
+          (discount) => discount.source === 'AUTO' && discount.applied,
+        );
+        outcomes.set(line.storeProductID, {
+          result: {
+            basePrice: line.basePrice,
+            finalPrice: line.currentTotal,
+            breakdown: line.breakdown,
+            discountApplied: line.discountsApplied.some(
+              (discount) => discount.applied,
+            ),
+            discountsApplied: line.discountsApplied,
+            discountDetails: automatic ?? null,
+            pricingContext: {
+              pricingDate: pricingDate.toISOString(),
+              storeID: line.storeID,
+              productID: line.productID,
+              variationID: line.variationID,
+              storeType: line.storeType,
+            },
+          },
+        });
+      } catch (error) {
+        outcomes.set(line.storeProductID, {
+          error:
+            error instanceof Error ? error.message : 'Error calculando precio',
+        });
+      }
+    }
+
+    return outcomes;
+  }
+
   private async buildLines(
     manager: EntityManager,
     storeProducts: StoreProduct[],
@@ -326,6 +446,7 @@ export class PricingService {
       string,
       { quantity: number; baseUnitPrice?: number; priceCost?: number }
     >,
+    productByVariationID?: ReadonlyMap<string, Product>,
   ): Promise<MutableCartLine[]> {
     const baseRows = storeProducts.map((storeProduct) => {
       const override = groupedItems.get(storeProduct.storeProductID);
@@ -376,7 +497,11 @@ export class PricingService {
 
     return baseRows.map((row) => {
       const storeProduct = row.storeProduct;
-      const product = storeProduct.variation?.product;
+      const variation = storeProduct.variation;
+      const product =
+        (variation?.variationID
+          ? productByVariationID?.get(variation.variationID)
+          : undefined) ?? variation?.product;
       const quantity =
         groupedItems.get(storeProduct.storeProductID)?.quantity ?? 0;
       const basePrice = this.toMoney(row.baseUnitPrice * quantity);

@@ -523,6 +523,138 @@ export class OfferService {
       .sort((left, right) => sortOffers(left, right));
   }
 
+  /**
+   * Carga una sola vez las ofertas para varios StoreProducts y devuelve las
+   * ofertas aplicables a cada ítem evaluado de forma aislada. Esto mantiene la
+   * semántica de calculatePrice (un ítem por cálculo) sin consultar ofertas por
+   * cada fila de tienda.
+   */
+  async getApplicableOffersForItems(
+    manager: EntityManager,
+    cartContexts: OfferCartContext[],
+  ): Promise<Map<string, SpecialOffer[]>> {
+    const result = new Map<string, SpecialOffer[]>();
+    const nonEmptyContexts = cartContexts.filter(
+      (context) => context.items.length > 0,
+    );
+    if (nonEmptyContexts.length === 0) return result;
+
+    const contextsByStore = new Map<string, OfferCartContext[]>();
+    for (const context of nonEmptyContexts) {
+      const contexts = contextsByStore.get(context.storeID) ?? [];
+      contexts.push(context);
+      contextsByStore.set(context.storeID, contexts);
+    }
+
+    const offersByStore = new Map<string, SpecialOffer[]>();
+    const allOffers: SpecialOffer[] = [];
+    const repository = this.specialOfferRepository;
+    for (const [storeID, contexts] of contextsByStore) {
+      const storeProductIDs = contexts.flatMap((context) =>
+        context.items.map((item) => item.storeProductID),
+      );
+      const pricingDate = contexts[0].pricingDate;
+      const offers = await repository
+        .createQueryBuilder('offer')
+        .leftJoinAndSelect('offer.storeProduct', 'storeProduct')
+        .leftJoinAndSelect('storeProduct.store', 'store')
+        .leftJoinAndSelect('offer.productTargets', 'productTargets')
+        .leftJoinAndSelect('offer.bundleItems', 'bundleItems')
+        .leftJoinAndSelect('bundleItems.storeProduct', 'bundleStoreProduct')
+        .leftJoinAndSelect('bundleStoreProduct.store', 'bundleStore')
+        .leftJoinAndSelect('bundleStoreProduct.variation', 'bundleVariation')
+        .leftJoinAndSelect('bundleVariation.product', 'bundleProduct')
+        .where('offer.isActive = :isActive', { isActive: true })
+        .andWhere('offer.startDate <= :pricingDate', { pricingDate })
+        .andWhere('(offer.endDate IS NULL OR offer.endDate >= :pricingDate)')
+        .andWhere(
+          new Brackets((qb) =>
+            qb
+              .where('offer.storeID = :storeID')
+              .orWhere('storeProduct.storeProductID IN (:...storeProductIDs)'),
+          ),
+        )
+        .setParameters({ storeID, storeProductIDs })
+        .orderBy('offer.priority', 'ASC')
+        .addOrderBy('offer.startDate', 'DESC')
+        .addOrderBy('offer.createdAt', 'DESC')
+        .addOrderBy('offer.offerID', 'ASC')
+        .getMany();
+
+      offersByStore.set(storeID, offers);
+      allOffers.push(...offers);
+    }
+
+    const needsCategoryTree = allOffers.some(
+      (offer) =>
+        offer.targetScope === OfferTargetScope.CATEGORY &&
+        offer.categoryID &&
+        offer.includeSubcategories,
+    );
+    const categories = needsCategoryTree
+      ? await manager.getRepository(Category).find({
+          select: ['categoryID', 'parentID'],
+        })
+      : [];
+    const childrenByParent = new Map<string, string[]>();
+    for (const category of categories) {
+      if (!category.parentID) continue;
+      const children = childrenByParent.get(category.parentID) ?? [];
+      children.push(category.categoryID);
+      childrenByParent.set(category.parentID, children);
+    }
+
+    for (const [storeID, contexts] of contextsByStore) {
+      const offers = offersByStore.get(storeID) ?? [];
+      const categoryScopes = this.buildCategoryScopes(offers, childrenByParent);
+      for (const context of contexts) {
+        for (const item of context.items) {
+          const itemContext: OfferCartContext = { ...context, items: [item] };
+          const applicable = offers
+            .filter((offer) => {
+              if (offer.discountType === DiscountType.BUNDLE) {
+                if (offer.storeID !== itemContext.storeID) return false;
+                const bundleStoreProductIDs = new Set(
+                  (offer.bundleItems ?? [])
+                    .map((bundleItem) => bundleItem.storeProductID)
+                    .filter((id): id is string => !!id),
+                );
+                return bundleStoreProductIDs.has(item.storeProductID);
+              }
+
+              const matchesStore =
+                offer.storeID === itemContext.storeID ||
+                item.storeProductID === (offer.storeProductID ?? '');
+              return matchesStore && matchesOffer(item, offer, categoryScopes);
+            })
+            .filter((offer) => {
+              if (
+                offer.targetScope !== OfferTargetScope.CATEGORY ||
+                !offer.categoryID
+              ) {
+                return true;
+              }
+
+              const offerScope = categoryScopes.get(
+                `${offer.categoryID}:${offer.includeSubcategories}`,
+              );
+              return matchesOffer(
+                item,
+                offer,
+                new Map([
+                  [offer.categoryID, offerScope ?? new Set([offer.categoryID])],
+                ]),
+              );
+            })
+            .sort((left, right) => sortOffers(left, right));
+          result.set(item.storeProductID, applicable);
+        }
+      }
+    }
+
+    return result;
+  }
+
   async getApplicableStoreProductIDs(
     offer: SpecialOffer,
     cartContext: OfferCartContext,
@@ -628,6 +760,41 @@ export class OfferService {
       }
     }
     return scope;
+  }
+
+  private buildCategoryScopes(
+    offers: SpecialOffer[],
+    childrenByParent: Map<string, string[]>,
+  ): Map<string, Set<string>> {
+    const scopes = new Map<string, Set<string>>();
+    const categoryOffers = offers.filter(
+      (offer) =>
+        offer.targetScope === OfferTargetScope.CATEGORY && offer.categoryID,
+    );
+    if (categoryOffers.length === 0) return scopes;
+
+    for (const offer of categoryOffers) {
+      const categoryID = offer.categoryID!;
+      const cacheKey = `${categoryID}:${offer.includeSubcategories}`;
+      if (scopes.has(cacheKey)) continue;
+
+      const scope = new Set<string>([categoryID]);
+      if (offer.includeSubcategories) {
+        const queue = [categoryID];
+        while (queue.length > 0) {
+          const current = queue.shift()!;
+          for (const childID of childrenByParent.get(current) ?? []) {
+            if (scope.has(childID)) continue;
+            scope.add(childID);
+            queue.push(childID);
+          }
+        }
+      }
+      scopes.set(cacheKey, scope);
+      scopes.set(categoryID, scopes.get(categoryID) ?? scope);
+    }
+
+    return scopes;
   }
 
   private async loadOffer(
