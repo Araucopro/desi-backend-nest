@@ -109,6 +109,33 @@ describe('applyInventoryMovement', () => {
       expect.objectContaining({ condition: ReturnItemCondition.DEFECTIVE }),
     );
   });
+
+  it('reutiliza el StoreProduct ya bloqueado por la transacción', async () => {
+    const manager = createMockManager(null);
+    const lockedStoreProduct = {
+      storeProductID: 'sp-1',
+      tenantID: 'tenant-1',
+      store: { storeID: 'store-1' },
+      variation: { variationID: 'var-1' },
+      stock: 4,
+      stockDefective: 0,
+      priceCost: 10,
+      priceList: 20,
+    };
+
+    const result = await applyInventoryMovement(manager as any, {
+      storeID: 'store-1',
+      variationID: 'var-1',
+      reason: InventoryMovementReason.ADJUSTMENT,
+      newStock: 7,
+      tenantID: 'tenant-1',
+      lockedStoreProduct: lockedStoreProduct as any,
+    });
+
+    expect(result.storeProduct.stock).toBe(7);
+    expect(result.movement).toMatchObject({ delta: 3 });
+    expect(manager.createQueryBuilder).not.toHaveBeenCalled();
+  });
 });
 
 describe('reserveStockAndSnapshotCosts', () => {

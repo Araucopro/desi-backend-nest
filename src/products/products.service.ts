@@ -17,12 +17,16 @@ import { PricingService } from '../pricing/pricing.service';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductListQueryDto } from './dto/product-list.query.dto';
 import { ProductListResponseDto } from './dto/product-list-response.dto';
-import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
+import {
+  InventoryMovement,
+  InventoryMovementReason,
+} from '../inventory/entities/inventory-movement.entity';
 import { InventoryService } from '../inventory/inventory.service';
 import { PriceType } from '../pricing/entities/price-history.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import { Category } from '../categories/entities/category.entity';
+import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import {
   buildVariationPlan,
   buildVariationUpsertPlan,
@@ -35,6 +39,7 @@ import {
   findCentralStore,
   findProductForUpdate,
   findProductWithRelations,
+  findProductsWithRelations,
   findProductsPaginated,
   saveProduct,
   saveVariation,
@@ -151,11 +156,9 @@ export class ProductsService {
         tenantID,
       );
       const centralStore = await findCentralStore(manager, tenantID);
-      const results: Product[] = [];
 
       for (const item of items) {
         const existingProduct = existingByName.get(item.normalizedName);
-
         for (const variation of item.variations) {
           const ownerProductID = skuOwners.get(variation.sku);
           if (ownerProductID && ownerProductID !== existingProduct?.productID) {
@@ -164,18 +167,57 @@ export class ProductsService {
             );
           }
         }
+      }
 
+      const newItems = items.filter(
+        (item) => !existingByName.has(item.normalizedName),
+      );
+      const newProducts = newItems.map((item) =>
+        createProductEntity(manager, {
+          name: item.name,
+          slug: item.slug,
+          tenantID,
+          ...(item.normalizedCategoryName
+            ? {
+                categoryID: categories.get(item.normalizedCategoryName)
+                  ?.categoryID,
+              }
+            : {}),
+          ...(item.image !== undefined ? { image: item.image } : {}),
+          ...(item.brand !== undefined ? { brand: item.brand } : {}),
+          ...(item.genre !== undefined ? { genre: item.genre } : {}),
+          ...(item.description !== undefined
+            ? { description: item.description }
+            : {}),
+        }),
+      );
+      const savedNewProducts = newProducts.length
+        ? await manager.save(Product, newProducts)
+        : [];
+      const newProductsByName = new Map(
+        savedNewProducts.map((product) => [
+          product.name.trim().toLowerCase(),
+          product,
+        ]),
+      );
+
+      const productIDs: string[] = [];
+      const variationsToCreate: Array<{
+        product: Product;
+        dto: BulkProductItemDto['variations'][number];
+      }> = [];
+      const variationsToUpdate: Array<
+        Extract<VariationPlanAction, { kind: 'update' }>
+      > = [];
+
+      for (const item of items) {
+        const existingProduct = existingByName.get(item.normalizedName);
         const categoryID = item.normalizedCategoryName
           ? categories.get(item.normalizedCategoryName)?.categoryID
           : undefined;
 
         if (existingProduct) {
-          const product = await findProductForUpdate(
-            manager,
-            existingProduct.productID,
-          );
-
-          manager.merge(Product, product, {
+          manager.merge(Product, existingProduct, {
             name: item.name,
             slug: item.slug ?? slugifyProductName(item.name),
             ...(item.image !== undefined ? { image: item.image } : {}),
@@ -187,74 +229,133 @@ export class ProductsService {
             ...(categoryID ? { categoryID } : {}),
           });
 
-          const savedProduct = await saveProduct(manager, product);
+          const savedProduct = await saveProduct(manager, existingProduct);
           const plan = buildVariationUpsertPlan({
             variations: item.variations,
-            existing: product.variations,
+            existing: existingProduct.variations,
           });
 
           for (const action of plan) {
             if (action.kind === 'create') {
-              await this.applyVariationCreate(
-                manager,
-                action,
-                savedProduct,
-                centralStore?.storeID,
-                tenantID,
-              );
+              variationsToCreate.push({
+                product: savedProduct,
+                dto: action.dto,
+              });
             } else if (action.kind === 'update') {
-              await this.applyVariationUpdate(
-                manager,
-                action,
-                centralStore?.storeID,
-                tenantID,
-              );
+              variationsToUpdate.push(action);
             }
           }
 
-          results.push(
-            await this.findProductWithRelationsOrFail(
-              manager,
-              savedProduct.productID,
-            ),
-          );
+          productIDs.push(savedProduct.productID);
           continue;
         }
 
-        const savedProduct = await saveProduct(
-          manager,
-          createProductEntity(manager, {
-            name: item.name,
-            tenantID,
-            ...(categoryID ? { categoryID } : {}),
-            ...(item.image !== undefined ? { image: item.image } : {}),
-            ...(item.brand !== undefined ? { brand: item.brand } : {}),
-            ...(item.genre !== undefined ? { genre: item.genre } : {}),
-            ...(item.description !== undefined
-              ? { description: item.description }
-              : {}),
-          }),
-        );
-
-        for (const variationDto of item.variations) {
-          await this.applyVariationCreate(
-            manager,
-            { kind: 'create', dto: variationDto },
-            savedProduct,
-            centralStore?.storeID,
-            tenantID,
+        const savedProduct = newProductsByName.get(item.normalizedName);
+        if (!savedProduct) {
+          throw new NotFoundException(
+            `Producto "${item.name}" no pudo ser creado`,
           );
         }
+        productIDs.push(savedProduct.productID);
+        for (const variationDto of item.variations) {
+          variationsToCreate.push({ product: savedProduct, dto: variationDto });
+        }
+      }
 
-        results.push(
-          await this.findProductWithRelationsOrFail(
-            manager,
-            savedProduct.productID,
-          ),
+      let lockedStoreProducts = new Map<string, StoreProduct>();
+      if (centralStore && variationsToUpdate.length > 0) {
+        lockedStoreProducts = await this.findStoreProductsForUpdate(
+          manager,
+          centralStore.storeID,
+          variationsToUpdate.map((action) => action.variation.variationID),
+        );
+      }
+      for (const action of variationsToUpdate) {
+        await this.applyVariationUpdate(
+          manager,
+          action,
+          centralStore?.storeID,
+          tenantID,
+          centralStore
+            ? (lockedStoreProducts.get(action.variation.variationID) ?? null)
+            : undefined,
         );
       }
 
-      return results;
+      if (variationsToCreate.length > 0) {
+        const variationEntities = variationsToCreate.map(({ product, dto }) =>
+          createVariationEntity(manager, { dto, product, tenantID }),
+        );
+        const savedVariations = await manager.save(
+          ProductVariation,
+          variationEntities,
+        );
+        const savedVariationsBySku = new Map(
+          savedVariations.map((variation) => [variation.sku, variation]),
+        );
+
+        if (centralStore) {
+          const storeProducts = variationsToCreate.map(({ dto }) => {
+            const variation = savedVariationsBySku.get(dto.sku);
+            if (!variation) {
+              throw new NotFoundException(
+                `Variante con SKU ${dto.sku} no pudo ser creada`,
+              );
+            }
+            return manager.create(StoreProduct, {
+              tenantID,
+              store: { storeID: centralStore.storeID },
+              variation: { variationID: variation.variationID },
+              stock: dto.stock,
+              stockDefective: 0,
+              priceCost: dto.priceCost,
+              priceList: dto.priceList,
+            });
+          });
+          await manager.save(StoreProduct, storeProducts);
+
+          const movements = variationsToCreate.flatMap(({ product, dto }) => {
+            const variation = savedVariationsBySku.get(dto.sku);
+            if (!variation) {
+              throw new NotFoundException(
+                `Variante con SKU ${dto.sku} no pudo ser creada`,
+              );
+            }
+            if (dto.stock === 0) return [];
+            return [
+              manager.create(InventoryMovement, {
+                tenantID,
+                store: { storeID: centralStore.storeID },
+                variation: { variationID: variation.variationID },
+                delta: dto.stock,
+                reason: InventoryMovementReason.ADJUSTMENT,
+                referenceID: product.productID,
+                condition: null,
+              }),
+            ];
+          });
+          if (movements.length > 0) {
+            await manager.save(InventoryMovement, movements);
+          }
+        }
+      }
+
+      const loadedProducts = await findProductsWithRelations(
+        manager,
+        productIDs,
+      );
+      const loadedByID = new Map(
+        loadedProducts.map((product) => [product.productID, product]),
+      );
+      return productIDs.map((productID) => {
+        const product = loadedByID.get(productID);
+        if (!product) {
+          throw new NotFoundException(
+            `Producto con ID ${productID} no encontrado`,
+          );
+        }
+        return product;
+      });
     });
   }
 
@@ -364,7 +465,10 @@ export class ProductsService {
       .where('LOWER(TRIM(product.name)) IN (:...names)', { names });
     if (tenantID) query.andWhere('product.tenantID = :tenantID', { tenantID });
 
-    const existing = await query.getMany();
+    const existing = await query
+      .orderBy('product.productID', 'ASC')
+      .setLock('pessimistic_write')
+      .getMany();
     const byName = new Map<string, Product>();
 
     for (const product of existing) {
@@ -377,7 +481,22 @@ export class ProductsService {
       byName.set(key, product);
     }
 
-    return byName;
+    if (existing.length === 0) return byName;
+
+    const productsWithVariations = await manager.find(Product, {
+      where: { productID: In(existing.map((product) => product.productID)) },
+      relations: ['variations'],
+    });
+    const productsByID = new Map(
+      productsWithVariations.map((product) => [product.productID, product]),
+    );
+
+    return new Map(
+      [...byName.entries()].map(([key, product]) => [
+        key,
+        productsByID.get(product.productID) ?? product,
+      ]),
+    );
   }
 
   private async findExistingSkuOwners(
@@ -406,15 +525,39 @@ export class ProductsService {
     );
   }
 
-  private async findProductWithRelationsOrFail(
+  private async findStoreProductsForUpdate(
     manager: EntityManager,
-    productID: string,
-  ): Promise<Product> {
-    const product = await findProductWithRelations(manager, productID);
-    if (!product) {
-      throw new NotFoundException(`Producto con ID ${productID} no encontrado`);
-    }
-    return product;
+    storeID: string,
+    variationIDs: string[],
+  ): Promise<Map<string, StoreProduct>> {
+    const uniqueVariationIDs = [...new Set(variationIDs)].sort();
+    if (uniqueVariationIDs.length === 0) return new Map();
+
+    const lockedRows = await manager
+      .createQueryBuilder(StoreProduct, 'storeProduct')
+      .where('storeProduct.storeID = :storeID', { storeID })
+      .andWhere('storeProduct.variationID IN (:...variationIDs)', {
+        variationIDs: uniqueVariationIDs,
+      })
+      .orderBy('storeProduct.variationID', 'ASC')
+      .setLock('pessimistic_write')
+      .getMany();
+    if (lockedRows.length === 0) return new Map();
+
+    const storeProducts = await manager.find(StoreProduct, {
+      where: {
+        store: { storeID },
+        variation: { variationID: In(uniqueVariationIDs) },
+      },
+      relations: ['variation'],
+    });
+
+    return new Map(
+      storeProducts.map((storeProduct) => [
+        storeProduct.variation.variationID,
+        storeProduct,
+      ]),
+    );
   }
 
   async findAll(query: ProductListQueryDto): Promise<ProductListResponseDto> {
@@ -572,6 +715,7 @@ export class ProductsService {
     action: Extract<VariationPlanAction, { kind: 'update' }>,
     centralStoreID: string | undefined,
     tenantID: string | undefined,
+    lockedStoreProduct?: StoreProduct | null,
   ): Promise<void> {
     const { dto, variation } = action;
     manager.merge(ProductVariation, variation, dto);
@@ -579,11 +723,14 @@ export class ProductsService {
 
     if (!centralStoreID) return;
 
-    const storeProduct = await this.inventoryService.findStoreProductForUpdate(
-      manager,
-      centralStoreID,
-      variation.variationID,
-    );
+    const storeProduct =
+      lockedStoreProduct !== undefined
+        ? lockedStoreProduct
+        : await this.inventoryService.findStoreProductForUpdate(
+            manager,
+            centralStoreID,
+            variation.variationID,
+          );
 
     if (storeProduct) {
       if (
@@ -621,6 +768,7 @@ export class ProductsService {
       priceCost: dto.priceCost,
       priceList: dto.priceList,
       skipZeroDelta: true,
+      lockedStoreProduct: storeProduct,
     });
   }
 

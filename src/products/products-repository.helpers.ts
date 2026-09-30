@@ -1,5 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
-import { EntityManager } from 'typeorm';
+import { EntityManager, In } from 'typeorm';
 import { Store } from '../stores/entities/store.entity';
 import { CreateProductVariationDto } from './dto/create-product-variation.dto';
 import { ProductListQueryDto } from './dto/product-list.query.dto';
@@ -120,6 +120,23 @@ export async function findProductWithRelations(
   return manager.findOne(Product, {
     where: { productID },
     relations,
+  });
+}
+
+export async function findProductsWithRelations(
+  manager: EntityManager,
+  productIDs: string[],
+): Promise<Product[]> {
+  if (productIDs.length === 0) return [];
+
+  return manager.find(Product, {
+    where: { productID: In(productIDs) },
+    relations: [
+      'variations',
+      'variations.storeProducts',
+      'variations.storeProducts.store',
+      'category',
+    ],
   });
 }
 
