@@ -564,25 +564,46 @@ export class ProductsService {
     return this.runInTransaction(async (manager) => {
       const [products, total] = await findProductsPaginated(manager, query);
 
-      for (const product of products) {
-        if (!product.variations) continue;
-        for (const variation of product.variations) {
-          if (!variation.storeProducts) continue;
-          for (const sp of variation.storeProducts) {
-            try {
-              const result = await this.pricingService.calculatePrice({
-                storeProductID: sp.storeProductID,
-                quantity: 1,
-              });
-              (sp as any).finalPrice = result.finalPrice;
-              (sp as any).discountApplied = result.discountApplied;
-              (sp as any).discountsApplied = result.discountsApplied ?? [];
-              (sp as any).activeOffer = result.discountDetails;
-              (sp as any).pricingBreakdown = result.breakdown;
-            } catch (e: any) {
-              (sp as any).pricingError = e.message || 'Error calculando precio';
-            }
+      const pricingTargets = products.flatMap((product) =>
+        (product.variations ?? []).flatMap((variation) =>
+          (variation.storeProducts ?? []).map((storeProduct) => ({
+            storeProduct,
+            variation,
+            product,
+          })),
+        ),
+      );
+
+      try {
+        const pricingResults =
+          await this.pricingService.calculatePricesForProductList(
+            manager,
+            pricingTargets,
+          );
+
+        for (const { storeProduct } of pricingTargets) {
+          const outcome = pricingResults.get(storeProduct.storeProductID);
+          if (outcome?.result) {
+            Object.assign(storeProduct, {
+              finalPrice: outcome.result.finalPrice,
+              discountApplied: outcome.result.discountApplied,
+              discountsApplied: outcome.result.discountsApplied ?? [],
+              activeOffer: outcome.result.discountDetails,
+              pricingBreakdown: outcome.result.breakdown,
+            });
+          } else {
+            Object.assign(storeProduct, {
+              pricingError: outcome?.error || 'Error calculando precio',
+            });
           }
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message
+            ? error.message
+            : 'Error calculando precio';
+        for (const { storeProduct } of pricingTargets) {
+          Object.assign(storeProduct, { pricingError: message });
         }
       }
 

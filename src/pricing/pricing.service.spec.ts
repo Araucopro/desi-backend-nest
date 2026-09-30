@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { PricingService } from './pricing.service';
+import { Product } from '../products/entities/product.entity';
 import { PriceHistory } from './entities/price-history.entity';
 import { OfferService } from './offer.service';
 import { MarginValidator } from './validators/margin.validator';
@@ -29,6 +30,7 @@ describe('PricingService', () => {
   let offerService: {
     getApplicableOffers: jest.Mock;
     getApplicableStoreProductIDs: jest.Mock;
+    getApplicableOffersForItems: jest.Mock;
   };
   let userDiscountValidator: { validate: jest.Mock };
   let marginValidator: { validate: jest.Mock };
@@ -96,6 +98,7 @@ describe('PricingService', () => {
     offerService = {
       getApplicableOffers: jest.fn(),
       getApplicableStoreProductIDs: jest.fn(),
+      getApplicableOffersForItems: jest.fn(),
     };
     userDiscountValidator = {
       validate: jest.fn(),
@@ -280,6 +283,76 @@ describe('PricingService', () => {
     expect(result.basePrice).toBe(120);
     expect(result.finalPrice).toBe(120);
     expect(marginValidator.validate).toHaveBeenCalledWith(50, 120);
+  });
+
+  it('calculates product-list prices in batch while evaluating each StoreProduct alone', async () => {
+    const sp1 = storeProduct({
+      storeProductID: 'sp-list-1',
+      priceCost: 100,
+      priceList: 1000,
+      variation: {
+        variationID: 'variation-list-1',
+        sku: 'SKU-LIST-1',
+      } as StoreProduct['variation'],
+    });
+    const sp2 = storeProduct({
+      storeProductID: 'sp-list-2',
+      priceCost: 50,
+      priceList: 500,
+      variation: {
+        variationID: 'variation-list-2',
+        sku: 'SKU-LIST-2',
+      } as StoreProduct['variation'],
+    });
+    const percentageOffer = offer({
+      offerID: 'list-offer',
+      discountType: DiscountType.PERCENTAGE,
+      value: 10,
+    });
+    offerService.getApplicableOffersForItems.mockResolvedValue(
+      new Map([
+        ['sp-list-1', [percentageOffer]],
+        ['sp-list-2', []],
+      ]),
+    );
+
+    const result = await service.calculatePricesForProductList(
+      manager as never,
+      [
+        {
+          storeProduct: sp1,
+          variation: sp1.variation,
+          product: {
+            productID: 'product-list-1',
+            name: 'Producto lista 1',
+            brand: 'Marca lista',
+            category: { categoryID: 'category-1' },
+          } as Product,
+        },
+        {
+          storeProduct: sp2,
+          variation: sp2.variation,
+          product: {
+            productID: 'product-list-2',
+            name: 'Producto lista 2',
+            category: { categoryID: 'category-2' },
+          } as Product,
+        },
+      ],
+    );
+
+    expect(offerService.getApplicableOffersForItems).toHaveBeenCalledTimes(1);
+    const offerContexts = offerService.getApplicableOffersForItems.mock
+      .calls[0][1] as Array<{ items: Array<{ storeProductID: string }> }>;
+    expect(
+      offerContexts.map((context) =>
+        context.items.map((item) => item.storeProductID),
+      ),
+    ).toEqual([['sp-list-1'], ['sp-list-2']]);
+    expect(result.get('sp-list-1')?.result?.finalPrice).toBe(900);
+    expect(result.get('sp-list-1')?.result?.discountApplied).toBe(true);
+    expect(result.get('sp-list-2')?.result?.finalPrice).toBe(500);
+    expect(result.get('sp-list-2')?.result?.discountApplied).toBe(false);
   });
 
   it('calculates cart totals applying offers by priority with rounding', async () => {

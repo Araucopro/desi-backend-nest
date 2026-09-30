@@ -22,6 +22,7 @@ describe('ProductsService', () => {
   let entityManager: EntityManager;
   let pricingService: {
     calculatePrice: jest.Mock;
+    calculatePricesForProductList: jest.Mock;
     applyPriceChange: jest.Mock;
   };
 
@@ -68,6 +69,7 @@ describe('ProductsService', () => {
 
     pricingService = {
       calculatePrice: jest.fn(),
+      calculatePricesForProductList: jest.fn().mockResolvedValue(new Map()),
       applyPriceChange: jest.fn().mockResolvedValue({ historyID: 'history-1' }),
     };
 
@@ -133,6 +135,63 @@ describe('ProductsService', () => {
         'product',
       );
       expect(queryBuilderMock.getManyAndCount).toHaveBeenCalled();
+    });
+
+    it('enriches all StoreProducts with one batched pricing call', async () => {
+      const storeProduct = { storeProductID: 'sp-1' } as StoreProduct;
+      const variation = {
+        variationID: 'variation-1',
+        storeProducts: [storeProduct],
+      } as ProductVariation;
+      const product = {
+        productID: 'product-1',
+        variations: [variation],
+      } as Product;
+      mockEntityManager.transaction.mockImplementation(async (cb) =>
+        cb(mockEntityManager as any),
+      );
+      mockProductRepository.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[product], 1]),
+      });
+      const activeOffer = { offerID: 'offer-1', applied: true };
+      pricingService.calculatePricesForProductList.mockResolvedValue(
+        new Map([
+          [
+            'sp-1',
+            {
+              result: {
+                finalPrice: 900,
+                discountApplied: true,
+                discountsApplied: [activeOffer],
+                discountDetails: activeOffer,
+                breakdown: [{ step: 'offer' }],
+              },
+            },
+          ],
+        ]),
+      );
+
+      const response = await service.findAll({});
+
+      expect(
+        pricingService.calculatePricesForProductList,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        pricingService.calculatePricesForProductList.mock.calls[0][1],
+      ).toEqual([{ storeProduct, variation, product }]);
+      expect(storeProduct).toMatchObject({
+        finalPrice: 900,
+        discountApplied: true,
+        discountsApplied: [activeOffer],
+        activeOffer,
+        pricingBreakdown: [{ step: 'offer' }],
+      });
+      expect(response.products).toEqual([product]);
+      expect(response.meta.total).toBe(1);
     });
 
     it('applies a server-side search across product and variation fields', async () => {
