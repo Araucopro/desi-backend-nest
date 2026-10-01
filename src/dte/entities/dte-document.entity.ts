@@ -23,6 +23,21 @@ export enum DteDocumentPaymentType {
   CASH = 'Efectivo',
   DEBIT = 'Debito',
   CREDIT = 'Credito',
+  NO_COST = 'Sin costo',
+}
+
+export enum DtePaymentMedium {
+  CASH = 1,
+  ELECTRONIC = 2,
+  BANK_TRANSFER = 3,
+  CHECK = 4,
+  OTHER = 5,
+}
+
+export enum DteFmaPago {
+  CONTADO = '1',
+  CREDIT = '2',
+  NO_COST = '3',
 }
 
 @Entity({ name: 'DteDocument' })
@@ -80,11 +95,17 @@ export class DteDocument {
   documentType!: number | null;
 
   @Column({
-    type: 'enum',
-    enum: DteDocumentPaymentType,
+    type: 'varchar',
+    length: 100,
     default: DteDocumentPaymentType.CASH,
   })
-  paymentType!: DteDocumentPaymentType;
+  paymentType!: string;
+
+  @Column({ type: 'varchar', length: 1, default: '1' })
+  fmaPago!: string;
+
+  @Column({ type: 'smallint', default: DtePaymentMedium.CASH })
+  medioPago!: DtePaymentMedium;
 
   @Column('decimal', {
     precision: 10,

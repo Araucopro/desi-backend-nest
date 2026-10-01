@@ -21,6 +21,7 @@ import {
   ApiPropertyOptional,
   getSchemaPath,
 } from '@nestjs/swagger';
+import { DteFmaPago, DtePaymentMedium } from '../entities/dte-document.entity';
 
 export enum DteResponseValue {
   TOKEN = 'TOKEN',
@@ -46,6 +47,30 @@ export class DteIdDocBoletaDto {
   @ApiProperty({ description: 'Fecha de emisión', example: '2026-08-03' })
   @IsDateString()
   FchEmis!: string;
+
+  @ApiProperty({
+    description: 'Forma de pago Openfactura: 1 contado, 2 crédito, 3 sin costo',
+    enum: DteFmaPago,
+    example: DteFmaPago.CONTADO,
+  })
+  @IsString()
+  @IsIn(Object.values(DteFmaPago))
+  FmaPago!: DteFmaPago;
+
+  @ApiProperty({
+    description:
+      'Medio de pago: 1 efectivo, 2 electrónico, 3 transferencia, 4 cheque, 5 otro',
+    enum: DtePaymentMedium,
+    example: DtePaymentMedium.CASH,
+  })
+  @Type(() => Number)
+  @IsInt()
+  @IsIn(
+    Object.values(DtePaymentMedium).filter(
+      (value) => typeof value === 'number',
+    ),
+  )
+  MedioPago!: DtePaymentMedium;
 
   @ApiPropertyOptional({
     description: 'Indicador de servicio (Boleta 39)',
@@ -90,10 +115,29 @@ export class DteIdDocFacturaDto {
   @IsString()
   TpoTranVenta?: string;
 
-  @ApiPropertyOptional({ description: 'Forma de pago', example: '2' })
-  @IsOptional()
+  @ApiProperty({
+    description: 'Forma de pago Openfactura: 1 contado, 2 crédito, 3 sin costo',
+    enum: DteFmaPago,
+    example: DteFmaPago.CREDIT,
+  })
   @IsString()
-  FmaPago?: string;
+  @IsIn(Object.values(DteFmaPago))
+  FmaPago!: DteFmaPago;
+
+  @ApiProperty({
+    description:
+      'Medio de pago: 1 efectivo, 2 electrónico, 3 transferencia, 4 cheque, 5 otro',
+    enum: DtePaymentMedium,
+    example: DtePaymentMedium.ELECTRONIC,
+  })
+  @Type(() => Number)
+  @IsInt()
+  @IsIn(
+    Object.values(DtePaymentMedium).filter(
+      (value) => typeof value === 'number',
+    ),
+  )
+  MedioPago!: DtePaymentMedium;
 }
 
 export class DteIdDocNotaCreditoDto {

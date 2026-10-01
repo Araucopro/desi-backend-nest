@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   Sale,
-  SalePaymentType,
+  SaleFmaPago,
   SaleStatus,
   SaleType,
 } from '../sales/entities/sale.entity';
@@ -22,7 +22,7 @@ function sale(overrides: Partial<Sale> = {}): Sale {
     userID: null,
     saleType: SaleType.NOTA_VENTA,
     status: SaleStatus.EMITIDA,
-    paymentType: SalePaymentType.CASH,
+    fmaPago: SaleFmaPago.CONTADO,
     folio: 1,
     issueDate: new Date('2026-08-18'),
     receiver: null,

@@ -1,7 +1,7 @@
 import { BadGatewayException } from '@nestjs/common';
 import {
   Sale,
-  SalePaymentType,
+  SaleFmaPago,
   SaleStatus,
   SaleType,
 } from '../sales/entities/sale.entity';
@@ -19,7 +19,7 @@ function createContext() {
     storeID: 'store-1',
     saleType: SaleType.NOTA_VENTA,
     status: SaleStatus.EMITIDA,
-    paymentType: SalePaymentType.CASH,
+    fmaPago: SaleFmaPago.CONTADO,
     folio: 1,
     issueDate: new Date('2026-08-18'),
     receiver: null,

@@ -2,8 +2,8 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SalesReportGroupedItemDto {
   @ApiProperty({
-    description: 'Clave del grupo: tipo de pago o estado del documento',
-    example: 'Efectivo',
+    description: 'Código de FmaPago o estado del documento',
+    example: '1',
   })
   key!: string;
 
@@ -99,8 +99,8 @@ export class SalesReportSaleItemDto {
   @ApiProperty({ description: 'Estado del documento', example: 'EMITIDO' })
   status!: string;
 
-  @ApiProperty({ description: 'Tipo de pago', example: 'Efectivo' })
-  paymentType!: string;
+  @ApiProperty({ description: 'Código FmaPago de Openfactura', example: '1' })
+  fmaPago!: string;
 
   @ApiProperty({ description: 'Total de la venta en CLP', example: 150000 })
   total!: number;
@@ -165,9 +165,9 @@ export class SalesReportMetaDto {
 export class SalesReportResponseDto {
   @ApiProperty({
     type: [SalesReportGroupedItemDto],
-    description: 'Ventas agrupadas por tipo de pago',
+    description: 'Ventas agrupadas por código FmaPago',
   })
-  groupedByPaymentType!: SalesReportGroupedItemDto[];
+  groupedByFmaPago!: SalesReportGroupedItemDto[];
 
   @ApiProperty({
     type: [SalesReportGroupedItemDto],

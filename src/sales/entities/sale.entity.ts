@@ -13,6 +13,7 @@ import {
 import { Store } from '../../stores/entities/store.entity';
 import { DteDocument } from '../../dte/entities/dte-document.entity';
 import { CashRegisterSession } from '../../cash-registers/entities/cash-register-session.entity';
+import type { Payment } from '../../cash-registers/entities/payment.entity';
 import { SaleItem } from './sale-item.entity';
 import { ColumnNumericTransformer } from '../../common/transformers/numeric.transformer';
 
@@ -32,10 +33,10 @@ export enum SaleStatus {
   CORREGIDA = 'CORREGIDA',
 }
 
-export enum SalePaymentType {
-  CASH = 'Efectivo',
-  DEBIT = 'Debito',
-  CREDIT = 'Credito',
+export enum SaleFmaPago {
+  CONTADO = '1',
+  CREDIT = '2',
+  NO_COST = '3',
 }
 
 export type SaleReceiver = {
@@ -83,8 +84,8 @@ export class Sale {
   })
   status!: SaleStatus;
 
-  @Column({ type: 'enum', enum: SalePaymentType })
-  paymentType!: SalePaymentType;
+  @Column({ type: 'varchar', length: 1 })
+  fmaPago!: SaleFmaPago;
 
   @Column({ type: 'int', nullable: true })
   folio!: number | null;
@@ -180,6 +181,9 @@ export class Sale {
     cascade: true,
   })
   items!: SaleItem[];
+
+  /** Cobros registrados desde el POS; FmaPago no identifica sus medios. */
+  payments?: Payment[];
 
   @CreateDateColumn()
   createdAt!: Date;

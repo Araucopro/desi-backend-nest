@@ -107,7 +107,7 @@ export async function fetchDtePaymentBreakdown(
 ): Promise<Array<Record<string, unknown>>> {
   const qb = repo
     .createQueryBuilder('document')
-    .select('document.paymentType', 'key')
+    .select('document.fmaPago', 'key')
     .addSelect(
       'SUM(CASE WHEN document.documentType = 61 THEN -document.total ELSE document.total END)',
       'total',
@@ -127,7 +127,7 @@ export async function fetchDtePaymentBreakdown(
     qb.andWhere('document.storeID = :storeId', { storeId });
   }
 
-  return qb.groupBy('document.paymentType').getRawMany();
+  return qb.groupBy('document.fmaPago').getRawMany();
 }
 
 export async function fetchDteStatusBreakdown(
@@ -168,7 +168,7 @@ export async function fetchSalePaymentBreakdown(
 ): Promise<Array<Record<string, unknown>>> {
   const qb = repo
     .createQueryBuilder('sale')
-    .select('sale.paymentType', 'key')
+    .select('sale.fmaPago', 'key')
     .addSelect('COUNT(sale.saleID)', 'count')
     .addSelect('SUM(sale.total)', 'total')
     .where('sale.createdAt >= :from AND sale.createdAt < :to', {
@@ -184,7 +184,7 @@ export async function fetchSalePaymentBreakdown(
     qb.andWhere('sale.storeID = :storeId', { storeId });
   }
 
-  return qb.groupBy('sale.paymentType').getRawMany();
+  return qb.groupBy('sale.fmaPago').getRawMany();
 }
 
 export async function fetchSaleStatusBreakdown(

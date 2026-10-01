@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { SalePaymentType } from '../sales/entities/sale.entity';
+import { SaleFmaPago } from '../sales/entities/sale.entity';
 import {
   findCashRegisterOrFail,
   findOpenSessionOrFail,
@@ -21,16 +21,13 @@ import {
 import { CashRegister } from './entities/cash-register.entity';
 import { CashRegisterSession } from './entities/cash-register-session.entity';
 import { Payment, PaymentStatus } from './entities/payment.entity';
-import {
-  PaymentMethod,
-  PaymentMethodType,
-} from './entities/payment-method.entity';
+import { PaymentMethod } from './entities/payment-method.entity';
 
 export type ResolveSalePaymentsInput = {
   tenantID?: string | null;
   storeID: string;
   saleTotal: number;
-  paymentType: SalePaymentType;
+  fmaPago: SaleFmaPago;
   cashRegisterID?: string;
   payments?: SalePaymentInputDto[];
   lock?: boolean;
@@ -93,6 +90,15 @@ export class PaymentsService {
     input: ResolveSalePaymentsInput,
   ): Promise<ResolvedSalePayments | null> {
     const requestedPayments = input.payments ?? [];
+
+    if (input.fmaPago === SaleFmaPago.NO_COST) {
+      if (input.saleTotal !== 0 || requestedPayments.length > 0) {
+        throw new BadRequestException(
+          'Una venta sin costo no puede registrar pagos y debe tener total cero',
+        );
+      }
+      return null;
+    }
 
     if (!input.cashRegisterID && requestedPayments.length === 0) {
       return null;
@@ -179,8 +185,6 @@ export class PaymentsService {
       );
     }
 
-    this.assertPaymentTypeMatches(input.paymentType, lines);
-
     return {
       tenantID,
       register,
@@ -188,33 +192,6 @@ export class PaymentsService {
       total: saleTotal,
       lines,
     };
-  }
-
-  /**
-   * Un cobro en efectivo declarado en la venta debe incluir al menos un medio
-   * que mueva efectivo; un cobro con débito debe incluir la tarjeta de débito.
-   */
-  private assertPaymentTypeMatches(
-    paymentType: SalePaymentType,
-    lines: ResolvedSalePaymentLine[],
-  ): void {
-    if (
-      paymentType === SalePaymentType.CASH &&
-      !lines.some((line) => line.method.affectsCash)
-    ) {
-      throw new BadRequestException(
-        'La venta está marcada como pago en efectivo pero ningún medio informado mueve efectivo',
-      );
-    }
-
-    if (
-      paymentType === SalePaymentType.DEBIT &&
-      !lines.some((line) => line.method.type === PaymentMethodType.DEBIT_CARD)
-    ) {
-      throw new BadRequestException(
-        'La venta está marcada como pago con débito pero no se informó una tarjeta de débito',
-      );
-    }
   }
 
   /**

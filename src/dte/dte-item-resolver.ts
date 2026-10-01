@@ -292,6 +292,8 @@ export async function mapToDocumentPayload(
         : {}),
       FchEmis: encabezado.IdDoc.FchEmis,
       IndServicio: encabezado.IdDoc.IndServicio ?? '3',
+      FmaPago: encabezado.IdDoc.FmaPago,
+      MedioPago: encabezado.IdDoc.MedioPago,
     };
 
     if (encabezado.Totales) {

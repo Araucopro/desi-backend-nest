@@ -15,10 +15,7 @@ import {
   DteDocumentStatus,
 } from '../dte/entities/dte-document.entity';
 import { DteDocumentResponseDto } from '../dte/dto/dte-document-response.dto';
-import {
-  CreateDteDocumentDto,
-  DteReferenciaDto,
-} from '../dte/dto/create-dte-document.dto';
+import { DteReferenciaDto } from '../dte/dto/create-dte-document.dto';
 import { OpenfacturaClientService } from '../dte/openfactura-client.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { InventoryMovementReason } from '../inventory/entities/inventory-movement.entity';
@@ -771,7 +768,6 @@ export class DispatchGuidesService implements OnModuleInit {
       dteDto,
       {
         reserveStock: false,
-        paymentType: dto.paymentType,
         cogsTotalOverride: cogsTotal,
       },
     );

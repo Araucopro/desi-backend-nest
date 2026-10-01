@@ -1,7 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { DteMapperService } from './dte-mapper.service';
-import { SalePaymentType, SaleType } from './entities/sale.entity';
+import { SaleFmaPago, SaleType } from './entities/sale.entity';
 import { StoreType } from '../stores/entities/store.entity';
+import { DtePaymentMedium } from '../dte/entities/dte-document.entity';
 
 const store = {
   storeID: 'store-1',
@@ -21,7 +22,8 @@ const store = {
 function saleInput(overrides: Record<string, unknown> = {}) {
   return {
     saleType: SaleType.NOTA_VENTA,
-    paymentType: SalePaymentType.CASH,
+    fmaPago: SaleFmaPago.CONTADO,
+    medioPago: DtePaymentMedium.CASH,
     issueDate: new Date('2026-08-06T12:00:00.000Z'),
     receiver: { rut: '66666666-6', name: 'Cliente Ejemplo' },
     items: [
@@ -49,7 +51,8 @@ describe('DteMapperService', () => {
     const encabezado = dto.dte.Encabezado;
 
     expect(encabezado.IdDoc.TipoDTE).toBe(39);
-    expect(encabezado.IdDoc).not.toHaveProperty('FmaPago');
+    expect(encabezado.IdDoc).toHaveProperty('FmaPago', '1');
+    expect(encabezado.IdDoc).toHaveProperty('MedioPago', 1);
     expect(encabezado.IdDoc).toMatchObject({ IndServicio: '3' });
     expect(encabezado.Emisor).toMatchObject({
       RznSocEmisor: 'Tienda Demo SpA',
@@ -88,7 +91,7 @@ describe('DteMapperService', () => {
     const encabezado = dto.dte.Encabezado;
 
     expect(encabezado.IdDoc.TipoDTE).toBe(33);
-    expect(encabezado.IdDoc).toMatchObject({ FmaPago: '1' });
+    expect(encabezado.IdDoc).toMatchObject({ FmaPago: '1', MedioPago: 1 });
     expect(encabezado.Emisor).toMatchObject({
       RznSoc: 'Tienda Demo SpA',
       GiroEmis: 'VENTA AL POR MENOR',
@@ -119,6 +122,31 @@ describe('DteMapperService', () => {
     expect(Number.isInteger(encabezado.Totales!.IVA)).toBe(true);
     expect(Number.isInteger(dto.dte.Detalle[0].MontoItem)).toBe(true);
     expect(Number.isInteger(dto.dte.Detalle[0].PrcItem)).toBe(true);
+  });
+
+  it('maps una boleta gratuita a FmaPago 3 y clasifica el medio como Otro', () => {
+    const dto = service.mapSaleToDte(
+      saleInput({
+        fmaPago: SaleFmaPago.NO_COST,
+        medioPago: DtePaymentMedium.OTHER,
+        total: 0,
+        netTotal: 0,
+        taxTotal: 0,
+        items: [
+          {
+            productName: 'Regalo',
+            sku: 'SKU-REGALO',
+            quantity: 1,
+            unitPrice: 0,
+            lineTotal: 0,
+          },
+        ],
+      }),
+      { documentType: 39 },
+    );
+
+    expect(dto.dte.Encabezado.IdDoc).toHaveProperty('FmaPago', '3');
+    expect(dto.dte.Encabezado.IdDoc).toHaveProperty('MedioPago', 5);
   });
 
   it('rejects a factura without receiver', () => {

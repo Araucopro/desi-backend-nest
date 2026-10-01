@@ -35,7 +35,7 @@ export type DteDocumentListItem = {
   token: string;
   folio: number;
   status: DteDocumentStatus;
-  paymentType: string;
+  fmaPago: string;
   total: number;
   documentType: number | null;
   createdAt: Date;
@@ -57,7 +57,7 @@ export type SaleListItem = {
   token: string | null;
   folio: number | null;
   status: string;
-  paymentType: string;
+  fmaPago: string;
   total: number;
   documentType: number | null;
   createdAt: Date;
@@ -262,7 +262,7 @@ export function serializeDocument(document: DteDocument): DteDocumentListItem {
     token: document.token,
     folio: document.folio,
     status: document.status,
-    paymentType: document.paymentType,
+    fmaPago: document.fmaPago,
     total: Number(document.total),
     documentType: document.documentType,
     createdAt: document.createdAt,
@@ -310,7 +310,7 @@ export function serializeSaleNote(sale: Sale): SaleListItem {
     token: null,
     folio: sale.folio,
     status: sale.status,
-    paymentType: sale.paymentType,
+    fmaPago: sale.fmaPago,
     total: Number(sale.total),
     documentType: null,
     createdAt: sale.createdAt,

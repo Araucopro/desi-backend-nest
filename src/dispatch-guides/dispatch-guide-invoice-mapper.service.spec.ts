@@ -1,5 +1,8 @@
 import { DispatchGuideInvoiceMapperService } from './dispatch-guide-invoice-mapper.service';
-import { DteDocumentPaymentType } from '../dte/entities/dte-document.entity';
+import {
+  DteFmaPago,
+  DtePaymentMedium,
+} from '../dte/entities/dte-document.entity';
 import { DispatchGuideStatus } from './entities/dispatch-guide.entity';
 
 describe('DispatchGuideInvoiceMapperService', () => {
@@ -55,7 +58,8 @@ describe('DispatchGuideInvoiceMapperService', () => {
   it('transforma 1 guía a factura electrónica 33 con referencia DTE 52', () => {
     const guide = mockGuide();
     const result = service.mapGuidesToInvoice([guide], store, {
-      paymentType: DteDocumentPaymentType.CASH,
+      fmaPago: DteFmaPago.CONTADO,
+      medioPago: DtePaymentMedium.CASH,
       issueDate: '2026-08-25',
     });
 
@@ -64,6 +68,7 @@ describe('DispatchGuideInvoiceMapperService', () => {
       Folio: 0,
       FchEmis: '2026-08-25',
       FmaPago: '1',
+      MedioPago: 1,
     });
 
     expect(result.dteDto.dte.Encabezado.Receptor).toMatchObject({
@@ -127,7 +132,8 @@ describe('DispatchGuideInvoiceMapperService', () => {
     });
 
     const result = service.mapGuidesToInvoice([guide1, guide2], store, {
-      paymentType: DteDocumentPaymentType.CREDIT,
+      fmaPago: DteFmaPago.CREDIT,
+      medioPago: DtePaymentMedium.BANK_TRANSFER,
     });
 
     expect(result.dteDto.dte.Referencia).toHaveLength(2);
@@ -165,7 +171,8 @@ describe('DispatchGuideInvoiceMapperService', () => {
 
     expect(() =>
       service.mapGuidesToInvoice([guide1, guide2], store, {
-        paymentType: DteDocumentPaymentType.CASH,
+        fmaPago: DteFmaPago.CONTADO,
+        medioPago: DtePaymentMedium.CASH,
       }),
     ).toThrow(
       'Todas las guías a consolidar deben pertenecer al mismo receptor',
@@ -177,7 +184,8 @@ describe('DispatchGuideInvoiceMapperService', () => {
 
     expect(() =>
       service.mapGuidesToInvoice([guide], store, {
-        paymentType: DteDocumentPaymentType.CASH,
+        fmaPago: DteFmaPago.CONTADO,
+        medioPago: DtePaymentMedium.CASH,
       }),
     ).toThrow('no tiene folio SII asignado');
   });
@@ -189,7 +197,8 @@ describe('DispatchGuideInvoiceMapperService', () => {
 
     expect(() =>
       service.mapGuidesToInvoice(guides, store, {
-        paymentType: DteDocumentPaymentType.CASH,
+        fmaPago: DteFmaPago.CONTADO,
+        medioPago: DtePaymentMedium.CASH,
       }),
     ).toThrow(
       'El SII permite un máximo de 40 documentos referenciados por factura',

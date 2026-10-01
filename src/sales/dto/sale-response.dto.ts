@@ -1,11 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DteDocumentResponseDto } from '../../dte/dto/dte-document-response.dto';
+import { PaymentStatus } from '../../cash-registers/entities/payment.entity';
+import { PaymentMethodType } from '../../cash-registers/entities/payment-method.entity';
 import {
   DteDocumentPaymentType,
   DteDocumentStatus,
 } from '../../dte/entities/dte-document.entity';
 import { StoreType } from '../../stores/entities/store.entity';
-import { SalePaymentType, SaleStatus, SaleType } from '../entities/sale.entity';
+import { SaleFmaPago, SaleStatus, SaleType } from '../entities/sale.entity';
 
 export class SaleItemDto {
   @ApiProperty({
@@ -65,6 +67,65 @@ export class SaleItemDto {
     example: '2026-08-18T12:00:00.000Z',
   })
   createdAt!: Date;
+}
+
+export class SalePaymentMethodDto {
+  @ApiProperty({ description: 'ID del medio de pago' })
+  paymentMethodID!: string;
+
+  @ApiProperty({
+    description: 'Código del medio de pago',
+    example: 'BANK_TRANSFER',
+  })
+  code!: string;
+
+  @ApiProperty({
+    description: 'Nombre visible del medio de pago',
+    example: 'Transferencia',
+  })
+  name!: string;
+
+  @ApiProperty({
+    description: 'Clasificación del medio de pago',
+    enum: PaymentMethodType,
+  })
+  type!: PaymentMethodType;
+}
+
+export class SalePaymentDto {
+  @ApiProperty({ description: 'ID del cobro' })
+  paymentID!: string;
+
+  @ApiProperty({ description: 'ID del medio usado en el cobro' })
+  paymentMethodID!: string;
+
+  @ApiProperty({
+    description: 'Medio de pago usado',
+    type: SalePaymentMethodDto,
+    nullable: true,
+  })
+  paymentMethod!: SalePaymentMethodDto | null;
+
+  @ApiProperty({ description: 'Monto del cobro en CLP', example: 99900 })
+  amount!: number;
+
+  @ApiProperty({ description: 'Estado del cobro', enum: PaymentStatus })
+  status!: PaymentStatus;
+
+  @ApiProperty({ description: 'Fecha de pago' })
+  paidAt!: Date;
+
+  @ApiPropertyOptional({
+    description: 'Código de autorización',
+    nullable: true,
+  })
+  authorizationCode!: string | null;
+
+  @ApiPropertyOptional({ description: 'ID de transacción', nullable: true })
+  transactionID!: string | null;
+
+  @ApiPropertyOptional({ description: 'Referencia del pago', nullable: true })
+  reference!: string | null;
 }
 
 export class SaleStoreDto {
@@ -226,7 +287,7 @@ export class DteDocumentSummaryDto {
   documentType!: number | null;
 
   @ApiProperty({
-    description: 'Tipo de pago del documento',
+    description: 'Forma de pago contable del documento (FmaPago)',
     enum: DteDocumentPaymentType,
     example: DteDocumentPaymentType.CASH,
   })
@@ -327,11 +388,17 @@ export class SaleDto {
   status!: SaleStatus;
 
   @ApiProperty({
-    description: 'Tipo de pago',
-    enum: SalePaymentType,
-    example: SalePaymentType.CASH,
+    description: 'Código FmaPago enviado a Openfactura',
+    enum: SaleFmaPago,
+    example: SaleFmaPago.CONTADO,
   })
-  paymentType!: SalePaymentType;
+  fmaPago!: SaleFmaPago;
+
+  @ApiProperty({
+    description: 'Cobros registrados para la venta y sus medios de pago',
+    type: [SalePaymentDto],
+  })
+  payments!: SalePaymentDto[];
 
   @ApiProperty({
     description: 'Folio de la venta (null en notas de venta sin convertir)',

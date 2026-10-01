@@ -1,6 +1,6 @@
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { CreateSaleDto } from './create-sale.dto';
-import { SalePaymentType, SaleType } from '../entities/sale.entity';
+import { SaleFmaPago, SaleType } from '../entities/sale.entity';
 
 describe('CreateSaleDto', () => {
   const pipe = new ValidationPipe({
@@ -12,7 +12,7 @@ describe('CreateSaleDto', () => {
   function validPayload() {
     return {
       saleType: SaleType.NOTA_VENTA,
-      paymentType: SalePaymentType.CASH,
+      fmaPago: SaleFmaPago.CONTADO,
       items: [
         {
           storeProductID: '550e8400-e29b-41d4-a716-446655440000',
@@ -46,6 +46,15 @@ describe('CreateSaleDto', () => {
 
     expect(dto).toBeInstanceOf(CreateSaleDto);
     expect((dto as CreateSaleDto).manualDiscount).toBe(10);
+  });
+
+  it('rejects the previous paymentType field in favor of fmaPago', async () => {
+    await expect(
+      pipe.transform(
+        { ...validPayload(), paymentType: 'Efectivo' },
+        { type: 'body', metatype: CreateSaleDto },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects manualDiscount outside 0-100', async () => {

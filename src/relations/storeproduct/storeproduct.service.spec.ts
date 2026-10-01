@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { StoreProductService } from './storeproduct.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { StoreProduct } from './entities/storeproduct.entity';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { NotFoundException } from '@nestjs/common';
 import { Product } from '../../products/entities/product.entity';
 import { PricingService } from '../../pricing/pricing.service';
@@ -13,9 +13,8 @@ import {
 
 describe('StoreProductService', () => {
   let service: StoreProductService;
-  let productRepository: Repository<Product>;
   let pricingService: {
-    calculatePrice: jest.Mock;
+    calculatePricesForProductList: jest.Mock;
     applyPriceChange: jest.Mock;
   };
 
@@ -35,6 +34,7 @@ describe('StoreProductService', () => {
   const mockManager = {
     findOne: jest.fn(),
     createQueryBuilder: jest.fn(),
+    getRepository: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
   };
@@ -43,9 +43,10 @@ describe('StoreProductService', () => {
     jest.clearAllMocks();
 
     pricingService = {
-      calculatePrice: jest.fn(),
+      calculatePricesForProductList: jest.fn().mockResolvedValue(new Map()),
       applyPriceChange: jest.fn().mockResolvedValue({ historyID: 'history-1' }),
     };
+    mockManager.getRepository.mockReturnValue(mockProductRepository);
     mockManager.create.mockImplementation(
       (_entity: unknown, values: object) => ({ ...values }),
     );
@@ -62,10 +63,6 @@ describe('StoreProductService', () => {
           useValue: mockStoreStockRepository,
         },
         {
-          provide: getRepositoryToken(Product),
-          useValue: mockProductRepository,
-        },
-        {
           provide: DataSource,
           useValue: mockDataSource,
         },
@@ -77,9 +74,6 @@ describe('StoreProductService', () => {
     }).compile();
 
     service = module.get<StoreProductService>(StoreProductService);
-    productRepository = module.get<Repository<Product>>(
-      getRepositoryToken(Product),
-    );
   });
 
   it('should be defined', () => {
@@ -156,7 +150,7 @@ describe('StoreProductService', () => {
   });
 
   describe('getStoreInventory', () => {
-    it('calculates prices only through PricingService', async () => {
+    it('calculates inventory prices in one batch through PricingService', async () => {
       const product = {
         productID: 'product-1',
         name: 'Producto A',
@@ -182,24 +176,46 @@ describe('StoreProductService', () => {
       mockProductRepository.createQueryBuilder.mockReturnValue(
         queryBuilderMock,
       );
-      pricingService.calculatePrice.mockResolvedValue({
+      const pricingResult = {
         finalPrice: 140,
         discountApplied: true,
         discountsApplied: [],
         discountDetails: null,
         breakdown: [],
-      });
+      };
+      pricingService.calculatePricesForProductList.mockResolvedValue(
+        new Map([
+          [
+            'sp-1',
+            {
+              result: pricingResult,
+            },
+          ],
+        ]),
+      );
 
       const result = await service.getStoreInventory('store-1');
 
-      expect(pricingService.calculatePrice).toHaveBeenCalledWith({
-        storeProductID: 'sp-1',
-        quantity: 1,
-      });
+      expect(mockManager.getRepository).toHaveBeenCalledWith(Product);
+      expect(
+        pricingService.calculatePricesForProductList,
+      ).toHaveBeenCalledTimes(1);
+      expect(pricingService.calculatePricesForProductList).toHaveBeenCalledWith(
+        mockManager,
+        [
+          {
+            storeProduct: product.variations[0].storeProducts[0],
+            variation: product.variations[0],
+            product,
+          },
+        ],
+      );
       expect(result[0].variations[0].storeProducts[0]).toEqual(
         expect.objectContaining({
           finalPrice: 140,
           discountApplied: true,
+          activeOffer: null,
+          pricingBreakdown: [],
         }),
       );
     });

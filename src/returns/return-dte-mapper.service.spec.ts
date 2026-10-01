@@ -2,7 +2,7 @@ import { ReturnDteMapperService } from './return-dte-mapper.service';
 import { Return, ReturnType } from './entities/return.entity';
 import {
   Sale,
-  SalePaymentType,
+  SaleFmaPago,
   SaleStatus,
   SaleType,
 } from '../sales/entities/sale.entity';
@@ -30,7 +30,7 @@ function sale(overrides: Partial<Sale> = {}): Sale {
     storeID: 'store-1',
     saleType: SaleType.BOLETA,
     status: SaleStatus.EMITIDA,
-    paymentType: SalePaymentType.CASH,
+    fmaPago: SaleFmaPago.CONTADO,
     folio: 1024,
     issueDate: new Date('2026-08-18'),
     receiver: null,

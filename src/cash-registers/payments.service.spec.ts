@@ -2,7 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { TenantContextService } from '../multitenant/tenant-context.service';
-import { SalePaymentType } from '../sales/entities/sale.entity';
+import { SaleFmaPago } from '../sales/entities/sale.entity';
 import { CashMovementsService } from './cash-movements.service';
 import { PaymentsService } from './payments.service';
 import { CashRegister } from './entities/cash-register.entity';
@@ -32,6 +32,7 @@ describe('PaymentsService (Hito 2)', () => {
   const mockSaleID = 'sale-uuid-7777';
   const mockCashMethodID = 'method-cash';
   const mockDebitMethodID = 'method-debit';
+  const mockTransferMethodID = 'method-transfer';
 
   const cashMethod = {
     paymentMethodID: mockCashMethodID,
@@ -48,6 +49,15 @@ describe('PaymentsService (Hito 2)', () => {
     code: 'DEBIT_CARD',
     name: 'Débito',
     type: PaymentMethodType.DEBIT_CARD,
+    affectsCash: false,
+    active: true,
+  };
+  const transferMethod = {
+    paymentMethodID: mockTransferMethodID,
+    tenantID: mockTenantID,
+    code: 'BANK_TRANSFER',
+    name: 'Transferencia',
+    type: PaymentMethodType.BANK_TRANSFER,
     affectsCash: false,
     active: true,
   };
@@ -127,7 +137,11 @@ describe('PaymentsService (Hito 2)', () => {
       cashRegisterID: mockRegisterID,
       status: CashRegisterSessionStatus.OPEN,
     });
-    mockMethodRepo.find.mockResolvedValue([cashMethod, debitMethod]);
+    mockMethodRepo.find.mockResolvedValue([
+      cashMethod,
+      debitMethod,
+      transferMethod,
+    ]);
     mockCashMovementsService.recordSystemMovement.mockImplementation(
       (_manager: unknown, input: object) =>
         Promise.resolve({ cashMovementID: 'movement-1', ...input }),
@@ -163,7 +177,7 @@ describe('PaymentsService (Hito 2)', () => {
       tenantID: mockTenantID,
       storeID: mockStoreID,
       saleTotal: 1190,
-      paymentType: SalePaymentType.CASH,
+      fmaPago: SaleFmaPago.CONTADO,
       cashRegisterID: mockRegisterID,
       payments: [{ paymentMethodID: mockCashMethodID, amount: 1190 }],
       ...overrides,
@@ -178,7 +192,23 @@ describe('PaymentsService (Hito 2)', () => {
           tenantID: mockTenantID,
           storeID: mockStoreID,
           saleTotal: 1190,
-          paymentType: SalePaymentType.CASH,
+          fmaPago: SaleFmaPago.CONTADO,
+        },
+      );
+
+      expect(result).toBeNull();
+      expect(mockRegisterRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('permite una venta sin costo de total cero y sin medios cobrados', async () => {
+      const result = await service.resolveSalePayments(
+        mockEntityManager as never,
+        {
+          tenantID: mockTenantID,
+          storeID: mockStoreID,
+          saleTotal: 0,
+          fmaPago: SaleFmaPago.NO_COST,
+          cashRegisterID: mockRegisterID,
         },
       );
 
@@ -234,13 +264,17 @@ describe('PaymentsService (Hito 2)', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('debe rechazar pagos en efectivo sin un medio que mueva efectivo', async () => {
-      await expect(
-        resolve({
-          paymentType: SalePaymentType.CASH,
-          payments: [{ paymentMethodID: mockDebitMethodID, amount: 1190 }],
-        }),
-      ).rejects.toThrow(BadRequestException);
+    it('permite una venta contado pagada por transferencia sin exigir efectivo físico', async () => {
+      const result = await resolve({
+        fmaPago: SaleFmaPago.CONTADO,
+        payments: [{ paymentMethodID: mockTransferMethodID, amount: 1190 }],
+      });
+
+      expect(result?.lines).toHaveLength(1);
+      expect(result?.lines[0].method.type).toBe(
+        PaymentMethodType.BANK_TRANSFER,
+      );
+      expect(result?.lines[0].method.affectsCash).toBe(false);
     });
 
     it('debe resolver el contexto de cobro con sesión, medios y total', async () => {
@@ -268,6 +302,29 @@ describe('PaymentsService (Hito 2)', () => {
   });
 
   describe('persistSalePayments', () => {
+    it('persiste una transferencia completada sin generar CASH_IN', async () => {
+      const resolved = await resolve({
+        payments: [{ paymentMethodID: mockTransferMethodID, amount: 1190 }],
+      });
+
+      const result = await service.persistSalePayments(
+        mockEntityManager as never,
+        resolved!,
+        { saleID: mockSaleID, createdByUserID: mockUserID },
+      );
+
+      expect(result.payments).toHaveLength(1);
+      expect(result.payments[0]).toMatchObject({
+        paymentMethodID: mockTransferMethodID,
+        amount: 1190,
+        status: PaymentStatus.COMPLETED,
+      });
+      expect(result.cashMovements).toEqual([]);
+      expect(
+        mockCashMovementsService.recordSystemMovement,
+      ).not.toHaveBeenCalled();
+    });
+
     it('debe persistir los pagos COMPLETED y generar CASH_IN solo para medios que afectan efectivo', async () => {
       const resolved = await resolve({
         payments: [

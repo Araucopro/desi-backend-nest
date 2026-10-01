@@ -27,20 +27,24 @@ function createDteDto(
     fmaPago?: string;
     quantity?: number;
     noCode?: boolean;
-    noFmaPago?: boolean;
     tipoDTE?: number;
   } = {},
 ) {
+  const tipoDTE = overrides.tipoDTE ?? 33;
+
   return {
     purchaseOrderID: undefined,
     response: ['FOLIO'],
     dte: {
       Encabezado: {
         IdDoc: {
-          TipoDTE: overrides.tipoDTE ?? 33,
+          TipoDTE: tipoDTE,
           Folio: 100,
           FchEmis: '2026-01-15',
-          ...(overrides.noFmaPago ? {} : { FmaPago: overrides.fmaPago }),
+          ...(tipoDTE === 33 || tipoDTE === 39
+            ? { FmaPago: overrides.fmaPago ?? '1' }
+            : {}),
+          MedioPago: 1,
         },
         Emisor: {
           RUTEmisor: '76123456-7',
@@ -635,19 +639,26 @@ describe('DteService', () => {
     );
   });
 
-  it('persists options.paymentType for a boleta without FmaPago', async () => {
+  it('maps FmaPago to the document summary and persists MedioPago for a boleta', async () => {
     const service = createService();
 
     await service.create(
       'store-1',
       undefined,
-      createDteDto({ tipoDTE: 39, noFmaPago: true }) as any,
-      { paymentType: DteDocumentPaymentType.CREDIT },
+      createDteDto({ tipoDTE: 39, fmaPago: '2' }) as any,
     );
 
     expect(findSavedDocument(DteDocumentStatus.EMITIDO).paymentType).toBe(
       'Credito',
     );
+    expect(findSavedDocument(DteDocumentStatus.EMITIDO).fmaPago).toBe('2');
+    expect(findSavedDocument(DteDocumentStatus.EMITIDO).medioPago).toBe(1);
+
+    const body = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
+    expect(body.dte.Encabezado.IdDoc).toMatchObject({
+      FmaPago: '2',
+      MedioPago: 1,
+    });
   });
 
   it('sends a boleta Emisor without Acteco or Telefono to Openfactura', async () => {
@@ -656,7 +667,7 @@ describe('DteService', () => {
     await service.create(
       'store-1',
       undefined,
-      createDteDto({ tipoDTE: 39, noFmaPago: true }) as any,
+      createDteDto({ tipoDTE: 39 }) as any,
     );
 
     const body = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
@@ -664,7 +675,8 @@ describe('DteService', () => {
       TipoDTE: 39,
       IndServicio: '3',
     });
-    expect(body.dte.Encabezado.IdDoc).not.toHaveProperty('FmaPago');
+    expect(body.dte.Encabezado.IdDoc).toHaveProperty('FmaPago', '1');
+    expect(body.dte.Encabezado.IdDoc).toHaveProperty('MedioPago');
     expect(body.dte.Encabezado.IdDoc).not.toHaveProperty('TpoTranVenta');
     expect(body.dte.Encabezado.Emisor).toMatchObject({
       RznSocEmisor: 'Tienda Central SpA',

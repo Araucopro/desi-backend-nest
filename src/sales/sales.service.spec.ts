@@ -2,12 +2,16 @@ import { BadRequestException } from '@nestjs/common';
 import { SalesService } from './sales.service';
 import {
   Sale,
-  SalePaymentType,
+  SaleFmaPago,
   SaleStatus,
   SaleType,
 } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
+import {
+  Payment,
+  PaymentStatus,
+} from '../cash-registers/entities/payment.entity';
 import { Store } from '../stores/entities/store.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { InventoryService } from '../inventory/inventory.service';
@@ -16,7 +20,6 @@ import { DispatchGuide } from '../dispatch-guides/entities/dispatch-guide.entity
 import { DispatchGuideReferenceItem } from '../dispatch-guides/entities/dispatch-guide-reference-item.entity';
 import {
   DteDocument,
-  DteDocumentPaymentType,
   DteDocumentStatus,
 } from '../dte/entities/dte-document.entity';
 
@@ -30,6 +33,8 @@ function createManagerMock(
     storeAllowNegativeStock?: boolean;
     dispatchGuides?: any[];
     consumedReferenceItems?: any[];
+    payments?: any[];
+    sales?: any[];
   } = {},
 ) {
   const store = {
@@ -159,7 +164,12 @@ function createManagerMock(
             for (const method of methods) {
               builder[method] = jest.fn().mockReturnValue(builder);
             }
-            builder.getManyAndCount = jest.fn().mockResolvedValue([[], 0]);
+            builder.getManyAndCount = jest
+              .fn()
+              .mockResolvedValue([
+                initial.sales ?? [],
+                initial.sales?.length ?? 0,
+              ]);
             return builder;
           }),
         };
@@ -172,6 +182,11 @@ function createManagerMock(
       if (entity === DispatchGuideReferenceItem) {
         return {
           find: jest.fn(async () => consumedReferenceItems),
+        };
+      }
+      if (entity === Payment) {
+        return {
+          find: jest.fn(async () => initial.payments ?? []),
         };
       }
       return {};
@@ -267,7 +282,7 @@ describe('SalesService', () => {
   function notaVentaDto() {
     return {
       saleType: SaleType.NOTA_VENTA,
-      paymentType: SalePaymentType.CASH,
+      fmaPago: SaleFmaPago.CONTADO,
       items: [{ storeProductID: 'sp-1', quantity: 1 }],
     };
   }
@@ -317,6 +332,63 @@ describe('SalesService', () => {
     );
     expect(dteService.create).not.toHaveBeenCalled();
     expect(result.dte).toBeNull();
+    expect(result.sale.payments).toEqual([]);
+  });
+
+  it('returns payment details in sale detail and lists', async () => {
+    const paymentMethod = {
+      paymentMethodID: 'bank-transfer-method',
+      code: 'BANK_TRANSFER',
+      name: 'Transferencia',
+      type: 'BANK_TRANSFER',
+      affectsCash: false,
+      active: true,
+    };
+    const sale = {
+      saleID: 'sale-with-transfer',
+      storeID: 'store-1',
+      items: [],
+      store: { storeID: 'store-1' },
+      dteDocument: null,
+    };
+    const payment = {
+      paymentID: 'payment-1',
+      tenantID: 'tenant-1',
+      saleID: sale.saleID,
+      sessionID: 'session-1',
+      paymentMethodID: paymentMethod.paymentMethodID,
+      paymentMethod,
+      amount: 99900,
+      status: PaymentStatus.COMPLETED,
+      paidAt: new Date('2026-10-01T00:16:59.000Z'),
+      authorizationCode: null,
+      transactionID: null,
+      reference: 'TRANSFER-001',
+    };
+    ctx = createManagerMock({ sale, sales: [sale], payments: [payment] });
+    dataSource.transaction.mockImplementation((callback) =>
+      callback(ctx.manager),
+    );
+    const service = createService();
+
+    const detail = await service.findOne(sale.saleID, 'store-1');
+    const list = await service.findAll('store-1', {} as any);
+
+    expect(detail.sale.payments).toMatchObject([
+      {
+        paymentID: 'payment-1',
+        paymentMethodID: 'bank-transfer-method',
+        paymentMethod: {
+          code: 'BANK_TRANSFER',
+          name: 'Transferencia',
+          type: 'BANK_TRANSFER',
+        },
+        amount: 99900,
+        status: PaymentStatus.COMPLETED,
+        reference: 'TRANSFER-001',
+      },
+    ]);
+    expect(list.sales[0].sale.payments).toEqual(detail.sale.payments);
   });
 
   it('forwards a manual discount to the pricing engine with the authenticated user', async () => {
@@ -417,7 +489,7 @@ describe('SalesService', () => {
     const service = createService();
     const dto = {
       saleType: SaleType.FACTURA,
-      paymentType: SalePaymentType.CREDIT,
+      fmaPago: SaleFmaPago.CREDIT,
       receiver: { rut: '66666666-6', name: 'Cliente SpA' },
       items: [{ storeProductID: 'sp-1', quantity: 1 }],
     };
@@ -434,7 +506,6 @@ describe('SalesService', () => {
       {},
       {
         reserveStock: true,
-        paymentType: DteDocumentPaymentType.CREDIT,
       },
     );
     expect(ctx.sale()).toMatchObject({
@@ -475,7 +546,7 @@ describe('SalesService', () => {
     const service = createService();
     const dto = {
       saleType: SaleType.FACTURA,
-      paymentType: SalePaymentType.CASH,
+      fmaPago: SaleFmaPago.CONTADO,
       receiver: { rut: '66666666-6', name: 'Cliente SpA' },
       items: [{ storeProductID: 'sp-1', quantity: 1 }],
       dispatchGuideIDs: ['dg-1'],
@@ -505,7 +576,6 @@ describe('SalesService', () => {
       {
         reserveStock: false,
         cogsTotalOverride: 400,
-        paymentType: DteDocumentPaymentType.CASH,
       },
     );
     expect(ctx.storeProduct.stock).toBe(10);
@@ -564,7 +634,7 @@ describe('SalesService', () => {
     const service = createService();
     const dto = {
       saleType: SaleType.FACTURA,
-      paymentType: SalePaymentType.CASH,
+      fmaPago: SaleFmaPago.CONTADO,
       receiver: { rut: '66666666-6', name: 'Cliente SpA' },
       items: [{ storeProductID: 'sp-1', quantity: 2 }],
       dispatchGuideIDs: ['dg-1'],
@@ -601,7 +671,7 @@ describe('SalesService', () => {
     const service = createService();
     const dto = {
       saleType: SaleType.FACTURA,
-      paymentType: SalePaymentType.CASH,
+      fmaPago: SaleFmaPago.CONTADO,
       receiver: { rut: '66666666-6', name: 'Cliente SpA' },
       items: [{ storeProductID: 'sp-1', quantity: 1 }],
       dispatchGuideIDs: ['dg-1'],
@@ -621,7 +691,7 @@ describe('SalesService', () => {
         tenantID: 'tenant-1',
         saleType: SaleType.FACTURA,
         status: SaleStatus.EMITIDA,
-        paymentType: SalePaymentType.CASH,
+        fmaPago: SaleFmaPago.CONTADO,
         folio: 123,
         issueDate: new Date('2026-08-25'),
         receiver: { rut: '66666666-6', name: 'Cliente SpA' },
@@ -646,7 +716,7 @@ describe('SalesService', () => {
     const service = createService();
     const dto = {
       saleType: SaleType.FACTURA,
-      paymentType: SalePaymentType.CASH,
+      fmaPago: SaleFmaPago.CONTADO,
       receiver: { rut: '66666666-6', name: 'Cliente SpA' },
       items: [{ storeProductID: 'sp-1', quantity: 1 }],
       dispatchGuideIDs: ['dg-1'],
@@ -673,7 +743,7 @@ describe('SalesService', () => {
     const service = createService();
     const dto = {
       saleType: SaleType.FACTURA,
-      paymentType: SalePaymentType.CASH,
+      fmaPago: SaleFmaPago.CONTADO,
       items: [{ storeProductID: 'sp-1', quantity: 1 }],
     };
 
@@ -690,7 +760,7 @@ describe('SalesService', () => {
       tenantID: 'tenant-1',
       saleType: SaleType.NOTA_VENTA,
       status: SaleStatus.EMITIDA,
-      paymentType: SalePaymentType.CASH,
+      fmaPago: SaleFmaPago.CONTADO,
       folio: 1,
       issueDate: new Date('2026-08-06'),
       receiver: { rut: '66666666-6', name: 'Cliente' },
@@ -744,7 +814,6 @@ describe('SalesService', () => {
       {
         reserveStock: false,
         saleID: 'sale-1',
-        paymentType: DteDocumentPaymentType.CASH,
       },
     );
     expect(ctx.sale()).toMatchObject({
@@ -799,7 +868,7 @@ describe('SalesService', () => {
 
       const dto = {
         saleType: SaleType.BOLETA,
-        paymentType: SalePaymentType.CASH,
+        fmaPago: SaleFmaPago.CONTADO,
         items: [{ storeProductID: 'sp-1', quantity: 1 }],
       };
 
@@ -815,7 +884,7 @@ describe('SalesService', () => {
 
       const dto = {
         saleType: SaleType.FACTURA,
-        paymentType: SalePaymentType.CASH,
+        fmaPago: SaleFmaPago.CONTADO,
         receiver: { rut: '76123456-7', name: 'Empresa SpA' },
         items: [{ storeProductID: 'sp-1', quantity: 1 }],
       };
@@ -832,7 +901,7 @@ describe('SalesService', () => {
 
       const dto = {
         saleType: SaleType.NOTA_VENTA,
-        paymentType: SalePaymentType.CASH,
+        fmaPago: SaleFmaPago.CONTADO,
         items: [{ storeProductID: 'sp-1', quantity: 1 }],
       };
 
@@ -849,7 +918,7 @@ describe('SalesService', () => {
         saleType: SaleType.NOTA_VENTA,
         status: SaleStatus.EMITIDA,
         total: 1190,
-        paymentType: SalePaymentType.CASH,
+        fmaPago: SaleFmaPago.CONTADO,
         items: [
           {
             storeProductID: 'sp-1',
@@ -908,7 +977,7 @@ describe('SalesService', () => {
       const service = createService();
       const dto = {
         saleType: SaleType.BOLETA,
-        paymentType: SalePaymentType.CASH,
+        fmaPago: SaleFmaPago.CONTADO,
         items: [{ storeProductID: 'sp-1', quantity: 1 }],
       };
 

@@ -163,7 +163,7 @@ export function buildSalesReportResult(input: {
   total: number;
   notesTotal: number;
 }): SalesReportResponseDto {
-  const groupedByPaymentType: GroupedAggregate[] = mergeGrouped(
+  const groupedByFmaPago: GroupedAggregate[] = mergeGrouped(
     input.paymentRaw,
     input.salePaymentRaw,
   );
@@ -180,7 +180,7 @@ export function buildSalesReportResult(input: {
     .slice((input.page - 1) * input.limit, input.page * input.limit);
 
   return {
-    groupedByPaymentType,
+    groupedByFmaPago,
     groupedByStatus,
     periodSummary: {
       today: mergeSummary(input.todaySummary, input.todayNotes),

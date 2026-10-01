@@ -10,6 +10,8 @@ function basePayload(overrides: Record<string, unknown> = {}) {
         IdDoc: {
           TipoDTE: 39,
           FchEmis: '2026-08-03',
+          FmaPago: '1',
+          MedioPago: 1,
         },
         Emisor: {
           RUTEmisor: '76123456-7',
@@ -46,8 +48,17 @@ async function validateDto(payload: Record<string, unknown>) {
 }
 
 describe('CreateDteDocumentDto', () => {
-  it('accepts a valid boleta (39) without FmaPago', async () => {
+  it('accepts a valid boleta (39) with FmaPago and MedioPago', async () => {
     const errors = await validateDto(basePayload());
+    expect(errors).toEqual([]);
+  });
+
+  it('accepts FmaPago 3 in a boleta gratuita', async () => {
+    const payload = basePayload();
+    Object.assign(payload.dte.Encabezado.IdDoc, { FmaPago: '3' });
+
+    const errors = await validateDto(payload);
+
     expect(errors).toEqual([]);
   });
 
@@ -59,7 +70,7 @@ describe('CreateDteDocumentDto', () => {
             IdDoc: {
               TipoDTE: 39,
               FchEmis: '2026-08-03',
-              FmaPago: '1',
+              MedioPago: 1,
               TpoTranVenta: '1',
             },
             Emisor: {
@@ -103,6 +114,8 @@ describe('CreateDteDocumentDto', () => {
               TipoDTE: 39,
               FchEmis: '2026-08-03',
               IndServicio: '3',
+              FmaPago: '1',
+              MedioPago: 1,
             },
             Emisor: {
               RUTEmisor: '76123456-7',
@@ -194,6 +207,8 @@ describe('CreateDteDocumentDto', () => {
               TipoDTE: 39,
               FchEmis: '2026-08-03',
               IndServicio: '3',
+              FmaPago: '1',
+              MedioPago: 1,
             },
             Emisor: {
               RUTEmisor: '76123456-7',
@@ -235,6 +250,7 @@ describe('CreateDteDocumentDto', () => {
               TipoDTE: 33,
               FchEmis: '2026-08-03',
               FmaPago: '2',
+              MedioPago: 2,
             },
             Emisor: {
               RUTEmisor: '76123456-7',
@@ -407,6 +423,8 @@ describe('CreateDteDocumentDto', () => {
             IdDoc: {
               TipoDTE: 33,
               FchEmis: '2026-08-25',
+              FmaPago: '1',
+              MedioPago: 3,
             },
             Emisor: {
               RUTEmisor: '76123456-7',

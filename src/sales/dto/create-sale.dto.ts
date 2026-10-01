@@ -16,7 +16,7 @@ import {
   ArrayUnique,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { SalePaymentType, SaleType } from '../entities/sale.entity';
+import { SaleFmaPago, SaleType } from '../entities/sale.entity';
 import { IsRut } from '../../common/validators/rut.validator';
 import { SalePaymentInputDto } from '../../cash-registers/dto/sale-payment.dto';
 
@@ -101,12 +101,13 @@ export class CreateSaleDto {
   saleType!: SaleType;
 
   @ApiProperty({
-    description: 'Forma de pago',
-    enum: SalePaymentType,
-    example: SalePaymentType.CASH,
+    description:
+      'Código FmaPago de Openfactura: 1 contado, 2 crédito pendiente, 3 sin costo',
+    enum: SaleFmaPago,
+    example: SaleFmaPago.CONTADO,
   })
-  @IsEnum(SalePaymentType)
-  paymentType!: SalePaymentType;
+  @IsEnum(SaleFmaPago)
+  fmaPago!: SaleFmaPago;
 
   @ApiPropertyOptional({
     description: 'Fecha de emisión (ISO). Default: hoy',

@@ -20,8 +20,30 @@ export function toSaleView(
   sale: Sale,
   dteResponse?: DteDocumentResponseDto | null,
 ): SaleView {
+  const { payments, ...saleFields } = sale;
+
   return {
-    sale,
+    sale: {
+      ...saleFields,
+      payments: (payments ?? []).map((payment) => ({
+        paymentID: payment.paymentID,
+        paymentMethodID: payment.paymentMethodID,
+        paymentMethod: payment.paymentMethod
+          ? {
+              paymentMethodID: payment.paymentMethod.paymentMethodID,
+              code: payment.paymentMethod.code,
+              name: payment.paymentMethod.name,
+              type: payment.paymentMethod.type,
+            }
+          : null,
+        amount: Number(payment.amount),
+        status: payment.status,
+        paidAt: payment.paidAt,
+        authorizationCode: payment.authorizationCode ?? null,
+        transactionID: payment.transactionID ?? null,
+        reference: payment.reference ?? null,
+      })),
+    },
     dte: dteResponse ?? toDteSummary(sale.dteDocument),
   };
 }

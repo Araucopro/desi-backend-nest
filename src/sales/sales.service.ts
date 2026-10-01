@@ -47,7 +47,7 @@ import {
   createSaleId,
   resolveConversionDocumentType,
   toDateOnly,
-  toDtePaymentType,
+  toDteMedioPagoFromMethods,
   validateClientRequirement,
   validateFacturaReceiver,
   validateStoreDteCapability,
@@ -129,7 +129,7 @@ export class SalesService {
       tenantID: this.tenantContext?.getTenantId() ?? null,
       storeID,
       saleTotal,
-      paymentType: dto.paymentType,
+      fmaPago: dto.fmaPago,
       cashRegisterID: dto.cashRegisterID,
       payments: dto.payments,
       lock,
@@ -292,7 +292,7 @@ export class SalesService {
         impersonatedBy: impersonatedBy ?? null,
         saleType: SaleType.NOTA_VENTA,
         status: SaleStatus.EMITIDA,
-        paymentType: prepared.paymentType,
+        fmaPago: prepared.fmaPago,
         folio,
         issueDate: prepared.issueDate,
         receiver: prepared.receiver,
@@ -381,7 +381,7 @@ export class SalesService {
 
     // Validación temprana del cobro: evita emitir un DTE que después no pueda
     // registrar su pago. La validación definitiva (con lock) ocurre al persistir.
-    await this.runInTransaction((manager) =>
+    const resolvedPayments = await this.runInTransaction((manager) =>
       this.resolveSalePayments(manager, storeID, dto, prepared.total, false),
     );
 
@@ -410,7 +410,11 @@ export class SalesService {
     const dteDto = this.dteMapperService.mapSaleToDte(
       {
         saleType: prepared.saleType,
-        paymentType: prepared.paymentType,
+        fmaPago: prepared.fmaPago,
+        medioPago: toDteMedioPagoFromMethods(
+          resolvedPayments?.lines.map((line) => line.method.type) ?? [],
+          prepared.fmaPago,
+        ),
         issueDate: prepared.issueDate,
         receiver: prepared.receiver,
         items: prepared.items,
@@ -434,7 +438,6 @@ export class SalesService {
         ...(dto.dispatchGuideIDs?.length
           ? { cogsTotalOverride: prepared.cogsTotal }
           : {}),
-        paymentType: toDtePaymentType(prepared.paymentType),
       },
     );
 
@@ -493,7 +496,7 @@ export class SalesService {
         impersonatedBy: impersonatedBy ?? null,
         saleType: dto.saleType,
         status: SaleStatus.EMITIDA,
-        paymentType: prepared.paymentType,
+        fmaPago: prepared.fmaPago,
         folio: dteResponse.FOLIO ?? null,
         issueDate: prepared.issueDate,
         receiver: prepared.receiver,
@@ -725,11 +728,22 @@ export class SalesService {
 
     const documentType = resolveConversionDocumentType(sale, dto);
 
-    const dteDto = this.dteMapperService.mapSaleToDte(sale, { documentType });
+    const salePayments = this.paymentsService
+      ? await this.runInTransaction((manager) =>
+          this.paymentsService!.listSalePayments(manager, saleID),
+        )
+      : [];
+    const medioPago = toDteMedioPagoFromMethods(
+      salePayments.map((payment) => payment.paymentMethod.type),
+      sale.fmaPago,
+    );
+    const dteDto = this.dteMapperService.mapSaleToDte(
+      { ...sale, medioPago },
+      { documentType },
+    );
     const dteResponse = await this.dteService.create(storeID, saleID, dteDto, {
       reserveStock: false,
       saleID,
-      paymentType: toDtePaymentType(sale.paymentType),
     });
 
     if (dteResponse.STATUS === 'PENDIENTE') {
