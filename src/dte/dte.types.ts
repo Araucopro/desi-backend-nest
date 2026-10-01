@@ -1,5 +1,6 @@
 import {
   DteDocumentPaymentType,
+  DtePaymentMedium,
   DteDocumentStatus,
 } from './entities/dte-document.entity';
 import { OpenfacturaDocumentResponse } from './openfactura-client.service';
@@ -10,8 +11,7 @@ export type DteCreateOptions = {
   reserveStock?: boolean;
   /** Venta asociada, para trazabilidad e idempotencia de conversión. */
   saleID?: string;
-  /** Forma de pago real del POS, preservada aunque el payload boleta no incluya FmaPago. */
-  paymentType?: DteDocumentPaymentType;
+  medioPago?: DtePaymentMedium;
   /** Costo de venta congelado del documento original (usado en NCE 61). */
   cogsTotalOverride?: number;
   /** Razón de inventario para la reserva de stock (default SALE). */
@@ -32,6 +32,8 @@ export type DtePreparationValues = {
   status: DteDocumentStatus;
   documentType: number | null;
   paymentType: DteDocumentPaymentType;
+  fmaPago: string;
+  medioPago: DtePaymentMedium;
   total: number;
   netTotal: number;
   taxTotal: number;

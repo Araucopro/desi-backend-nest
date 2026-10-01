@@ -5,7 +5,6 @@ import {
   DteReferenciaDto,
   DteResponseValue,
 } from '../dte/dto/create-dte-document.dto';
-import { DteDocumentPaymentType } from '../dte/entities/dte-document.entity';
 import { DispatchGuide } from './entities/dispatch-guide.entity';
 import {
   roundClp,
@@ -32,11 +31,6 @@ export class DispatchGuideInvoiceMapperService {
     return Number.isNaN(date.getTime())
       ? new Date().toISOString().slice(0, 10)
       : date.toISOString().slice(0, 10);
-  }
-
-  private mapFmaPago(paymentType: DteDocumentPaymentType): string {
-    if (paymentType === DteDocumentPaymentType.CREDIT) return '2';
-    return '1';
   }
 
   mapGuidesToInvoice(
@@ -170,7 +164,8 @@ export class DispatchGuideInvoiceMapperService {
             TipoDTE: 33 as const,
             Folio: 0,
             FchEmis: this.toDateOnly(issueDate),
-            FmaPago: this.mapFmaPago(dto.paymentType),
+            FmaPago: dto.fmaPago,
+            MedioPago: dto.medioPago,
           },
           Emisor: {
             RUTEmisor: store.rut,

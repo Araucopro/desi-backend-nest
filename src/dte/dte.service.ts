@@ -19,6 +19,7 @@ import {
   DteDocument,
   DteDocumentPaymentType,
   DteDocumentStatus,
+  DteFmaPago,
 } from './entities/dte-document.entity';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { FinancialMovementsService } from '../financial-movements/financial-movements.service';
@@ -157,8 +158,9 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
 
   private mapPaymentType(fmaPago?: string): DteDocumentPaymentType {
     const value = fmaPago?.trim();
-    if (value === '1') return DteDocumentPaymentType.CASH;
-    if (value === '2') return DteDocumentPaymentType.CREDIT;
+    if (value === DteFmaPago.CONTADO) return DteDocumentPaymentType.CASH;
+    if (value === DteFmaPago.CREDIT) return DteDocumentPaymentType.CREDIT;
+    if (value === DteFmaPago.NO_COST) return DteDocumentPaymentType.NO_COST;
     this.logger.warn(
       `FmaPago ausente o no reconocido ('${value ?? ''}'); se usará Efectivo`,
     );
@@ -212,13 +214,11 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
         : buildLocalToken();
     const folio =
       existing?.folio ?? resolveFolio(dto.dte.Encabezado.IdDoc.Folio);
+    const idDoc = dto.dte.Encabezado.IdDoc;
     const paymentType =
-      options?.paymentType ??
-      this.mapPaymentType(
-        'FmaPago' in dto.dte.Encabezado.IdDoc
-          ? dto.dte.Encabezado.IdDoc.FmaPago
-          : undefined,
-      );
+      'FmaPago' in idDoc
+        ? this.mapPaymentType(idDoc.FmaPago)
+        : DteDocumentPaymentType.CASH;
 
     const tenantID = this.tenantContext?.getTenantId() ?? store.tenantID;
 
@@ -236,6 +236,7 @@ export class DteService implements OnModuleInit, OnModuleDestroy {
       token,
       folio,
       paymentType,
+      medioPago: options?.medioPago,
     });
 
     let document: DteDocument | null = null;

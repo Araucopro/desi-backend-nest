@@ -11,6 +11,8 @@ import {
 import {
   DteDocument,
   DteDocumentPaymentType,
+  DteFmaPago,
+  DtePaymentMedium,
   DteDocumentStatus,
 } from './entities/dte-document.entity';
 import { OpenfacturaCallResult } from './openfactura-client.service';
@@ -79,9 +81,13 @@ export function buildDtePreparationValues(input: {
   token: string;
   folio: number;
   paymentType: DteDocumentPaymentType;
+  medioPago?: DtePaymentMedium;
 }): DtePreparationValues {
   const { dto, store, normalizedItems, totals } = input;
   const paymentType = input.paymentType;
+  const idDoc = dto.dte.Encabezado.IdDoc;
+  const fmaPago = 'FmaPago' in idDoc ? idDoc.FmaPago : undefined;
+  const medioPago = 'MedioPago' in idDoc ? idDoc.MedioPago : undefined;
 
   return {
     tenantID: input.tenantID,
@@ -97,6 +103,22 @@ export function buildDtePreparationValues(input: {
     status: DteDocumentStatus.PENDIENTE,
     documentType: dto.dte.Encabezado.IdDoc.TipoDTE ?? null,
     paymentType,
+    fmaPago:
+      fmaPago ??
+      (paymentType === DteDocumentPaymentType.CREDIT
+        ? DteFmaPago.CREDIT
+        : paymentType === DteDocumentPaymentType.NO_COST
+          ? DteFmaPago.NO_COST
+          : DteFmaPago.CONTADO),
+    medioPago:
+      medioPago ??
+      input.medioPago ??
+      (paymentType === DteDocumentPaymentType.DEBIT
+        ? DtePaymentMedium.ELECTRONIC
+        : paymentType === DteDocumentPaymentType.CREDIT ||
+            paymentType === DteDocumentPaymentType.NO_COST
+          ? DtePaymentMedium.OTHER
+          : DtePaymentMedium.CASH),
     total: totals.total,
     netTotal: totals.net,
     taxTotal: totals.tax,

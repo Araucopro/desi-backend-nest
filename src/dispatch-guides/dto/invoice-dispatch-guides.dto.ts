@@ -1,12 +1,18 @@
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
   IsDateString,
   IsEnum,
+  IsIn,
+  IsInt,
   IsOptional,
   IsUUID,
 } from 'class-validator';
-import { DteDocumentPaymentType } from '../../dte/entities/dte-document.entity';
+import {
+  DteFmaPago,
+  DtePaymentMedium,
+} from '../../dte/entities/dte-document.entity';
 
 export class InvoiceDispatchGuidesDto {
   @ApiPropertyOptional({
@@ -21,12 +27,28 @@ export class InvoiceDispatchGuidesDto {
   additionalDispatchGuideIDs?: string[];
 
   @ApiProperty({
-    description: 'Tipo de pago de la factura electrónica',
-    enum: DteDocumentPaymentType,
-    example: DteDocumentPaymentType.CASH,
+    description:
+      'Código FmaPago de Openfactura: 1 contado, 2 crédito pendiente, 3 sin costo',
+    enum: DteFmaPago,
+    example: DteFmaPago.CONTADO,
   })
-  @IsEnum(DteDocumentPaymentType)
-  paymentType!: DteDocumentPaymentType;
+  @IsEnum(DteFmaPago)
+  fmaPago!: DteFmaPago;
+
+  @ApiProperty({
+    description:
+      'Medio de pago: 1 efectivo, 2 electrónico, 3 transferencia, 4 cheque, 5 otro',
+    enum: DtePaymentMedium,
+    example: DtePaymentMedium.BANK_TRANSFER,
+  })
+  @Type(() => Number)
+  @IsInt()
+  @IsIn(
+    Object.values(DtePaymentMedium).filter(
+      (value) => typeof value === 'number',
+    ),
+  )
+  medioPago!: DtePaymentMedium;
 
   @ApiPropertyOptional({
     description:

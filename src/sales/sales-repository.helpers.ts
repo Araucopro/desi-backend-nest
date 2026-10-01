@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
-import { EntityManager } from 'typeorm';
+import { EntityManager, In } from 'typeorm';
 import { isUniqueViolation } from '../common/utils/db-errors.util';
+import { Payment } from '../cash-registers/entities/payment.entity';
 import { Store } from '../stores/entities/store.entity';
 import { ListSalesQueryDto } from './dto/list-sales.query.dto';
 import { SaleItem } from './entities/sale-item.entity';
@@ -47,7 +48,7 @@ export async function loadSale(
     });
     if (!sale)
       throw new NotFoundException(`Venta con ID ${saleID} no encontrada`);
-    return sale;
+    return (await attachSalePayments(manager, [sale]))[0];
   }
   const repository = manager.getRepository(Sale);
   const qb = repository
@@ -63,7 +64,33 @@ export async function loadSale(
   if (!sale) {
     throw new NotFoundException(`Venta con ID ${saleID} no encontrada`);
   }
-  return sale;
+  return (await attachSalePayments(manager, [sale]))[0];
+}
+
+async function attachSalePayments(
+  manager: EntityManager,
+  sales: Sale[],
+): Promise<Sale[]> {
+  if (!sales.length) return sales;
+
+  const payments = await manager.getRepository(Payment).find({
+    where: { saleID: In(sales.map((sale) => sale.saleID)) },
+    relations: ['paymentMethod'],
+    order: { paidAt: 'ASC', createdAt: 'ASC' },
+  });
+  const paymentsBySaleID = new Map<string, Payment[]>();
+
+  for (const payment of payments) {
+    const salePayments = paymentsBySaleID.get(payment.saleID) ?? [];
+    salePayments.push(payment);
+    paymentsBySaleID.set(payment.saleID, salePayments);
+  }
+
+  for (const sale of sales) {
+    sale.payments = paymentsBySaleID.get(sale.saleID) ?? [];
+  }
+
+  return sales;
 }
 
 export async function nextSaleFolio(
@@ -162,6 +189,8 @@ export async function listSales(
     .take(limit)
     .getManyAndCount();
 
+  await attachSalePayments(manager, sales);
+
   return { sales, total };
 }
 
@@ -173,7 +202,7 @@ export type CreateSaleEntityInput = {
   impersonatedBy?: string | null;
   saleType: PreparedSale['saleType'];
   status: SaleStatus;
-  paymentType: PreparedSale['paymentType'];
+  fmaPago: PreparedSale['fmaPago'];
   folio: number | null;
   issueDate: Date;
   receiver: PreparedSale['receiver'];
@@ -201,7 +230,7 @@ export function createSaleEntity(
     impersonatedBy: input.impersonatedBy ?? null,
     saleType: input.saleType,
     status: input.status,
-    paymentType: input.paymentType,
+    fmaPago: input.fmaPago,
     folio: input.folio,
     issueDate: input.issueDate,
     receiver: input.receiver,

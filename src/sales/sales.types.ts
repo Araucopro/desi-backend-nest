@@ -1,10 +1,29 @@
 import { DteDocumentResponseDto } from '../dte/dto/dte-document-response.dto';
+import { PaymentStatus } from '../cash-registers/entities/payment.entity';
+import { PaymentMethodType } from '../cash-registers/entities/payment-method.entity';
 import {
   Sale,
-  SalePaymentType,
+  SaleFmaPago,
   SaleReceiver,
   SaleType,
 } from './entities/sale.entity';
+
+export type SalePaymentSummary = {
+  paymentID: string;
+  paymentMethodID: string;
+  paymentMethod: {
+    paymentMethodID: string;
+    code: string;
+    name: string;
+    type: PaymentMethodType;
+  } | null;
+  amount: number;
+  status: PaymentStatus;
+  paidAt: Date;
+  authorizationCode: string | null;
+  transactionID: string | null;
+  reference: string | null;
+};
 
 export type PreparedSaleItem = {
   storeProductID: string;
@@ -20,7 +39,7 @@ export type PreparedSaleItem = {
 
 export type PreparedSale = {
   saleType: SaleType;
-  paymentType: SalePaymentType;
+  fmaPago: SaleFmaPago;
   issueDate: Date;
   receiver: SaleReceiver | null;
   clientID?: string | null;
@@ -34,6 +53,6 @@ export type PreparedSale = {
 };
 
 export type SaleView = {
-  sale: Sale;
+  sale: Omit<Sale, 'payments'> & { payments: SalePaymentSummary[] };
   dte: DteDocumentResponseDto | null;
 };

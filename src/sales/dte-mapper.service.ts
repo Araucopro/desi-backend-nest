@@ -1,10 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Store } from '../stores/entities/store.entity';
-import {
-  SalePaymentType,
-  SaleReceiver,
-  SaleType,
-} from './entities/sale.entity';
+import { SaleFmaPago, SaleReceiver, SaleType } from './entities/sale.entity';
 import {
   CreateDteDocumentDto,
   DteReferenciaDto,
@@ -15,10 +11,15 @@ import {
   splitIvaIncluded,
   TAX_RATE,
 } from '../common/utils/money.util';
+import {
+  DteFmaPago,
+  DtePaymentMedium,
+} from '../dte/entities/dte-document.entity';
 
 export type SaleDteInput = {
   saleType: SaleType;
-  paymentType: SalePaymentType;
+  fmaPago: SaleFmaPago;
+  medioPago: DtePaymentMedium;
   issueDate: Date;
   receiver: SaleReceiver | null;
   items: Array<{
@@ -51,9 +52,15 @@ export class DteMapperService {
       : date.toISOString().slice(0, 10);
   }
 
-  private mapFmaPago(paymentType: SalePaymentType): string {
-    if (paymentType === SalePaymentType.CREDIT) return '2';
-    return '1';
+  private mapFmaPago(fmaPago: SaleFmaPago): DteFmaPago {
+    switch (fmaPago) {
+      case SaleFmaPago.CREDIT:
+        return DteFmaPago.CREDIT;
+      case SaleFmaPago.NO_COST:
+        return DteFmaPago.NO_COST;
+      default:
+        return DteFmaPago.CONTADO;
+    }
   }
 
   mapSaleToDte(
@@ -117,6 +124,8 @@ export class DteMapperService {
             FchEmis: this.toDateOnly(sale.issueDate),
             // Openfactura exige IndServicio en la Boleta 39 (su ejemplo usa '3').
             IndServicio: '3',
+            FmaPago: this.mapFmaPago(sale.fmaPago),
+            MedioPago: sale.medioPago,
           },
           Emisor: {
             RUTEmisor: store.rut,
@@ -139,7 +148,8 @@ export class DteMapperService {
             TipoDTE: 33 as const,
             Folio: 0,
             FchEmis: this.toDateOnly(sale.issueDate),
-            FmaPago: this.mapFmaPago(sale.paymentType),
+            FmaPago: this.mapFmaPago(sale.fmaPago),
+            MedioPago: sale.medioPago,
           },
           Emisor: {
             RUTEmisor: store.rut,

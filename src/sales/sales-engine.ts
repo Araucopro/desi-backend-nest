@@ -2,12 +2,9 @@ import { BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { ConvertDocumentType, ConvertSaleDto } from './dto/convert-sale.dto';
-import {
-  SalePaymentType,
-  SaleReceiver,
-  SaleType,
-} from './entities/sale.entity';
-import { DteDocumentPaymentType } from '../dte/entities/dte-document.entity';
+import { SaleFmaPago, SaleReceiver, SaleType } from './entities/sale.entity';
+import { DtePaymentMedium } from '../dte/entities/dte-document.entity';
+import { PaymentMethodType } from '../cash-registers/entities/payment-method.entity';
 import { CalculateCartResult } from '../pricing/dto/pricing.dto';
 import {
   roundClp,
@@ -31,16 +28,38 @@ export function toDateOnly(value: string | Date): Date {
   return Number.isNaN(date.getTime()) ? new Date() : date;
 }
 
-export function toDtePaymentType(
-  paymentType: SalePaymentType,
-): DteDocumentPaymentType {
-  if (paymentType === SalePaymentType.CREDIT) {
-    return DteDocumentPaymentType.CREDIT;
-  }
-  if (paymentType === SalePaymentType.DEBIT) {
-    return DteDocumentPaymentType.DEBIT;
-  }
-  return DteDocumentPaymentType.CASH;
+export function toDteMedioPago(fmaPago: SaleFmaPago): DtePaymentMedium {
+  return fmaPago === SaleFmaPago.CONTADO
+    ? DtePaymentMedium.CASH
+    : DtePaymentMedium.OTHER;
+}
+
+export function toDteMedioPagoFromMethods(
+  methodTypes: PaymentMethodType[],
+  fallback: SaleFmaPago,
+): DtePaymentMedium {
+  if (methodTypes.length === 0) return toDteMedioPago(fallback);
+
+  const medioPagoForType = (type: PaymentMethodType): DtePaymentMedium => {
+    switch (type) {
+      case PaymentMethodType.CASH:
+        return DtePaymentMedium.CASH;
+      case PaymentMethodType.DEBIT_CARD:
+      case PaymentMethodType.CREDIT_CARD:
+        return DtePaymentMedium.ELECTRONIC;
+      case PaymentMethodType.BANK_TRANSFER:
+        return DtePaymentMedium.BANK_TRANSFER;
+      case PaymentMethodType.CHECK:
+        return DtePaymentMedium.CHECK;
+      case PaymentMethodType.CREDIT:
+      case PaymentMethodType.OTHER:
+      default:
+        return DtePaymentMedium.OTHER;
+    }
+  };
+
+  const medios = new Set(methodTypes.map(medioPagoForType));
+  return medios.size === 1 ? [...medios][0] : DtePaymentMedium.OTHER;
 }
 
 export function createSaleId(): string {
@@ -104,6 +123,9 @@ export function buildPreparedSale(
   );
 
   const total = roundClp(items.reduce((acc, item) => acc + item.lineTotal, 0));
+  if (dto.fmaPago === SaleFmaPago.NO_COST && total !== 0) {
+    throw new BadRequestException('Una venta sin costo debe tener total cero');
+  }
   const subtotal = roundClp(
     items.reduce((acc, item) => acc + item.baseTotal, 0),
   );
@@ -112,7 +134,7 @@ export function buildPreparedSale(
 
   return {
     saleType: dto.saleType,
-    paymentType: dto.paymentType,
+    fmaPago: dto.fmaPago,
     issueDate: toDateOnly(dto.issueDate ?? new Date()),
     receiver: dto.receiver ?? null,
     clientID: dto.clientID ?? null,

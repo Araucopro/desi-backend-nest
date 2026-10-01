@@ -119,7 +119,7 @@ describe('reports-engine', () => {
       token: 'token-1',
       folio: 100,
       status: DteDocumentStatus.EMITIDO,
-      paymentType: 'Efectivo',
+      fmaPago: '1',
       total: 1000,
       documentType: 33,
       createdAt: new Date('2026-08-06T10:00:00.000Z'),
@@ -133,7 +133,7 @@ describe('reports-engine', () => {
       saleType: SaleType.NOTA_VENTA,
       status: SaleStatus.EMITIDA,
       folio: 1,
-      paymentType: 'Efectivo',
+      fmaPago: '1',
       total: 2500,
       subtotal: 2500,
       discount: 0,
@@ -148,11 +148,11 @@ describe('reports-engine', () => {
     } as any;
 
     const result = buildSalesReportResult({
-      paymentRaw: [{ key: 'Efectivo', count: '1', total: '1000' }],
+      paymentRaw: [{ key: '1', count: '1', total: '1000' }],
       statusRaw: [{ key: 'EMITIDO', count: '1', total: '1000' }],
       salePaymentRaw: [
-        { key: 'Efectivo', count: '2', total: '2500' },
-        { key: 'Debito', count: '1', total: '500' },
+        { key: '1', count: '2', total: '2500' },
+        { key: '2', count: '1', total: '500' },
       ],
       saleStatusRaw: [{ key: 'EMITIDA', count: '2', total: '2500' }],
       todaySummary: { count: 1, total: 1000 },
@@ -169,9 +169,9 @@ describe('reports-engine', () => {
       notesTotal: 1,
     });
 
-    expect(result.groupedByPaymentType).toEqual([
-      { key: 'Efectivo', count: 3, total: 3500 },
-      { key: 'Debito', count: 1, total: 500 },
+    expect(result.groupedByFmaPago).toEqual([
+      { key: '1', count: 3, total: 3500 },
+      { key: '2', count: 1, total: 500 },
     ]);
     expect(result.groupedByStatus).toEqual([
       { key: 'EMITIDO', count: 1, total: 1000 },

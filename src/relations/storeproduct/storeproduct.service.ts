@@ -19,8 +19,6 @@ export class StoreProductService {
   constructor(
     @InjectRepository(StoreProduct)
     private readonly storeStockRepository: Repository<StoreProduct>,
-    @InjectRepository(Product)
-    private readonly productRepository: Repository<Product>,
     private readonly dataSource: DataSource,
     private readonly pricingService: PricingService,
     @Optional() private readonly tenantContext?: TenantContextService,
@@ -44,62 +42,86 @@ export class StoreProductService {
     search?: string,
     barcode?: string,
   ): Promise<Product[]> {
-    const qb = this.productRepository
-      .createQueryBuilder('product')
-      .leftJoinAndSelect('product.category', 'category')
-      .innerJoinAndSelect('product.variations', 'variations')
-      .innerJoinAndSelect(
-        'variations.storeProducts',
-        'storeProducts',
-        'storeProducts.storeID = :storeID',
-        { storeID },
-      )
-      .leftJoinAndSelect('storeProducts.store', 'store')
-      .leftJoinAndSelect(
-        'storeProducts.specialOffers',
-        'offer',
-        '(offer.isActive = :isActive AND (offer.endDate IS NULL OR offer.endDate >= :now) AND offer.startDate <= :now)',
-        { isActive: true, now: new Date() },
+    return this.runInTransaction(async (manager) => {
+      const qb = manager
+        .getRepository(Product)
+        .createQueryBuilder('product')
+        .leftJoinAndSelect('product.category', 'category')
+        .innerJoinAndSelect('product.variations', 'variations')
+        .innerJoinAndSelect(
+          'variations.storeProducts',
+          'storeProducts',
+          'storeProducts.storeID = :storeID',
+          { storeID },
+        )
+        .leftJoinAndSelect('storeProducts.store', 'store')
+        .leftJoinAndSelect(
+          'storeProducts.specialOffers',
+          'offer',
+          '(offer.isActive = :isActive AND (offer.endDate IS NULL OR offer.endDate >= :now) AND offer.startDate <= :now)',
+          { isActive: true, now: new Date() },
+        );
+
+      if (search?.trim()) {
+        const term = `%${search.trim()}%`;
+        qb.andWhere(
+          '(product.name ILIKE :term OR product.brand ILIKE :term OR category.name ILIKE :term OR variations.sku ILIKE :term OR variations.supplierSku ILIKE :term OR variations.barcode ILIKE :term)',
+          { term },
+        );
+      }
+
+      if (barcode?.trim()) {
+        qb.andWhere('variations.barcode = :barcode', {
+          barcode: barcode.trim(),
+        });
+      }
+
+      const products = await qb.getMany();
+      const pricingTargets = products.flatMap((product) =>
+        (product.variations ?? []).flatMap((variation) =>
+          (variation.storeProducts ?? []).map((storeProduct) => ({
+            storeProduct,
+            variation,
+            product,
+          })),
+        ),
       );
 
-    if (search?.trim()) {
-      const term = `%${search.trim()}%`;
-      qb.andWhere(
-        '(product.name ILIKE :term OR product.brand ILIKE :term OR category.name ILIKE :term OR variations.sku ILIKE :term OR variations.supplierSku ILIKE :term OR variations.barcode ILIKE :term)',
-        { term },
-      );
-    }
+      try {
+        const pricingResults =
+          await this.pricingService.calculatePricesForProductList(
+            manager,
+            pricingTargets,
+          );
 
-    if (barcode?.trim()) {
-      qb.andWhere('variations.barcode = :barcode', {
-        barcode: barcode.trim(),
-      });
-    }
-
-    const products = await qb.getMany();
-
-    for (const product of products) {
-      for (const variation of product.variations) {
-        for (const sp of variation.storeProducts) {
-          try {
-            const result = await this.pricingService.calculatePrice({
-              storeProductID: sp.storeProductID,
-              quantity: 1,
+        for (const { storeProduct } of pricingTargets) {
+          const outcome = pricingResults.get(storeProduct.storeProductID);
+          if (outcome?.result) {
+            Object.assign(storeProduct, {
+              finalPrice: outcome.result.finalPrice,
+              discountApplied: outcome.result.discountApplied,
+              discountsApplied: outcome.result.discountsApplied ?? [],
+              activeOffer: outcome.result.discountDetails,
+              pricingBreakdown: outcome.result.breakdown,
             });
-            (sp as any).finalPrice = result.finalPrice;
-            (sp as any).discountApplied = result.discountApplied;
-            (sp as any).discountsApplied = result.discountsApplied ?? [];
-            (sp as any).activeOffer = result.discountDetails;
-            (sp as any).pricingBreakdown = result.breakdown;
-          } catch (e) {
-            (sp as any).pricingError =
-              (e as Error)?.message || 'Error calculando precio';
+          } else {
+            Object.assign(storeProduct, {
+              pricingError: outcome?.error || 'Error calculando precio',
+            });
           }
         }
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message
+            ? error.message
+            : 'Error calculando precio';
+        for (const { storeProduct } of pricingTargets) {
+          Object.assign(storeProduct, { pricingError: message });
+        }
       }
-    }
 
-    return products;
+      return products;
+    });
   }
 
   async update(

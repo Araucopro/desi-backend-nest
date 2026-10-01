@@ -1,7 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { ConvertDocumentType } from './dto/convert-sale.dto';
-import { SalePaymentType, SaleType } from './entities/sale.entity';
-import { DteDocumentPaymentType } from '../dte/entities/dte-document.entity';
+import { SaleFmaPago, SaleType } from './entities/sale.entity';
+import { DtePaymentMedium } from '../dte/entities/dte-document.entity';
+import { PaymentMethodType } from '../cash-registers/entities/payment-method.entity';
 import { CalculateCartResult } from '../pricing/dto/pricing.dto';
 import {
   TAX_RATE,
@@ -9,7 +10,7 @@ import {
   createSaleId,
   resolveConversionDocumentType,
   toDateOnly,
-  toDtePaymentType,
+  toDteMedioPagoFromMethods,
   toMoney,
   validateClientRequirement,
   validateFacturaReceiver,
@@ -32,15 +33,33 @@ describe('sales-engine', () => {
     expect(toDateOnly('not-a-date')).toBeInstanceOf(Date);
   });
 
-  it('maps sale payment types to DTE payment types', () => {
-    expect(toDtePaymentType(SalePaymentType.CASH)).toBe(
-      DteDocumentPaymentType.CASH,
-    );
-    expect(toDtePaymentType(SalePaymentType.DEBIT)).toBe(
-      DteDocumentPaymentType.DEBIT,
-    );
-    expect(toDtePaymentType(SalePaymentType.CREDIT)).toBe(
-      DteDocumentPaymentType.CREDIT,
+  it('maps payment method categories to MedioPago and uses 5 for mixed types', () => {
+    expect(
+      toDteMedioPagoFromMethods([PaymentMethodType.CASH], SaleFmaPago.CONTADO),
+    ).toBe(DtePaymentMedium.CASH);
+    expect(
+      toDteMedioPagoFromMethods(
+        [PaymentMethodType.DEBIT_CARD],
+        SaleFmaPago.CONTADO,
+      ),
+    ).toBe(DtePaymentMedium.ELECTRONIC);
+    expect(
+      toDteMedioPagoFromMethods(
+        [PaymentMethodType.BANK_TRANSFER],
+        SaleFmaPago.CONTADO,
+      ),
+    ).toBe(DtePaymentMedium.BANK_TRANSFER);
+    expect(
+      toDteMedioPagoFromMethods([PaymentMethodType.CHECK], SaleFmaPago.CONTADO),
+    ).toBe(DtePaymentMedium.CHECK);
+    expect(
+      toDteMedioPagoFromMethods(
+        [PaymentMethodType.CASH, PaymentMethodType.DEBIT_CARD],
+        SaleFmaPago.CONTADO,
+      ),
+    ).toBe(DtePaymentMedium.OTHER);
+    expect(toDteMedioPagoFromMethods([], SaleFmaPago.NO_COST)).toBe(
+      DtePaymentMedium.OTHER,
     );
   });
 
@@ -99,7 +118,7 @@ describe('sales-engine', () => {
     const prepared = buildPreparedSale(
       {
         saleType: SaleType.NOTA_VENTA,
-        paymentType: SalePaymentType.CASH,
+        fmaPago: SaleFmaPago.CONTADO,
         issueDate: '2026-08-06',
         receiver: undefined,
         items: [],
@@ -130,11 +149,40 @@ describe('sales-engine', () => {
     );
   });
 
+  it('requires a no-cost sale to have a zero total', () => {
+    const pricing = {
+      items: [
+        {
+          storeProductID: 'sp-1',
+          variationID: 'var-1',
+          productName: 'Producto A',
+          sku: 'SKU-1',
+          quantity: 1,
+          basePrice: 1000,
+          finalUnitPrice: 1000,
+          unitCost: 400,
+          lineTotal: 1000,
+        },
+      ],
+    } as unknown as CalculateCartResult;
+
+    expect(() =>
+      buildPreparedSale(
+        {
+          saleType: SaleType.BOLETA,
+          fmaPago: SaleFmaPago.NO_COST,
+          items: [],
+        } as any,
+        pricing,
+      ),
+    ).toThrow(BadRequestException);
+  });
+
   it('computes discount and base totals from pricing lines', () => {
     const prepared = buildPreparedSale(
       {
         saleType: SaleType.BOLETA,
-        paymentType: SalePaymentType.DEBIT,
+        fmaPago: SaleFmaPago.CONTADO,
         items: [],
       } as any,
       {

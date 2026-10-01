@@ -467,7 +467,7 @@ describe('ReportsService', () => {
   it('merges notas de venta into the sales report without double counting', async () => {
     const documentsRepo = createRepositoryMock(
       {
-        document: [{ key: 'Efectivo', count: '1', total: '1000' }],
+        document: [{ key: '1', count: '1', total: '1000' }],
       },
       {
         rawOne: {
@@ -479,7 +479,7 @@ describe('ReportsService', () => {
     const saleRepo = createRepositoryMock(
       {
         sale: [
-          { key: 'Efectivo', count: '2', total: '2500' },
+          { key: '1', count: '2', total: '2500' },
           { key: 'EMITIDA', count: '2', total: '2500' },
         ],
       },
@@ -498,12 +498,12 @@ describe('ReportsService', () => {
 
     const result = await service.getSalesReport({});
 
-    expect(result.groupedByPaymentType).toEqual([
-      { key: 'Efectivo', count: 3, total: 3500 },
+    expect(result.groupedByFmaPago).toEqual([
+      { key: '1', count: 3, total: 3500 },
       { key: 'EMITIDA', count: 2, total: 2500 },
     ]);
     expect(result.groupedByStatus).toEqual([
-      { key: 'Efectivo', count: 3, total: 3500 },
+      { key: '1', count: 3, total: 3500 },
       { key: 'EMITIDA', count: 2, total: 2500 },
     ]);
     expect(result.periodSummary.today).toEqual({ count: 3, total: 3500 });
