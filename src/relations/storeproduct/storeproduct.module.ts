@@ -25,5 +25,6 @@ import { TransactionRunnerService } from '../../common/services/transaction-runn
   ],
   controllers: [StoreProductController],
   providers: [StoreProductService, TransactionRunnerService],
+  exports: [StoreProductService],
 })
 export class StoreProductModule {}

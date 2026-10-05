@@ -13,9 +13,12 @@ import { MASTER_ROUTE } from '../decorators/master.decorator';
 import { ConfigService } from '@nestjs/config';
 import { FastifyRequest } from 'fastify';
 import { DataSource, EntityManager } from 'typeorm';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { TenantContextService } from '../../multitenant/tenant-context.service';
 import { User } from '../../users/entities/user.entity';
 import { JwtPayload } from '../interfaces/jwt-payload.interface';
+import { CHANNEL_ROUTE } from '../decorators/channel-route.decorator';
+import { CommerceChannel } from '../../commerce/entities/commerce-channel.entity';
 
 export interface AuthenticatedRequest extends FastifyRequest {
   user?: any;
@@ -37,6 +40,14 @@ export class AuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    const isChannelRoute = this.reflector.getAllAndOverride<boolean>(
+      CHANNEL_ROUTE,
+      [context.getHandler(), context.getClass()],
+    );
+    if (isChannelRoute) {
+      await this.authenticateChannel(request);
+      return true;
+    }
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
@@ -140,5 +151,49 @@ export class AuthGuard implements CanActivate {
     const authorization = request.headers.authorization;
     const [type, token] = authorization?.split(' ') ?? [];
     return type === 'Bearer' ? token : undefined;
+  }
+
+  /** A service token is accepted only by routes explicitly marked @ChannelRoute(). */
+  private async authenticateChannel(
+    request: AuthenticatedRequest,
+  ): Promise<void> {
+    const provided = this.extractTokenFromHeader(request);
+    const uuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const [channelID, secret, extra] = provided?.split('.') ?? [];
+    if (
+      !provided ||
+      !channelID ||
+      !uuid.test(channelID) ||
+      !secret ||
+      !/^[0-9a-f]{64}$/i.test(secret) ||
+      extra
+    ) {
+      throw new UnauthorizedException('Invalid channel token');
+    }
+    const channel = await this.dataSource
+      .getRepository(CommerceChannel)
+      .findOne({
+        where: { channelID, active: true },
+      });
+    if (!channel) throw new UnauthorizedException('Invalid channel token');
+    const expectedHash = Buffer.from(channel.tokenHash, 'hex');
+    const providedHash = createHash('sha256').update(provided).digest();
+    if (
+      expectedHash.length !== providedHash.length ||
+      !timingSafeEqual(expectedHash, providedHash)
+    ) {
+      throw new UnauthorizedException('Invalid channel token');
+    }
+
+    request.user = {
+      type: 'channel',
+      channelId: channel.channelID,
+      channelCode: channel.code,
+      channelName: channel.name,
+      domain: channel.domain,
+      tenantId: channel.tenantID,
+      storeId: channel.storeID,
+    };
   }
 }
