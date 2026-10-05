@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Body,
   Patch,
   Param,
@@ -9,22 +10,170 @@ import {
   HttpCode,
   HttpStatus,
   Query,
+  ForbiddenException,
+  UseGuards,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserListQueryDto } from './dto/user-list.query.dto';
 import { UserListResponseDto } from './dto/user-list-response.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { Store } from '../stores/entities/store.entity';
 import { CustomMessage } from '../common/decorators/response-message';
 import { User } from './entities/user.entity';
 import { RequirePermission } from '../auth/decorators/require-permission.decorator';
+import { AuthGuard } from '../auth/guards/auth.guard';
+import { GetUser } from '../auth/decorators/get-user.decorator';
+import type {
+  JwtPayload,
+  MasterJwtPayload,
+} from '../auth/interfaces/jwt-payload.interface';
+import { InventoryColumnPreferencesService } from './inventory-column-preferences.service';
+import { InventoryColumnPreferenceQueryDto } from './dto/inventory-column-preference-query.dto';
+import { UpdateInventoryColumnPreferenceDto } from './dto/update-inventory-column-preference.dto';
+import { InventoryColumnPreferenceResponseDto } from './dto/inventory-column-preference-response.dto';
+import { InventoryColumnStoreFilter } from './entities/inventory-column-preference.entity';
 
 @ApiTags('Usuarios')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly inventoryColumnPreferences: InventoryColumnPreferencesService,
+  ) {}
+
+  @Get('me/preferences/inventory-columns')
+  @UseGuards(AuthGuard)
+  @ApiOperation({
+    summary: 'Obtener preferencias de columnas ocultas del inventario',
+    description:
+      'Lee la preferencia del usuario autenticado para una tienda o filtro agregado. Debe enviarse exactamente uno de storeID o storeFilter. storeFilter solo está disponible para usuarios con rol TENANT_ADMIN. Las claves son identificadores de interfaz y no afectan los permisos ni los datos que devuelve la API.',
+  })
+  @ApiQuery({
+    name: 'storeID',
+    required: false,
+    type: String,
+    format: 'uuid',
+    description: 'Tienda asignada al usuario o accesible por su rol.',
+  })
+  @ApiQuery({
+    name: 'storeFilter',
+    required: false,
+    enum: InventoryColumnStoreFilter,
+    description: 'Filtro de vista agregada, exclusivo de TENANT_ADMIN.',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Preferencia encontrada, o exists=false si aún no se ha guardado para este contexto.',
+    type: InventoryColumnPreferenceResponseDto,
+    schema: {
+      example: {
+        exists: true,
+        hiddenColumns: ['supplierSku', 'ean'],
+        updatedAt: '2026-10-02T15:30:00.000Z',
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Query inválida o contexto ambiguo.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Token ausente, inválido o expirado.',
+  })
+  @ApiResponse({ status: 403, description: 'Sin acceso a la tienda o filtro.' })
+  getInventoryColumnPreference(
+    @GetUser() authenticatedUser: JwtPayload | MasterJwtPayload,
+    @Query() query: InventoryColumnPreferenceQueryDto,
+  ) {
+    const { tenantID, userID } = this.getTenantIdentity(authenticatedUser);
+    return this.inventoryColumnPreferences.getPreference(
+      tenantID,
+      userID,
+      query,
+    );
+  }
+
+  @Put('me/preferences/inventory-columns')
+  @UseGuards(AuthGuard)
+  @ApiOperation({
+    summary: 'Reemplazar preferencias de columnas ocultas del inventario',
+    description:
+      'Reemplaza la lista completa para el contexto indicado; la última escritura prevalece. hiddenColumns puede estar vacía (la preferencia seguirá existiendo y todas las columnas quedarán visibles). Se eliminan duplicados y no se limita el conjunto de claves a un catálogo del backend. Esta preferencia solo afecta la presentación.',
+  })
+  @ApiQuery({
+    name: 'storeID',
+    required: false,
+    type: String,
+    format: 'uuid',
+    description: 'Tienda asignada al usuario o accesible por su rol.',
+  })
+  @ApiQuery({
+    name: 'storeFilter',
+    required: false,
+    enum: InventoryColumnStoreFilter,
+    description: 'Filtro de vista agregada, exclusivo de TENANT_ADMIN.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Preferencia reemplazada correctamente.',
+    type: InventoryColumnPreferenceResponseDto,
+    schema: {
+      example: {
+        exists: true,
+        hiddenColumns: ['supplierSku', 'ean'],
+        updatedAt: '2026-10-02T15:30:00.000Z',
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Query o body inválido.' })
+  @ApiResponse({
+    status: 401,
+    description: 'Token ausente, inválido o expirado.',
+  })
+  @ApiResponse({ status: 403, description: 'Sin acceso a la tienda o filtro.' })
+  replaceInventoryColumnPreference(
+    @GetUser() authenticatedUser: JwtPayload | MasterJwtPayload,
+    @Query() query: InventoryColumnPreferenceQueryDto,
+    @Body() dto: UpdateInventoryColumnPreferenceDto,
+  ) {
+    const { tenantID, userID } = this.getTenantIdentity(authenticatedUser);
+    return this.inventoryColumnPreferences.replacePreference(
+      tenantID,
+      userID,
+      query,
+      dto.hiddenColumns,
+    );
+  }
+
+  private getTenantIdentity(authenticatedUser: JwtPayload | MasterJwtPayload): {
+    tenantID: string;
+    userID: string;
+  } {
+    if (
+      authenticatedUser.type !== 'tenant' ||
+      'masterUserId' in authenticatedUser ||
+      !authenticatedUser.tenantId ||
+      !authenticatedUser.userId
+    ) {
+      throw new ForbiddenException(
+        'A tenant user identity is required for this preference',
+      );
+    }
+    return {
+      tenantID: authenticatedUser.tenantId,
+      userID: authenticatedUser.userId,
+    };
+  }
 
   @Post()
   @RequirePermission('users:manage')
