@@ -855,4 +855,96 @@ describe('OfferService', () => {
       result[0].bundleItems[0].storeProduct?.variation?.product?.productID,
     ).toBe('product-a');
   });
+  it('uses the supplied connection for catalog offers instead of acquiring from the global repository', async () => {
+    const builder = mockQueryBuilder([]);
+    repository.createQueryBuilder.mockImplementation(() => {
+      throw new Error('Unexpected second connection');
+    });
+    const transactionRepository = {
+      createQueryBuilder: jest.fn(() => builder),
+    };
+    const transactionManager = {
+      getRepository: jest.fn(() => transactionRepository),
+    };
+    const context = {
+      storeID: 'store-1',
+      pricingDate: new Date(),
+      items: [
+        {
+          storeProductID: 'sp-1',
+          storeID: 'store-1',
+          variationID: 'variation-1',
+          productID: 'product-1',
+          quantity: 1,
+          unitPrice: 100,
+        },
+      ],
+    };
+    const result = await service.getApplicableOffersForItems(
+      transactionManager as never,
+      [context],
+    );
+    expect(result.get('sp-1')).toEqual([]);
+    expect(transactionManager.getRepository).toHaveBeenCalledWith(SpecialOffer);
+    expect(repository.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('loads cart offers and category scopes on the same transaction connection', async () => {
+    const categoryOffer = offer({
+      targetScope: OfferTargetScope.CATEGORY,
+      categoryID: 'parent',
+      includeSubcategories: true,
+      discountType: DiscountType.PERCENTAGE,
+      value: 10,
+    });
+    const builder = mockQueryBuilder([categoryOffer]);
+    repository.createQueryBuilder.mockImplementation(() => {
+      throw new Error('Global offer connection');
+    });
+    categoryRepository.find.mockImplementation(() => {
+      throw new Error('Global category connection');
+    });
+    const transactionCategories = {
+      find: jest
+        .fn()
+        .mockResolvedValue([{ categoryID: 'child', parentID: 'parent' }]),
+    };
+    const transactionManager = {
+      getRepository: jest.fn((entity) =>
+        entity === SpecialOffer
+          ? { createQueryBuilder: () => builder }
+          : transactionCategories,
+      ),
+    };
+    const context = {
+      storeID: 'store-1',
+      pricingDate: new Date(),
+      items: [
+        {
+          storeProductID: 'sp-1',
+          storeID: 'store-1',
+          variationID: 'variation-1',
+          productID: 'product-1',
+          categoryID: 'child',
+          quantity: 1,
+          unitPrice: 100,
+        },
+      ],
+    };
+    const offers = await service.getApplicableOffers(
+      context,
+      context.pricingDate,
+      transactionManager as never,
+    );
+    expect(offers).toHaveLength(1);
+    const ids = await service.getApplicableStoreProductIDs(
+      offers[0],
+      context,
+      transactionManager as never,
+    );
+    expect(ids.has('sp-1')).toBe(true);
+    expect(mockTenantContext.transaction).not.toHaveBeenCalled();
+    expect(repository.createQueryBuilder).not.toHaveBeenCalled();
+    expect(categoryRepository.find).not.toHaveBeenCalled();
+  });
 });

@@ -102,8 +102,11 @@ export class ClientsService {
     };
   }
 
-  async findOne(clientID: string): Promise<Client> {
-    const client = await this.clientRepository.findOne({
+  async findOne(clientID: string, manager?: EntityManager): Promise<Client> {
+    const repository = manager
+      ? manager.getRepository(Client)
+      : this.clientRepository;
+    const client = await repository.findOne({
       where: { clientID },
     });
 

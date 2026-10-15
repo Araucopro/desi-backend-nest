@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantSubscriber } from '../multitenant/tenant-subscriber';
+import { runtimePoolOptions } from './pool-options';
 
 @Module({
   imports: [
@@ -9,10 +10,12 @@ import { TenantSubscriber } from '../multitenant/tenant-subscriber';
     TypeOrmModule.forRootAsync({
       useFactory: () => {
         const databaseUrl = process.env.DATABASE_URL;
+        const poolOptions = runtimePoolOptions();
 
         if (databaseUrl) {
           return {
             type: 'postgres',
+            ...poolOptions,
             url: databaseUrl,
             entities: [__dirname + '/../**/*.entity{.ts,.js}'],
             synchronize: false,
@@ -27,6 +30,7 @@ import { TenantSubscriber } from '../multitenant/tenant-subscriber';
 
         return {
           type: 'postgres',
+          ...poolOptions,
           host: process.env.PGHOST || 'localhost',
           port: Number(process.env.PGPORT || 5432),
           username:
