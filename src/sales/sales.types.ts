@@ -52,7 +52,16 @@ export type PreparedSale = {
   cogsTotal: number;
 };
 
+export type SaleCommerceSummary = {
+  origin: 'WEB';
+  paymentProvider: string;
+  isTest: boolean;
+};
+
 export type SaleView = {
-  sale: Omit<Sale, 'payments'> & { payments: SalePaymentSummary[] };
+  sale: Omit<Sale, 'payments'> & {
+    payments: SalePaymentSummary[];
+    commerce: SaleCommerceSummary | null;
+  };
   dte: DteDocumentResponseDto | null;
 };
