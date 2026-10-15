@@ -452,11 +452,15 @@ export class OfferService {
   async getApplicableOffers(
     cartContext: OfferCartContext,
     pricingDate: Date = new Date(),
+    manager?: EntityManager,
   ): Promise<SpecialOffer[]> {
     const storeProductIDs = cartContext.items.map(
       (item) => item.storeProductID,
     );
-    const query = this.specialOfferRepository
+    const repository = manager
+      ? manager.getRepository(SpecialOffer)
+      : this.specialOfferRepository;
+    const query = repository
       .createQueryBuilder('offer')
       .leftJoinAndSelect('offer.storeProduct', 'storeProduct')
       .leftJoinAndSelect('storeProduct.store', 'store')
@@ -493,6 +497,7 @@ export class OfferService {
             await this.resolveCategoryScope(
               offer.categoryID,
               offer.includeSubcategories,
+              manager,
             ),
           );
         }
@@ -548,7 +553,9 @@ export class OfferService {
 
     const offersByStore = new Map<string, SpecialOffer[]>();
     const allOffers: SpecialOffer[] = [];
-    const repository = this.specialOfferRepository;
+    // Stay on the caller's connection: requesting a second one here can
+    // exhaust the pool while every catalog transaction waits for offers.
+    const repository = manager.getRepository(SpecialOffer);
     for (const [storeID, contexts] of contextsByStore) {
       const storeProductIDs = contexts.flatMap((context) =>
         context.items.map((item) => item.storeProductID),
@@ -658,6 +665,7 @@ export class OfferService {
   async getApplicableStoreProductIDs(
     offer: SpecialOffer,
     cartContext: OfferCartContext,
+    manager?: EntityManager,
   ): Promise<Set<string>> {
     if (offer.discountType === DiscountType.BUNDLE) {
       const bundleStoreProductIDs = new Set(
@@ -679,6 +687,7 @@ export class OfferService {
           await this.resolveCategoryScope(
             offer.categoryID,
             offer.includeSubcategories,
+            manager,
           ),
         ],
       ]);
@@ -732,15 +741,18 @@ export class OfferService {
   private async resolveCategoryScope(
     categoryID: string,
     includeSubcategories: boolean,
+    manager?: EntityManager,
   ): Promise<Set<string>> {
     const scope = new Set<string>([categoryID]);
     if (!includeSubcategories) return scope;
 
-    const categories = this.tenantContext
-      ? await this.tenantContext.transaction((manager) =>
-          manager.getRepository(Category).find(),
-        )
-      : await this.categoryRepository.find();
+    const categories = manager
+      ? await manager.getRepository(Category).find()
+      : this.tenantContext
+        ? await this.tenantContext.transaction((transactionManager) =>
+            transactionManager.getRepository(Category).find(),
+          )
+        : await this.categoryRepository.find();
     const childrenByParent = new Map<string, Category[]>();
     for (const category of categories) {
       if (!category.parentID) continue;

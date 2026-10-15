@@ -155,7 +155,7 @@ export class SalesService {
 
     if (this.clientsService) {
       if (clientID && !receiver) {
-        const client = await this.clientsService.findOne(clientID);
+        const client = await this.clientsService.findOne(clientID, manager);
         receiver = {
           rut: client.rut,
           name: client.name,
@@ -191,18 +191,21 @@ export class SalesService {
     validateFacturaReceiver(dto.saleType, receiver);
     validateClientRequirement(store, clientID);
 
-    const pricing = await this.pricingService.calculateCart({
-      storeID,
-      items: dto.items.map((item) => ({
-        storeProductID: item.storeProductID,
-        quantity: item.quantity,
-      })),
-      userID: userId ?? null,
-      ...(dto.manualDiscount !== undefined && dto.manualDiscount > 0
-        ? { manualDiscount: dto.manualDiscount }
-        : {}),
-      pricingDate: toDateOnly(dto.issueDate ?? new Date()),
-    });
+    const pricing = await this.pricingService.calculateCart(
+      {
+        storeID,
+        items: dto.items.map((item) => ({
+          storeProductID: item.storeProductID,
+          quantity: item.quantity,
+        })),
+        userID: userId ?? null,
+        ...(dto.manualDiscount !== undefined && dto.manualDiscount > 0
+          ? { manualDiscount: dto.manualDiscount }
+          : {}),
+        pricingDate: toDateOnly(dto.issueDate ?? new Date()),
+      },
+      manager,
+    );
 
     const prepared = buildPreparedSale(
       {

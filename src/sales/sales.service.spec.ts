@@ -403,6 +403,7 @@ describe('SalesService', () => {
         userID: 'user-1',
         manualDiscount: 10,
       }),
+      ctx.manager,
     );
   });
 
@@ -1232,7 +1233,16 @@ describe('SalesService commerce transaction', () => {
       undefined,
       payments as never,
     );
-    return { ...ctx, service, financial, inventory, dte, payments, dataSource };
+    return {
+      ...ctx,
+      service,
+      financial,
+      inventory,
+      dte,
+      payments,
+      dataSource,
+      pricing,
+    };
   }
   const input = {
     items: [{ storeProductID: 'sp-1', quantity: 1 }],
@@ -1292,5 +1302,19 @@ describe('SalesService commerce transaction', () => {
     expect(ctx.savedSales).toHaveLength(0);
     expect(ctx.inventory.reserveStock).not.toHaveBeenCalled();
     expect(ctx.financial.recordSaleNote).not.toHaveBeenCalled();
+  });
+  it('passes the active sale manager to pricing without acquiring a second transaction', async () => {
+    const ctx = setupCommerce();
+    await ctx.service.createCommerceSale(
+      ctx.manager as never,
+      'store-1',
+      input,
+      'commerce-key',
+      1190,
+    );
+    expect(ctx.pricing.calculateCart).toHaveBeenCalledWith(
+      expect.anything(),
+      ctx.manager,
+    );
   });
 });

@@ -175,14 +175,17 @@ describe('PricingService', () => {
       manualDiscount: 5,
     });
 
-    expect(userDiscountValidator.validate).toHaveBeenCalledWith({
-      userID: 'user-1',
-      manualDiscount: 5,
-      storeProduct: spRow,
-      baseUnitPrice: 100,
-      currentUnitPrice: 90,
-      quantity: 2,
-    });
+    expect(userDiscountValidator.validate).toHaveBeenCalledWith(
+      {
+        userID: 'user-1',
+        manualDiscount: 5,
+        storeProduct: spRow,
+        baseUnitPrice: 100,
+        currentUnitPrice: 90,
+        quantity: 2,
+      },
+      manager,
+    );
     expect(result.finalPrice).toBe(171);
     expect(result.discountsApplied).toHaveLength(2);
     expect(result.pricingContext.storeID).toBe('store-1');
@@ -779,6 +782,41 @@ describe('PricingService', () => {
     expect(result).toHaveLength(1);
     expect(result[0].storeProduct.variation.product.productID).toBe(
       'product-1',
+    );
+  });
+  it('reuses the sale transaction for pricing, offers, categories and manual discount validation', async () => {
+    mockSingleLineStoreProduct(storeProduct());
+    offerService.getApplicableOffers.mockResolvedValue([offer({ value: 10 })]);
+    offerService.getApplicableStoreProductIDs.mockResolvedValue(
+      new Set(['sp-1']),
+    );
+    dataSource.transaction.mockImplementation(() => {
+      throw new Error('Nested pricing connection');
+    });
+    const result = await service.calculateCart(
+      {
+        storeID: 'store-1',
+        items: [{ storeProductID: 'sp-1', quantity: 1 }],
+        userID: 'user-1',
+        manualDiscount: 5,
+      },
+      manager as never,
+    );
+    expect(result.items).toHaveLength(1);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(offerService.getApplicableOffers).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Date),
+      manager,
+    );
+    expect(offerService.getApplicableStoreProductIDs).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      manager,
+    );
+    expect(userDiscountValidator.validate).toHaveBeenCalledWith(
+      expect.anything(),
+      manager,
     );
   });
 });
