@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { SalesService } from './sales.service';
+import { User } from '../users/entities/user.entity';
 import {
   Sale,
   SaleFmaPago,
@@ -1169,5 +1170,127 @@ describe('SalesService', () => {
       expect(paymentsService.persistSalePayments).not.toHaveBeenCalled();
       expect(ctx.sale()).toMatchObject({ cashRegisterSessionID: null });
     });
+  });
+});
+
+describe('SalesService commerce transaction', () => {
+  function setupCommerce() {
+    const ctx = createManagerMock({
+      storeHasOpenfacturaKey: false,
+      storeAllowNegativeStock: true,
+    });
+    const original = ctx.manager.getRepository.getMockImplementation()!;
+    ctx.manager.getRepository.mockImplementation((entity) =>
+      entity === User
+        ? ({
+            findOne: jest.fn(async () => ({ userID: 'system-user' })),
+          } as never)
+        : original(entity),
+    );
+    const pricing = {
+      calculateCart: jest.fn(async () => ({
+        items: [
+          {
+            storeProductID: 'sp-1',
+            variationID: 'var-1',
+            productName: 'Producto A',
+            sku: 'SKU-1',
+            quantity: 1,
+            finalUnitPrice: 1190,
+            unitCost: 400,
+            lineTotal: 1190,
+            basePrice: 1190,
+          },
+        ],
+        totals: { subtotal: 1190, discount: 0, total: 1190 },
+      })),
+    };
+    const financial = {
+      recordSaleNote: jest.fn().mockResolvedValue(undefined),
+    };
+    const inventory = { reserveStock: jest.fn().mockResolvedValue(400) };
+    const dte = { create: jest.fn() };
+    const payments = {
+      resolveSalePayments: jest.fn(),
+      persistSalePayments: jest.fn(),
+    };
+    const dataSource = { transaction: jest.fn() };
+    const context = { getTenantId: () => 'tenant-1' };
+    const service = new SalesService(
+      {} as never,
+      {} as never,
+      {} as never,
+      dataSource as never,
+      pricing as never,
+      dte as never,
+      {} as never,
+      financial as never,
+      inventory as never,
+      undefined,
+      context as never,
+      undefined,
+      undefined,
+      payments as never,
+    );
+    return { ...ctx, service, financial, inventory, dte, payments, dataSource };
+  }
+  const input = {
+    items: [{ storeProductID: 'sp-1', quantity: 1 }],
+    receiver: {
+      name: 'Cliente Web',
+      email: 'web@example.test',
+      address: 'Calle 123',
+      city: 'Temuco',
+    },
+  };
+
+  it('stores buyer data and uses the supplied transaction for note, stock and income without Haulmer or a cash session', async () => {
+    const ctx = setupCommerce();
+    const result = await ctx.service.createCommerceSale(
+      ctx.manager as never,
+      'store-1',
+      input,
+      'commerce-key',
+      1190,
+    );
+    expect(result.sale).toMatchObject({
+      saleType: SaleType.NOTA_VENTA,
+      fmaPago: SaleFmaPago.CONTADO,
+      userID: 'system-user',
+      receiver: input.receiver,
+      cashRegisterSessionID: null,
+    });
+    expect(ctx.dataSource.transaction).not.toHaveBeenCalled();
+    expect(ctx.dte.create).not.toHaveBeenCalled();
+    expect(ctx.payments.resolveSalePayments).not.toHaveBeenCalled();
+    expect(ctx.inventory.reserveStock).toHaveBeenCalledWith(
+      ctx.manager,
+      'store-1',
+      [{ variationID: 'var-1', QtyItem: 1 }],
+      expect.any(String),
+      'tenant-1',
+      InventoryMovementReason.SALE,
+      false,
+    );
+    expect(ctx.financial.recordSaleNote).toHaveBeenCalledWith(
+      ctx.manager,
+      expect.objectContaining({ tenantID: 'tenant-1', storeID: 'store-1' }),
+    );
+  });
+
+  it('rejects a paid total that differs from ERP pricing before changing sale, stock or ledger', async () => {
+    const ctx = setupCommerce();
+    await expect(
+      ctx.service.createCommerceSale(
+        ctx.manager as never,
+        'store-1',
+        input,
+        'commerce-key',
+        1,
+      ),
+    ).rejects.toThrow('monto pagado');
+    expect(ctx.savedSales).toHaveLength(0);
+    expect(ctx.inventory.reserveStock).not.toHaveBeenCalled();
+    expect(ctx.financial.recordSaleNote).not.toHaveBeenCalled();
   });
 });

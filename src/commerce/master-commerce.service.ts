@@ -44,6 +44,8 @@ export class MasterCommerceService {
       name: channel.name,
       domain: channel.domain,
       active: channel.active,
+      salesEnabled: channel.salesEnabled,
+      acceptTestPayments: channel.acceptTestPayments,
       createdAt: channel.createdAt,
       updatedAt: channel.updatedAt,
     };
@@ -107,6 +109,8 @@ export class MasterCommerceService {
               domain: dto.domain || null,
               tokenHash,
               active: true,
+              salesEnabled: dto.salesEnabled ?? false,
+              acceptTestPayments: dto.acceptTestPayments ?? false,
             });
             const saved = await manager.save(channel);
             await manager.save(
@@ -165,6 +169,10 @@ export class MasterCommerceService {
           if (dto.name !== undefined) row.name = dto.name;
           if (dto.domain !== undefined) row.domain = dto.domain || null;
           if (dto.active !== undefined) row.active = dto.active;
+          if (dto.salesEnabled !== undefined)
+            row.salesEnabled = dto.salesEnabled;
+          if (dto.acceptTestPayments !== undefined)
+            row.acceptTestPayments = dto.acceptTestPayments;
           const saved = await manager.save(row);
           await manager.save(
             AuditEvent,
