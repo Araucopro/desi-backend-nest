@@ -36,9 +36,10 @@ describe('MasterCommerceService provisioning', () => {
         timeZone: 'America/Santiago',
       }),
     };
+    type MockManager = typeof manager;
     const tenantContext = {
       run: jest.fn((_context: unknown, callback: () => unknown) => callback()),
-      transaction: jest.fn((callback: (manager: typeof manager) => unknown) =>
+      transaction: jest.fn((callback: (manager: MockManager) => unknown) =>
         callback(manager),
       ),
     };
@@ -80,6 +81,8 @@ describe('MasterCommerceService provisioning', () => {
       storeID,
       code: 'DESI_WEB',
       active: true,
+      salesEnabled: false,
+      acceptTestPayments: false,
     });
     expect(created.token).toMatch(/^[0-9a-f-]{36}\.[0-9a-f]{64}$/);
     expect(created).not.toHaveProperty('tokenHash');
