@@ -25,7 +25,8 @@ export class Product {
   @Column({ type: 'uuid' })
   tenantID!: string;
 
-  @Column({ type: 'varchar', length: 255, nullable: true })
+  /** Ordered photo URLs, comma separated; the first is the cover. */
+  @Column({ type: 'text', nullable: true })
   image?: string;
 
   @Column({ type: 'uuid', nullable: true })

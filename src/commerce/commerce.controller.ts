@@ -1,8 +1,18 @@
 import { Body, Controller, Get, Post, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiTags,
+  ApiOkResponse,
+  ApiCreatedResponse,
+} from '@nestjs/swagger';
 import { FastifyRequest } from 'fastify';
 import { ChannelRoute } from '../auth/decorators/channel-route.decorator';
 import { CommerceService } from './commerce.service';
+import {
+  CommerceCatalogProductDto,
+  CommerceQuoteResponseDto,
+} from './dto/catalog-response.dto';
 import { CommerceQuoteDto } from './dto/quote.dto';
 
 type ChannelRequest = FastifyRequest & {
@@ -39,13 +49,23 @@ export class CommerceController {
   }
 
   @Get('catalog')
-  @ApiOperation({ summary: 'Catálogo y stock de la tienda vinculada' })
+  @ApiOkResponse({ type: [CommerceCatalogProductDto] })
+  @ApiOperation({
+    summary: 'Catalogo y stock de la tienda vinculada',
+    description:
+      'Solo productos con foto HTTP/HTTPS, descripcion y slug. image contiene hasta cinco URLs separadas por comas. Sin requisito de categoria ni de stock positivo.',
+  })
   catalog(@Req() request: ChannelRequest) {
     return this.commerce.catalog(request.user.storeId);
   }
 
   @Post('quote')
-  @ApiOperation({ summary: 'Cotizar productos de la tienda vinculada' })
+  @ApiCreatedResponse({ type: CommerceQuoteResponseDto })
+  @ApiOperation({
+    summary: 'Cotizar productos de la tienda vinculada',
+    description:
+      'Cada item incluye storeProductID, sku, name, image (portada), size, color, quantity, unitPrice, lineTotal y available. Productos sin contenido web completo: 400.',
+  })
   quote(@Req() request: ChannelRequest, @Body() dto: CommerceQuoteDto) {
     return this.commerce.quote(request.user.storeId, dto);
   }

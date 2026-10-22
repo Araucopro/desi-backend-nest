@@ -12,6 +12,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsProductImageList } from '../product-images';
 import { ProductGenre } from '../entities/product.entity';
 import { CreateProductVariationDto } from './create-product-variation.dto';
 
@@ -48,11 +49,13 @@ export class BulkProductItemDto {
   categoryName?: string;
 
   @ApiPropertyOptional({
-    description: 'URL de la imagen del producto',
+    description:
+      'Hasta 5 URLs HTTP/HTTPS de fotos separadas por comas. La primera es la portada. Vacio elimina las fotos.',
     example: 'https://example.com/image.jpg',
   })
   @IsString()
   @IsOptional()
+  @IsProductImageList()
   image?: string;
 
   @ApiPropertyOptional({

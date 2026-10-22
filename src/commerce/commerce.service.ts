@@ -10,6 +10,11 @@ import { PricingService } from '../pricing/pricing.service';
 import { StoreProductService } from '../relations/storeproduct/storeproduct.service';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { Store } from '../stores/entities/store.entity';
+import {
+  hasWebContent,
+  productImages,
+  isProductImageUrl,
+} from '../products/product-images';
 import { CommerceQuoteDto } from './dto/quote.dto';
 
 type PricedStoreProduct = StoreProduct & {
@@ -45,13 +50,16 @@ export class CommerceService {
   async catalog(storeId: string) {
     await this.context(storeId);
     const products = await this.inventory.getStoreInventory(storeId);
-    return products.map((product) => ({
+    return products.filter(hasWebContent).map((product) => ({
       productID: product.productID,
       slug: product.slug,
       name: product.name,
       brand: product.brand ?? null,
       description: product.description ?? null,
-      image: product.image ?? null,
+      image: productImages(product.image)
+        .filter(isProductImageUrl)
+        .slice(0, 5)
+        .join(', '),
       category: product.category?.name ?? null,
       variants: (product.variations ?? []).flatMap((variation) =>
         (variation.storeProducts ?? []).map((raw) => {
@@ -102,10 +110,24 @@ export class CommerceService {
           storeProductID: In([...quantities.keys()]),
           store: { storeID: storeId },
         },
+        relations: { variation: { product: true } },
       }),
     );
     if (stock.length !== items.length)
       throw new NotFoundException('Product outside channel store');
+    if (
+      stock.some(
+        (item) =>
+          !item.variation?.product || !hasWebContent(item.variation.product),
+      )
+    ) {
+      throw new BadRequestException(
+        'Product is no longer available on the website',
+      );
+    }
+    const productsById = new Map(
+      stock.map((item) => [item.storeProductID, item.variation]),
+    );
     const stockById = new Map(
       stock.map((item) => [item.storeProductID, Number(item.stock)]),
     );
@@ -114,6 +136,13 @@ export class CommerceService {
         storeProductID: item.storeProductID,
         quantity: item.quantity,
         sku: item.sku,
+        name: productsById.get(item.storeProductID)?.product.name ?? item.sku,
+        image:
+          productImages(
+            productsById.get(item.storeProductID)?.product.image,
+          ).find(isProductImageUrl) ?? null,
+        size: productsById.get(item.storeProductID)?.variation ?? null,
+        color: productsById.get(item.storeProductID)?.subVariation ?? null,
         unitPrice: item.finalUnitPrice,
         lineTotal: item.lineTotal,
         available: (stockById.get(item.storeProductID) ?? 0) >= item.quantity,
