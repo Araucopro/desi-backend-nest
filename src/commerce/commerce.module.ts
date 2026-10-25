@@ -1,4 +1,8 @@
 import { Module } from '@nestjs/common';
+import { SalesModule } from '../sales/sales.module';
+import { CommerceOrder } from './entities/commerce-order.entity';
+import { CommerceSalesService } from './commerce-sales.service';
+import { CommerceSalesController } from './commerce-sales.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MultitenantModule } from '../multitenant/multitenant.module';
 import { PricingModule } from '../pricing/pricing.module';
@@ -15,11 +19,22 @@ import { MasterCommerceService } from './master-commerce.service';
 @Module({
   imports: [
     MultitenantModule,
+    SalesModule,
     PricingModule,
     StoreProductModule,
-    TypeOrmModule.forFeature([Store, StoreProduct, Tenant, CommerceChannel]),
+    TypeOrmModule.forFeature([
+      Store,
+      StoreProduct,
+      Tenant,
+      CommerceChannel,
+      CommerceOrder,
+    ]),
   ],
-  controllers: [CommerceController, MasterCommerceController],
-  providers: [CommerceService, MasterCommerceService],
+  controllers: [
+    CommerceController,
+    MasterCommerceController,
+    CommerceSalesController,
+  ],
+  providers: [CommerceService, MasterCommerceService, CommerceSalesService],
 })
 export class CommerceModule {}

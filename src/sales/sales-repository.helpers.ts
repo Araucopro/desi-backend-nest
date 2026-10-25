@@ -7,7 +7,12 @@ import { ListSalesQueryDto } from './dto/list-sales.query.dto';
 import { SaleItem } from './entities/sale-item.entity';
 import { Sale, SaleStatus } from './entities/sale.entity';
 import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
-import { PreparedSale, PreparedSaleItem } from './sales.types';
+import {
+  PreparedSale,
+  PreparedSaleItem,
+  SaleCommerceSummary,
+} from './sales.types';
+import { CommerceOrder } from '../commerce/entities/commerce-order.entity';
 import { applyOwnershipScope } from '../common/authorization/apply-ownership-scope';
 import { PermissionScope } from '../roles/entities/role-permission.entity';
 
@@ -91,6 +96,28 @@ async function attachSalePayments(
   }
 
   return sales;
+}
+
+/** Reads metadata for already authorized sales, on the same tenant transaction. */
+export async function loadSaleCommerce(
+  manager: EntityManager,
+  sales: Sale[],
+): Promise<Map<string, SaleCommerceSummary>> {
+  if (!sales.length) return new Map();
+  const orders = await manager.getRepository(CommerceOrder).find({
+    where: { saleID: In(sales.map((sale) => sale.saleID)) },
+    select: ['saleID', 'paymentProvider', 'isTest'],
+  });
+  return new Map(
+    orders.map((order) => [
+      order.saleID,
+      {
+        origin: 'WEB' as const,
+        paymentProvider: order.paymentProvider,
+        isTest: order.isTest,
+      },
+    ]),
+  );
 }
 
 export async function nextSaleFolio(

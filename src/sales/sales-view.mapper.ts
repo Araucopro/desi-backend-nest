@@ -1,7 +1,7 @@
 import { DteDocument } from '../dte/entities/dte-document.entity';
 import { DteDocumentResponseDto } from '../dte/dto/dte-document-response.dto';
 import { Sale } from './entities/sale.entity';
-import { SaleView } from './sales.types';
+import { SaleCommerceSummary, SaleView } from './sales.types';
 
 export function toDteSummary(
   dte: DteDocument | null | undefined,
@@ -19,12 +19,14 @@ export function toDteSummary(
 export function toSaleView(
   sale: Sale,
   dteResponse?: DteDocumentResponseDto | null,
+  commerce: SaleCommerceSummary | null = null,
 ): SaleView {
   const { payments, ...saleFields } = sale;
 
   return {
     sale: {
       ...saleFields,
+      commerce,
       payments: (payments ?? []).map((payment) => ({
         paymentID: payment.paymentID,
         paymentMethodID: payment.paymentMethodID,

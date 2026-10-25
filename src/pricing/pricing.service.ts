@@ -134,7 +134,10 @@ export class PricingService {
     return findPriceHistoryList(this.priceHistoryRepository, filters);
   }
 
-  async calculateCart(input: CalculateCartInput): Promise<CalculateCartResult> {
+  async calculateCart(
+    input: CalculateCartInput,
+    manager?: EntityManager,
+  ): Promise<CalculateCartResult> {
     const pricingDate = this.parsePricingDate(input.pricingDate ?? new Date());
     this.validateManualDiscount(input.manualDiscount);
     if (!input.items.length) {
@@ -148,7 +151,9 @@ export class PricingService {
     const groupedItems = this.groupCartItems(input.items);
     const storeProductIDs = Array.from(groupedItems.keys());
 
-    return this.runInTransaction(async (manager) => {
+    const calculate = async (
+      manager: EntityManager,
+    ): Promise<CalculateCartResult> => {
       let storeID = input.storeID;
       if (!storeID) {
         if (storeProductIDs.length !== 1) {
@@ -187,6 +192,7 @@ export class PricingService {
       const offers = await this.offerService.getApplicableOffers(
         cartContext,
         pricingDate,
+        manager,
       );
       let exclusiveApplied = false;
 
@@ -195,6 +201,7 @@ export class PricingService {
           await this.offerService.getApplicableStoreProductIDs(
             offer,
             cartContext,
+            manager,
           );
         const applicableLines = lines.filter((line) =>
           applicableIDs.has(line.storeProductID),
@@ -224,14 +231,17 @@ export class PricingService {
           }
         } else {
           for (const line of lines) {
-            await this.userDiscountValidator.validate({
-              userID: input.userID ?? null,
-              manualDiscount: input.manualDiscount,
-              storeProduct: line.storeProduct,
-              baseUnitPrice: line.baseUnitPrice,
-              currentUnitPrice: line.currentTotal / line.quantity,
-              quantity: line.quantity,
-            });
+            await this.userDiscountValidator.validate(
+              {
+                userID: input.userID ?? null,
+                manualDiscount: input.manualDiscount,
+                storeProduct: line.storeProduct,
+                baseUnitPrice: line.baseUnitPrice,
+                currentUnitPrice: line.currentTotal / line.quantity,
+                quantity: line.quantity,
+              },
+              manager,
+            );
             applyManualDiscount(line, input.manualDiscount);
           }
         }
@@ -279,7 +289,8 @@ export class PricingService {
           storeType: firstStore?.type,
         },
       };
-    });
+    };
+    return manager ? calculate(manager) : this.runInTransaction(calculate);
   }
 
   async calculatePrice(input: PricingInput): Promise<PricingResult> {

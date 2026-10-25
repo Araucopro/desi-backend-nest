@@ -1,5 +1,5 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
-import { DataSource, IsNull } from 'typeorm';
+import { DataSource, EntityManager, IsNull } from 'typeorm';
 import { User, UserRole } from '../../users/entities/user.entity';
 import { UserStore } from '../../relations/userstores/entities/userstore.entity';
 import { StoreProduct } from '../../relations/storeproduct/entities/storeproduct.entity';
@@ -17,14 +17,17 @@ type UserDiscountValidationInput = {
 export class UserDiscountValidator {
   constructor(private readonly dataSource: DataSource) {}
 
-  async validate({
-    userID,
-    manualDiscount,
-    storeProduct,
-    baseUnitPrice,
-    currentUnitPrice,
-    quantity,
-  }: UserDiscountValidationInput) {
+  async validate(
+    {
+      userID,
+      manualDiscount,
+      storeProduct,
+      baseUnitPrice,
+      currentUnitPrice,
+      quantity,
+    }: UserDiscountValidationInput,
+    manager: EntityManager = this.dataSource.manager,
+  ) {
     const defaultMax = parseFloat(
       process.env.DEFAULT_MAX_DISCOUNT_PERCENT || '30',
     );
@@ -34,7 +37,7 @@ export class UserDiscountValidator {
       );
     }
 
-    const user = await this.dataSource.manager.findOne(User, {
+    const user = await manager.findOne(User, {
       where: { userID },
     });
 
@@ -42,7 +45,7 @@ export class UserDiscountValidator {
       throw new ForbiddenException('Usuario no autorizado para descontar');
     }
 
-    const belongsToStore = await this.dataSource.manager.exists(UserStore, {
+    const belongsToStore = await manager.exists(UserStore, {
       where: {
         user: { userID },
         store: { storeID: storeProduct.store?.storeID },

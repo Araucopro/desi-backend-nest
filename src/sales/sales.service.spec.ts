@@ -1,5 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { SalesService } from './sales.service';
+import { CommerceOrder } from '../commerce/entities/commerce-order.entity';
+import { User } from '../users/entities/user.entity';
 import {
   Sale,
   SaleFmaPago,
@@ -34,6 +36,7 @@ function createManagerMock(
     dispatchGuides?: any[];
     consumedReferenceItems?: any[];
     payments?: any[];
+    commerceOrders?: Partial<CommerceOrder>[];
     sales?: any[];
   } = {},
 ) {
@@ -183,6 +186,9 @@ function createManagerMock(
         return {
           find: jest.fn(async () => consumedReferenceItems),
         };
+      }
+      if (entity === CommerceOrder) {
+        return { find: jest.fn(async () => initial.commerceOrders ?? []) };
       }
       if (entity === Payment) {
         return {
@@ -389,6 +395,46 @@ describe('SalesService', () => {
       },
     ]);
     expect(list.sales[0].sale.payments).toEqual(detail.sale.payments);
+    expect(detail.sale.commerce).toBeNull();
+    expect(list.sales[0].sale.commerce).toBeNull();
+  });
+
+  it('exposes existing web orders in detail and mixed lists without creating cash payments', async () => {
+    const webSale = {
+      saleID: 'web-sale',
+      tenantID: 'tenant-1',
+      storeID: 'store-1',
+      items: [],
+      store: { storeID: 'store-1' },
+    };
+    const posSale = { ...webSale, saleID: 'pos-sale' };
+    ctx = createManagerMock({
+      sale: webSale,
+      sales: [webSale, posSale],
+      commerceOrders: [
+        {
+          saleID: webSale.saleID,
+          paymentProvider: 'mercadopago',
+          isTest: true,
+        },
+      ],
+    });
+    dataSource.transaction.mockImplementation((callback) =>
+      callback(ctx.manager),
+    );
+    const service = createService();
+    const detail = await service.findOne(webSale.saleID, 'store-1');
+    const list = await service.findAll('store-1', {} as any);
+    expect(detail.sale.commerce).toEqual({
+      origin: 'WEB',
+      paymentProvider: 'mercadopago',
+      isTest: true,
+    });
+    expect(list.sales[0].sale.commerce).toEqual(detail.sale.commerce);
+    expect(list.sales[1].sale.commerce).toBeNull();
+    expect(detail.sale.payments).toEqual([]);
+    expect(ctx.manager.save).not.toHaveBeenCalled();
+    expect(financialMovementsService.recordSaleNote).not.toHaveBeenCalled();
   });
 
   it('forwards a manual discount to the pricing engine with the authenticated user', async () => {
@@ -402,6 +448,7 @@ describe('SalesService', () => {
         userID: 'user-1',
         manualDiscount: 10,
       }),
+      ctx.manager,
     );
   });
 
@@ -1169,5 +1216,150 @@ describe('SalesService', () => {
       expect(paymentsService.persistSalePayments).not.toHaveBeenCalled();
       expect(ctx.sale()).toMatchObject({ cashRegisterSessionID: null });
     });
+  });
+});
+
+describe('SalesService commerce transaction', () => {
+  function setupCommerce() {
+    const ctx = createManagerMock({
+      storeHasOpenfacturaKey: false,
+      storeAllowNegativeStock: true,
+    });
+    const original = ctx.manager.getRepository.getMockImplementation()!;
+    ctx.manager.getRepository.mockImplementation((entity) =>
+      entity === User
+        ? ({
+            findOne: jest.fn(async () => ({ userID: 'system-user' })),
+          } as never)
+        : original(entity),
+    );
+    const pricing = {
+      calculateCart: jest.fn(async () => ({
+        items: [
+          {
+            storeProductID: 'sp-1',
+            variationID: 'var-1',
+            productName: 'Producto A',
+            sku: 'SKU-1',
+            quantity: 1,
+            finalUnitPrice: 1190,
+            unitCost: 400,
+            lineTotal: 1190,
+            basePrice: 1190,
+          },
+        ],
+        totals: { subtotal: 1190, discount: 0, total: 1190 },
+      })),
+    };
+    const financial = {
+      recordSaleNote: jest.fn().mockResolvedValue(undefined),
+    };
+    const inventory = { reserveStock: jest.fn().mockResolvedValue(400) };
+    const dte = { create: jest.fn() };
+    const payments = {
+      resolveSalePayments: jest.fn(),
+      persistSalePayments: jest.fn(),
+    };
+    const dataSource = { transaction: jest.fn() };
+    const context = { getTenantId: () => 'tenant-1' };
+    const service = new SalesService(
+      {} as never,
+      {} as never,
+      {} as never,
+      dataSource as never,
+      pricing as never,
+      dte as never,
+      {} as never,
+      financial as never,
+      inventory as never,
+      undefined,
+      context as never,
+      undefined,
+      undefined,
+      payments as never,
+    );
+    return {
+      ...ctx,
+      service,
+      financial,
+      inventory,
+      dte,
+      payments,
+      dataSource,
+      pricing,
+    };
+  }
+  const input = {
+    items: [{ storeProductID: 'sp-1', quantity: 1 }],
+    receiver: {
+      name: 'Cliente Web',
+      email: 'web@example.test',
+      address: 'Calle 123',
+      city: 'Temuco',
+    },
+  };
+
+  it('stores buyer data and uses the supplied transaction for note, stock and income without Haulmer or a cash session', async () => {
+    const ctx = setupCommerce();
+    const result = await ctx.service.createCommerceSale(
+      ctx.manager as never,
+      'store-1',
+      input,
+      'commerce-key',
+      1190,
+    );
+    expect(result.sale).toMatchObject({
+      saleType: SaleType.NOTA_VENTA,
+      fmaPago: SaleFmaPago.CONTADO,
+      userID: 'system-user',
+      receiver: input.receiver,
+      cashRegisterSessionID: null,
+    });
+    expect(ctx.dataSource.transaction).not.toHaveBeenCalled();
+    expect(ctx.dte.create).not.toHaveBeenCalled();
+    expect(ctx.payments.resolveSalePayments).not.toHaveBeenCalled();
+    expect(ctx.inventory.reserveStock).toHaveBeenCalledWith(
+      ctx.manager,
+      'store-1',
+      [{ variationID: 'var-1', QtyItem: 1 }],
+      expect.any(String),
+      'tenant-1',
+      InventoryMovementReason.SALE,
+      false,
+    );
+    expect(ctx.financial.recordSaleNote).toHaveBeenCalledWith(
+      ctx.manager,
+      expect.objectContaining({ tenantID: 'tenant-1', storeID: 'store-1' }),
+    );
+  });
+
+  it('rejects a paid total that differs from ERP pricing before changing sale, stock or ledger', async () => {
+    const ctx = setupCommerce();
+    await expect(
+      ctx.service.createCommerceSale(
+        ctx.manager as never,
+        'store-1',
+        input,
+        'commerce-key',
+        1,
+      ),
+    ).rejects.toThrow('monto pagado');
+    expect(ctx.savedSales).toHaveLength(0);
+    expect(ctx.inventory.reserveStock).not.toHaveBeenCalled();
+    expect(ctx.financial.recordSaleNote).not.toHaveBeenCalled();
+  });
+  it('passes the active sale manager to pricing without acquiring a second transaction', async () => {
+    const ctx = setupCommerce();
+    await ctx.service.createCommerceSale(
+      ctx.manager as never,
+      'store-1',
+      input,
+      'commerce-key',
+      1190,
+    );
+    expect(ctx.pricing.calculateCart).toHaveBeenCalledWith(
+      expect.anything(),
+      ctx.manager,
+    );
   });
 });

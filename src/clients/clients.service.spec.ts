@@ -186,4 +186,14 @@ describe('ClientsService', () => {
       expect(mgr.save).toHaveBeenCalled();
     });
   });
+  it('uses the caller transaction when loading the client for a sale', async () => {
+    const transactionalRepository = {
+      findOne: jest.fn().mockResolvedValue(mockClient),
+    };
+    const manager = { getRepository: jest.fn(() => transactionalRepository) };
+    const result = await service.findOne(mockClient.clientID, manager as never);
+    expect(result.clientID).toBe(mockClient.clientID);
+    expect(manager.getRepository).toHaveBeenCalledWith(Client);
+    expect(repo.findOne).not.toHaveBeenCalled();
+  });
 });

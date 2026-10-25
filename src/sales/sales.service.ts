@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ConflictException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -32,8 +33,14 @@ import {
   DispatchGuideConsumptionItem,
   planConsumption,
 } from '../dispatch-guides/dispatch-guides-engine';
-import { Sale, SaleStatus, SaleType } from './entities/sale.entity';
+import {
+  Sale,
+  SaleStatus,
+  SaleType,
+  SaleFmaPago,
+} from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
+import { User } from '../users/entities/user.entity';
 import { SaleFolioCounter } from './entities/sale-folio-counter.entity';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import {
@@ -60,6 +67,7 @@ import {
   findStoreById,
   listSales,
   loadSale,
+  loadSaleCommerce,
   nextSaleFolio,
 } from './sales-repository.helpers';
 import { toSaleView } from './sales-view.mapper';
@@ -148,7 +156,7 @@ export class SalesService {
 
     if (this.clientsService) {
       if (clientID && !receiver) {
-        const client = await this.clientsService.findOne(clientID);
+        const client = await this.clientsService.findOne(clientID, manager);
         receiver = {
           rut: client.rut,
           name: client.name,
@@ -184,18 +192,21 @@ export class SalesService {
     validateFacturaReceiver(dto.saleType, receiver);
     validateClientRequirement(store, clientID);
 
-    const pricing = await this.pricingService.calculateCart({
-      storeID,
-      items: dto.items.map((item) => ({
-        storeProductID: item.storeProductID,
-        quantity: item.quantity,
-      })),
-      userID: userId ?? null,
-      ...(dto.manualDiscount !== undefined && dto.manualDiscount > 0
-        ? { manualDiscount: dto.manualDiscount }
-        : {}),
-      pricingDate: toDateOnly(dto.issueDate ?? new Date()),
-    });
+    const pricing = await this.pricingService.calculateCart(
+      {
+        storeID,
+        items: dto.items.map((item) => ({
+          storeProductID: item.storeProductID,
+          quantity: item.quantity,
+        })),
+        userID: userId ?? null,
+        ...(dto.manualDiscount !== undefined && dto.manualDiscount > 0
+          ? { manualDiscount: dto.manualDiscount }
+          : {}),
+        pricingDate: toDateOnly(dto.issueDate ?? new Date()),
+      },
+      manager,
+    );
 
     const prepared = buildPreparedSale(
       {
@@ -251,104 +262,157 @@ export class SalesService {
     userId: string | undefined,
     impersonatedBy?: string,
   ) {
-    return this.runInTransaction(async (manager) => {
-      if (idempotencyKey) {
-        const existing = await findSaleByIdempotencyKey(
-          manager,
-          idempotencyKey,
-        );
-        if (existing) {
-          if (existing.storeID !== storeID) {
-            throw new BadRequestException(
-              'La Idempotency-Key ya fue utilizada en otra tienda',
-            );
-          }
-          return toSaleView(await loadSale(manager, existing.saleID));
-        }
-      }
-
-      const { prepared, store } = await this.prepareSale(
+    return this.runInTransaction((manager) =>
+      this.persistNotaVenta(
         manager,
         storeID,
+        idempotencyKey,
         dto,
         userId,
-      );
-      const tenantID = this.tenantContext?.getTenantId();
-      const saleID = createSaleId();
-      const folio = await nextSaleFolio(manager, storeID, tenantID);
-      const resolvedPayments = await this.resolveSalePayments(
-        manager,
-        storeID,
-        dto,
-        prepared.total,
-        true,
-      );
+        impersonatedBy,
+      ),
+    );
+  }
 
-      const sale = createSaleEntity(manager, {
-        saleID,
-        tenantID,
-        storeID,
-        userID: userId!,
-        impersonatedBy: impersonatedBy ?? null,
-        saleType: SaleType.NOTA_VENTA,
-        status: SaleStatus.EMITIDA,
-        fmaPago: prepared.fmaPago,
-        folio,
-        issueDate: prepared.issueDate,
-        receiver: prepared.receiver,
-        clientID: prepared.clientID,
-        subtotal: prepared.subtotal,
-        discount: prepared.discount,
-        netTotal: prepared.netTotal,
-        taxTotal: prepared.taxTotal,
-        total: prepared.total,
-        cogsTotal: prepared.cogsTotal,
-        idempotencyKey: idempotencyKey ?? null,
-        cashRegisterSessionID: resolvedPayments?.session.sessionID ?? null,
-      });
-
-      await manager.save(sale);
-
-      await this.inventoryService.reserveStock(
-        manager,
-        storeID,
-        prepared.items.map((item) => ({
-          variationID: item.variationID,
-          QtyItem: item.quantity,
-        })),
-        saleID,
-        tenantID,
-        InventoryMovementReason.SALE,
-        store.allowNegativeStock === true,
-      );
-
-      await manager.save(
-        createSaleItems(manager, tenantID, saleID, prepared.items),
-      );
-
-      await this.financialMovementsService.recordSaleNote(manager, {
-        saleID,
-        tenantID: tenantID ?? sale.tenantID,
-        storeID,
-        issueDate: sale.issueDate,
-        netTotal: sale.netTotal,
-        taxTotal: sale.taxTotal,
-        cogsTotal: sale.cogsTotal,
-      });
-
-      if (resolvedPayments) {
-        await this.paymentsService!.persistSalePayments(
-          manager,
-          resolvedPayments,
-          {
-            saleID,
-            createdByUserID: userId ?? sale.userID,
-          },
-        );
-      }
-
-      return toSaleView(await loadSale(manager, saleID));
+  /** Used only by authenticated commerce orchestration; all writes share its transaction. */
+  async createCommerceSale(
+    manager: EntityManager,
+    storeID: string,
+    input: Pick<CreateSaleDto, 'items' | 'receiver' | 'issueDate'>,
+    idempotencyKey: string,
+    expectedTotal: number,
+  ) {
+    const tenantID = this.tenantContext?.getTenantId();
+    if (!tenantID)
+      throw new BadRequestException('Contexto tenant no disponible');
+    const systemUser = await manager.getRepository(User).findOne({
+      where: { tenantID, isSystem: true },
+      select: ['userID'],
     });
+    if (!systemUser)
+      throw new BadRequestException(
+        'El tenant no tiene un usuario de sistema configurado',
+      );
+    return this.persistNotaVenta(
+      manager,
+      storeID,
+      idempotencyKey,
+      { ...input, saleType: SaleType.NOTA_VENTA, fmaPago: SaleFmaPago.CONTADO },
+      systemUser.userID,
+      undefined,
+      expectedTotal,
+      true,
+    );
+  }
+
+  private async persistNotaVenta(
+    manager: EntityManager,
+    storeID: string,
+    idempotencyKey: string | undefined,
+    dto: CreateSaleDto,
+    userId: string | undefined,
+    impersonatedBy?: string,
+    expectedTotal?: number,
+    strictStock = false,
+  ) {
+    if (idempotencyKey) {
+      const existing = await findSaleByIdempotencyKey(manager, idempotencyKey);
+      if (existing) {
+        if (existing.storeID !== storeID) {
+          throw new BadRequestException(
+            'La Idempotency-Key ya fue utilizada en otra tienda',
+          );
+        }
+        return toSaleView(await loadSale(manager, existing.saleID));
+      }
+    }
+
+    const { prepared, store } = await this.prepareSale(
+      manager,
+      storeID,
+      dto,
+      userId,
+    );
+    if (expectedTotal !== undefined && prepared.total !== expectedTotal) {
+      throw new ConflictException(
+        'El monto pagado no coincide con el total calculado por el ERP',
+      );
+    }
+    const tenantID = this.tenantContext?.getTenantId();
+    const saleID = createSaleId();
+    const folio = await nextSaleFolio(manager, storeID, tenantID);
+    const resolvedPayments = await this.resolveSalePayments(
+      manager,
+      storeID,
+      dto,
+      prepared.total,
+      true,
+    );
+
+    const sale = createSaleEntity(manager, {
+      saleID,
+      tenantID,
+      storeID,
+      userID: userId!,
+      impersonatedBy: impersonatedBy ?? null,
+      saleType: SaleType.NOTA_VENTA,
+      status: SaleStatus.EMITIDA,
+      fmaPago: prepared.fmaPago,
+      folio,
+      issueDate: prepared.issueDate,
+      receiver: prepared.receiver,
+      clientID: prepared.clientID,
+      subtotal: prepared.subtotal,
+      discount: prepared.discount,
+      netTotal: prepared.netTotal,
+      taxTotal: prepared.taxTotal,
+      total: prepared.total,
+      cogsTotal: prepared.cogsTotal,
+      idempotencyKey: idempotencyKey ?? null,
+      cashRegisterSessionID: resolvedPayments?.session.sessionID ?? null,
+    });
+
+    await manager.save(sale);
+
+    await this.inventoryService.reserveStock(
+      manager,
+      storeID,
+      prepared.items.map((item) => ({
+        variationID: item.variationID,
+        QtyItem: item.quantity,
+      })),
+      saleID,
+      tenantID,
+      InventoryMovementReason.SALE,
+      strictStock ? false : store.allowNegativeStock === true,
+    );
+
+    await manager.save(
+      createSaleItems(manager, tenantID, saleID, prepared.items),
+    );
+
+    await this.financialMovementsService.recordSaleNote(manager, {
+      saleID,
+      tenantID: tenantID ?? sale.tenantID,
+      storeID,
+      issueDate: sale.issueDate,
+      netTotal: sale.netTotal,
+      taxTotal: sale.taxTotal,
+      cogsTotal: sale.cogsTotal,
+    });
+
+    if (resolvedPayments) {
+      await this.paymentsService!.persistSalePayments(
+        manager,
+        resolvedPayments,
+        {
+          saleID,
+          createdByUserID: userId ?? sale.userID,
+        },
+      );
+    }
+
+    return toSaleView(await loadSale(manager, saleID));
   }
 
   private async createElectronicSale(
@@ -643,8 +707,8 @@ export class SalesService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
 
-    const { sales, total } = await this.runInTransaction((manager) =>
-      listSales(
+    const { sales, total } = await this.runInTransaction(async (manager) => {
+      const result = await listSales(
         manager,
         storeID,
         query,
@@ -654,13 +718,17 @@ export class SalesService {
               ownerId: userId,
             }
           : undefined,
-      ),
-    );
+      );
+      const commerce = await loadSaleCommerce(manager, result.sales);
+      return {
+        sales: result.sales.map((sale) =>
+          toSaleView(sale, undefined, commerce.get(sale.saleID)),
+        ),
+        total: result.total,
+      };
+    });
 
-    return {
-      sales: sales.map((sale) => toSaleView(sale)),
-      meta: { page, limit, total },
-    };
+    return { sales, meta: { page, limit, total } };
   }
 
   async findOne(
@@ -678,7 +746,8 @@ export class SalesService {
             }
           : undefined;
       const sale = await loadSale(manager, saleID, storeID, ownership);
-      return toSaleView(sale);
+      const commerce = await loadSaleCommerce(manager, [sale]);
+      return toSaleView(sale, undefined, commerce.get(sale.saleID));
     });
   }
 

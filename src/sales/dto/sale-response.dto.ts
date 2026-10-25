@@ -353,6 +353,17 @@ export class DteDocumentSummaryDto {
   updatedAt!: Date;
 }
 
+export class SaleCommerceSummaryDto {
+  @ApiProperty({ enum: ['WEB'], description: 'Origen de la venta' })
+  origin!: 'WEB';
+
+  @ApiProperty({ example: 'mercadopago' })
+  paymentProvider!: string;
+
+  @ApiProperty({ description: 'Pago realizado con una cuenta de prueba' })
+  isTest!: boolean;
+}
+
 export class SaleDto {
   @ApiProperty({
     description: 'ID de la venta',
@@ -399,6 +410,14 @@ export class SaleDto {
     type: [SalePaymentDto],
   })
   payments!: SalePaymentDto[];
+
+  @ApiPropertyOptional({
+    type: SaleCommerceSummaryDto,
+    nullable: true,
+    description:
+      'Origen y proveedor del pedido web; null para ventas presenciales. Disponible en listado y detalle.',
+  })
+  commerce?: SaleCommerceSummaryDto | null;
 
   @ApiProperty({
     description: 'Folio de la venta (null en notas de venta sin convertir)',
