@@ -67,6 +67,7 @@ import {
   findStoreById,
   listSales,
   loadSale,
+  loadSaleCommerce,
   nextSaleFolio,
 } from './sales-repository.helpers';
 import { toSaleView } from './sales-view.mapper';
@@ -706,8 +707,8 @@ export class SalesService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
 
-    const { sales, total } = await this.runInTransaction((manager) =>
-      listSales(
+    const { sales, total } = await this.runInTransaction(async (manager) => {
+      const result = await listSales(
         manager,
         storeID,
         query,
@@ -717,13 +718,17 @@ export class SalesService {
               ownerId: userId,
             }
           : undefined,
-      ),
-    );
+      );
+      const commerce = await loadSaleCommerce(manager, result.sales);
+      return {
+        sales: result.sales.map((sale) =>
+          toSaleView(sale, undefined, commerce.get(sale.saleID)),
+        ),
+        total: result.total,
+      };
+    });
 
-    return {
-      sales: sales.map((sale) => toSaleView(sale)),
-      meta: { page, limit, total },
-    };
+    return { sales, meta: { page, limit, total } };
   }
 
   async findOne(
@@ -741,7 +746,8 @@ export class SalesService {
             }
           : undefined;
       const sale = await loadSale(manager, saleID, storeID, ownership);
-      return toSaleView(sale);
+      const commerce = await loadSaleCommerce(manager, [sale]);
+      return toSaleView(sale, undefined, commerce.get(sale.saleID));
     });
   }
 

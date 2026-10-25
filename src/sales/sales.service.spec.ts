@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { SalesService } from './sales.service';
+import { CommerceOrder } from '../commerce/entities/commerce-order.entity';
 import { User } from '../users/entities/user.entity';
 import {
   Sale,
@@ -35,6 +36,7 @@ function createManagerMock(
     dispatchGuides?: any[];
     consumedReferenceItems?: any[];
     payments?: any[];
+    commerceOrders?: Partial<CommerceOrder>[];
     sales?: any[];
   } = {},
 ) {
@@ -184,6 +186,9 @@ function createManagerMock(
         return {
           find: jest.fn(async () => consumedReferenceItems),
         };
+      }
+      if (entity === CommerceOrder) {
+        return { find: jest.fn(async () => initial.commerceOrders ?? []) };
       }
       if (entity === Payment) {
         return {
@@ -390,6 +395,46 @@ describe('SalesService', () => {
       },
     ]);
     expect(list.sales[0].sale.payments).toEqual(detail.sale.payments);
+    expect(detail.sale.commerce).toBeNull();
+    expect(list.sales[0].sale.commerce).toBeNull();
+  });
+
+  it('exposes existing web orders in detail and mixed lists without creating cash payments', async () => {
+    const webSale = {
+      saleID: 'web-sale',
+      tenantID: 'tenant-1',
+      storeID: 'store-1',
+      items: [],
+      store: { storeID: 'store-1' },
+    };
+    const posSale = { ...webSale, saleID: 'pos-sale' };
+    ctx = createManagerMock({
+      sale: webSale,
+      sales: [webSale, posSale],
+      commerceOrders: [
+        {
+          saleID: webSale.saleID,
+          paymentProvider: 'mercadopago',
+          isTest: true,
+        },
+      ],
+    });
+    dataSource.transaction.mockImplementation((callback) =>
+      callback(ctx.manager),
+    );
+    const service = createService();
+    const detail = await service.findOne(webSale.saleID, 'store-1');
+    const list = await service.findAll('store-1', {} as any);
+    expect(detail.sale.commerce).toEqual({
+      origin: 'WEB',
+      paymentProvider: 'mercadopago',
+      isTest: true,
+    });
+    expect(list.sales[0].sale.commerce).toEqual(detail.sale.commerce);
+    expect(list.sales[1].sale.commerce).toBeNull();
+    expect(detail.sale.payments).toEqual([]);
+    expect(ctx.manager.save).not.toHaveBeenCalled();
+    expect(financialMovementsService.recordSaleNote).not.toHaveBeenCalled();
   });
 
   it('forwards a manual discount to the pricing engine with the authenticated user', async () => {
