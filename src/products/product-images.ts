@@ -49,7 +49,8 @@ export function IsProductImageList(
     });
 }
 
-export function hasWebContent(
+/** Editorial fields do not control publication; only the channel photo policy applies. */
+export function meetsChannelPhotoPolicy(
   product: {
     image?: string | null;
     slug?: string | null;
@@ -57,10 +58,7 @@ export function hasWebContent(
   },
   requireProductPhoto = true,
 ): boolean {
-  return Boolean(
-    product.slug?.trim() &&
-    product.description?.trim() &&
-    (!requireProductPhoto ||
-      productImages(product.image).some(isProductImageUrl)),
+  return (
+    !requireProductPhoto || productImages(product.image).some(isProductImageUrl)
   );
 }

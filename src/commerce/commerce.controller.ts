@@ -14,6 +14,7 @@ import {
   CommerceQuoteResponseDto,
 } from './dto/catalog-response.dto';
 import { CommerceQuoteDto } from './dto/quote.dto';
+import { CommerceContextResponseDto } from './dto/commerce-context-response.dto';
 
 type ChannelRequest = FastifyRequest & {
   user: {
@@ -22,6 +23,8 @@ type ChannelRequest = FastifyRequest & {
     channelCode: string;
     channelName: string;
     domain: string | null;
+    salesEnabled: boolean;
+    acceptTestPayments: boolean;
     requireProductPhoto: boolean;
     tenantId: string;
     storeId: string;
@@ -36,6 +39,7 @@ export class CommerceController {
   constructor(private readonly commerce: CommerceService) {}
 
   @Get('context')
+  @ApiOkResponse({ type: CommerceContextResponseDto })
   @ApiOperation({
     summary: 'Verificar la vinculación del canal con tenant y tienda',
   })
@@ -46,6 +50,8 @@ export class CommerceController {
       channelCode: request.user.channelCode,
       channelName: request.user.channelName,
       domain: request.user.domain,
+      salesEnabled: request.user.salesEnabled === true,
+      acceptTestPayments: request.user.acceptTestPayments === true,
       requireProductPhoto: request.user.requireProductPhoto !== false,
     };
   }
@@ -55,7 +61,7 @@ export class CommerceController {
   @ApiOperation({
     summary: 'Catalogo y stock de la tienda vinculada',
     description:
-      'Requiere descripcion y slug. La foto HTTP/HTTPS es obligatoria solo si requireProductPhoto esta activado en el canal (por defecto true). image contiene hasta cinco URLs separadas por comas, o una cadena vacia si no hay fotos. Sin requisito de categoria ni de stock positivo.',
+      'Descripcion y slug son opcionales: si falta el slug, devuelve una URL estable basada en productID. La foto HTTP/HTTPS solo es obligatoria si requireProductPhoto esta activado. Incluye productos sin precio calculable y agotados; las validaciones de compra se aplican al cotizar.',
   })
   catalog(@Req() request: ChannelRequest) {
     return this.commerce.catalog(
@@ -69,7 +75,7 @@ export class CommerceController {
   @ApiOperation({
     summary: 'Cotizar productos de la tienda vinculada',
     description:
-      'Cada item incluye storeProductID, sku, name, image (portada o null), size, color, quantity, unitPrice, lineTotal y available. Aplica la misma politica requireProductPhoto del catalogo; productos sin descripcion o slug, o sin foto si el canal la exige: 400.',
+      'Cada item incluye storeProductID, sku, name, image (portada o null), size, color, quantity, unitPrice, lineTotal y available. No exige descripcion ni slug. Aplica la politica requireProductPhoto del canal y conserva el motor de precios y las comprobaciones de stock y tienda.',
   })
   quote(@Req() request: ChannelRequest, @Body() dto: CommerceQuoteDto) {
     return this.commerce.quote(

@@ -13,7 +13,11 @@ export class CommerceCatalogVariantDto {
 
 export class CommerceCatalogProductDto {
   @ApiProperty({ format: 'uuid' }) productID!: string;
-  @ApiProperty() slug!: string;
+  @ApiProperty({
+    description:
+      'Slug del ERP o producto-{productID} cuando falta. No modifica el producto guardado.',
+  })
+  slug!: string;
   @ApiProperty() name!: string;
   @ApiProperty({ type: String, nullable: true }) brand!: string | null;
   @ApiProperty({ type: String, nullable: true }) description!: string | null;
