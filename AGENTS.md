@@ -180,6 +180,29 @@ Reglas:
 - Definir relaciones con `@ManyToOne`, `@OneToMany`, `@OneToOne`, `@JoinColumn` siguiendo entidades cercanas.
 - Para operaciones que cambian varias tablas o mutan datos de negocio, envolver en la infraestructura de transaccion multitenant (`TenantContextService`).
 
+### Aviso obligatorio y pasos para aplicar migraciones
+
+Cuando un cambio cree o modifique tablas, columnas, indices, constraints, permisos, politicas RLS o datos mediante una migracion, el agente debe avisar al usuario durante el trabajo y volver a indicarlo en la entrega final. Esto tambien aplica si el cambio depende de una migracion existente cuya aplicacion no esta confirmada en el entorno destino.
+
+El aviso debe incluir:
+
+- Nombre y archivo de cada migracion requerida, su efecto y si debe aplicarse antes de desplegar o iniciar la nueva version del backend.
+- Estado por entorno: desarrollo y produccion se verifican y migran por separado. No asumir que una migracion aplicada en uno tambien esta aplicada en el otro.
+- Pasos concretos y comandos copiables para la terminal que usa el usuario (Git Bash, PowerShell, etc.), sin mezclar sintaxis de shells.
+- Verificacion final: `migration:show` debe mostrar las migraciones requeridas con `[X]`, seguida de una comprobacion del comportamiento afectado en el entorno correspondiente.
+
+Los pasos deben contemplar, en este orden:
+
+1. Compilar con `npm run build` o `pnpm build`, porque el CLI usa los archivos de `dist`.
+2. Seleccionar explicitamente la base del entorno destino mediante `MIGRATION_DATABASE_URL`, con la conexion PostgreSQL del propietario de esa misma base. Desde la PC del usuario, usar una conexion publica accesible; el dominio HTTP del backend no es una URL de PostgreSQL. Solicitar el ingreso de credenciales de forma oculta en la terminal, nunca pegarlas en el chat ni incluirlas en los comandos como texto visible.
+3. Ejecutar `npm run migration:show` o `pnpm migration:show` y revisar las pendientes. Aclarar que `migration:run` aplica todas las pendientes, no solamente la migracion de la feature.
+4. Ejecutar `npm run migration:run` o `pnpm migration:run`. Si falla un paso, detener la secuencia y revisar el error antes de continuar.
+5. Volver a ejecutar `migration:show`, comprobar el comportamiento afectado y limpiar la variable temporal de conexion al terminar. Repetir el procedimiento para cada entorno que lo requiera.
+
+No dar por aplicada una migracion solo por haber creado el archivo, compilado, pasado tests o desplegado codigo. Si no hay evidencia de ejecucion exitosa en el entorno destino, indicar explicitamente **migracion pendiente de aplicar o verificar**, junto con los pasos anteriores; no presentar la funcionalidad como lista para ese entorno. Si la migracion figura con `[X]` pero faltan sus tablas o columnas, revisar la conexion, el esquema y el historial antes de intentar repararla.
+
+No usar `migration:fresh`, `schema:drop` ni `synchronize: true` para resolver migraciones pendientes en bases existentes. La conexion privilegiada de migraciones no debe reemplazar la conexion de runtime ni ampliar los permisos de `app_runtime`.
+
 ## Arquitectura Multitenant y Row-Level Security (RLS)
 
 El aislamiento entre tenants se garantiza en la capa de base de datos PostgreSQL mediante **Row-Level Security (RLS)** asistido por el runtime NestJS.
@@ -408,3 +431,4 @@ No hardcodear secretos ni URLs productivas nuevas.
 - Mantuve respuesta compatible con interceptor global.
 - Corri `pnpm exec tsc --noEmit` para verificar la ausencia de errores TypeScript.
 - Agregue o actualice tests si la logica es sensible.
+- Si el cambio requiere migraciones, avise al usuario, detalle su estado por entorno y entregue los comandos para aplicarlas y verificarlas. Marque explicitamente cualquier ejecucion o verificacion pendiente.
