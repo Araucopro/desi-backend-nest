@@ -22,6 +22,8 @@ type SetupOptions = {
   channelStoreID?: string;
   channelEnabled?: boolean;
   requireProductPhoto?: boolean;
+  salesEnabled?: boolean;
+  acceptTestPayments?: boolean;
 };
 
 function setupAuthGuard(options: SetupOptions = {}) {
@@ -87,6 +89,8 @@ function setupAuthGuard(options: SetupOptions = {}) {
                       .update(CHANNEL_TOKEN)
                       .digest('hex'),
                     active: true,
+                    salesEnabled: options.salesEnabled,
+                    acceptTestPayments: options.acceptTestPayments,
                     requireProductPhoto: options.requireProductPhoto,
                   },
             ),
@@ -206,6 +210,8 @@ describe('AuthGuard', () => {
       channelCode: 'DESI_WEB',
       channelName: 'desi.cl',
       domain: 'www.desi.cl',
+      salesEnabled: false,
+      acceptTestPayments: false,
       requireProductPhoto: true,
       tenantId: '5323b94c-bea8-40fd-aac4-efdb6efcd75c',
       storeId: 'ad191d2e-934b-4ec7-9792-c91a758d7336',
@@ -220,6 +226,20 @@ describe('AuthGuard', () => {
     });
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.user).toMatchObject({ requireProductPhoto: false });
+  });
+
+  it('loads sales permissions from the authenticated channel record', async () => {
+    const { guard, context, request } = setupAuthGuard({
+      isChannel: true,
+      channelToken: CHANNEL_TOKEN,
+      salesEnabled: true,
+      acceptTestPayments: false,
+    });
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(request.user).toMatchObject({
+      salesEnabled: true,
+      acceptTestPayments: false,
+    });
   });
 
   it('resolves a second channel to a different tenant without ERP env changes', async () => {

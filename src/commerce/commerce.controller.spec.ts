@@ -2,6 +2,28 @@ import { CommerceController } from './commerce.controller';
 
 // The binding is populated by AuthGuard from the channel record, never from checkout data.
 describe('CommerceController channel photo policy', () => {
+  it.each([true, false])(
+    'returns the authenticated sales permissions in channel context: %s',
+    async (acceptTestPayments) => {
+      const service = {
+        context: jest.fn().mockResolvedValue({
+          tenantID: 'tenant-1',
+          storeID: 'store-1',
+          storeName: 'Store',
+        }),
+      };
+      const controller = new CommerceController(service as never);
+      const request = {
+        user: { storeId: 'store-1', salesEnabled: true, acceptTestPayments },
+      } as never;
+      await expect(controller.context(request)).resolves.toMatchObject({
+        tenantID: 'tenant-1',
+        storeID: 'store-1',
+        salesEnabled: true,
+        acceptTestPayments,
+      });
+    },
+  );
   it.each([true, false, undefined])(
     'forwards the authenticated policy to both listing and quoting: %s',
     async (requireProductPhoto) => {
