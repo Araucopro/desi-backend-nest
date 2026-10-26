@@ -6,7 +6,7 @@ comercios ni de todas las tiendas del tenant.
 
 - `true` (valor inicial de canales nuevos y existentes): exige al menos una foto HTTP/HTTPS.
 - `false`: permite publicar y cotizar productos sin foto.
-- Descripcion y slug siguen siendo obligatorios. Precio, margen y stock conservan sus validaciones.
+- Descripcion y slug son opcionales. Si falta el slug, el catalogo devuelve `producto-{productID}` sin modificar la base de datos. Precio, margen y stock conservan sus validaciones al comprar.
 
 ## Contrato
 
@@ -30,6 +30,10 @@ El ecommerce confia en la publicacion del ERP y muestra su imagen provisional
 local en catalogo, ficha y carrito. No usa fotos de productos mockeadas.
 
 ## Despliegue
+
+La publicacion sin descripcion ni slug no requiere nuevas migraciones. Desplegar
+el backend ERP y el frontend ecommerce actualizados. La politica de fotos sigue
+usando la columna existente `requireProductPhoto`.
 
 1. Compilar el ERP backend. En Railway, `railway.json` ejecuta las migraciones
    pendientes antes de arrancar, incluida `AddChannelPhotoRequirement1792965600000`.

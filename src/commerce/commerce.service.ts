@@ -11,7 +11,7 @@ import { StoreProductService } from '../relations/storeproduct/storeproduct.serv
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { Store } from '../stores/entities/store.entity';
 import {
-  hasWebContent,
+  meetsChannelPhotoPolicy,
   productImages,
   isProductImageUrl,
 } from '../products/product-images';
@@ -51,13 +51,15 @@ export class CommerceService {
     await this.context(storeId);
     const products = await this.inventory.getStoreInventory(storeId);
     return products
-      .filter((product) => hasWebContent(product, requireProductPhoto))
+      .filter((product) =>
+        meetsChannelPhotoPolicy(product, requireProductPhoto),
+      )
       .map((product) => ({
         productID: product.productID,
-        slug: product.slug,
+        slug: product.slug?.trim() || `producto-${product.productID}`,
         name: product.name,
         brand: product.brand ?? null,
-        description: product.description ?? null,
+        description: product.description?.trim() || null,
         image: productImages(product.image)
           .filter(isProductImageUrl)
           .slice(0, 5)
@@ -125,7 +127,7 @@ export class CommerceService {
       stock.some(
         (item) =>
           !item.variation?.product ||
-          !hasWebContent(item.variation.product, requireProductPhoto),
+          !meetsChannelPhotoPolicy(item.variation.product, requireProductPhoto),
       )
     ) {
       throw new BadRequestException(

@@ -13,7 +13,7 @@ export class CommerceChannelResponseDto {
   @ApiProperty({
     default: true,
     description:
-      'Exigir foto para publicar y cotizar. Descripcion, slug y precio valido siguen siendo obligatorios.',
+      'Exigir foto para publicar y cotizar. Descripcion y slug son opcionales; la compra requiere precio y stock validos.',
   })
   requireProductPhoto!: boolean;
   @ApiProperty({ format: 'date-time' }) createdAt!: Date;

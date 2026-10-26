@@ -87,7 +87,7 @@ describe('CommerceService catalog content', () => {
       } as never,
     );
   }
-  it('hides incomplete content and includes a sold-out product without category', async () => {
+  it('includes products without editorial fields and sold-out products without category', async () => {
     const commerce = service([
       product,
       { ...product, image: '' },
@@ -95,12 +95,14 @@ describe('CommerceService catalog content', () => {
       { ...product, slug: '' },
     ]);
     const catalog = await commerce.catalog(storeID);
-    expect(catalog).toHaveLength(1);
+    expect(catalog).toHaveLength(3);
     expect(catalog[0]).toMatchObject({
       productID: 'product-1',
       category: null,
       variants: [{ stock: 0, price: 5000 }],
     });
+    expect(catalog[1].description).toBeNull();
+    expect(catalog[2].slug).toBe('producto-product-1');
   });
   it('permits missing photos only for the channel with the requirement disabled', async () => {
     const commerce = service([
@@ -109,7 +111,7 @@ describe('CommerceService catalog content', () => {
       { ...product, image: null, slug: ' ' },
     ]);
     const optional = await commerce.catalog(storeID, false);
-    expect(optional).toHaveLength(1);
+    expect(optional).toHaveLength(3);
     expect(optional[0].image).toBe('');
     // A different channel using the same store retains its own strict policy.
     expect(await commerce.catalog(storeID, true)).toEqual([]);
@@ -143,7 +145,7 @@ describe('CommerceService catalog content', () => {
   });
 
   it.each([{ slug: '' }, { description: ' ' }])(
-    'still rejects incomplete web content with optional photos: %s',
+    'quotes products without optional editorial fields: %s',
     async (missing) => {
       const commerce = service(
         [],
@@ -164,9 +166,42 @@ describe('CommerceService catalog content', () => {
           { items: [{ storeProductID: 'sp-1', quantity: 1 }] },
           false,
         ),
-      ).rejects.toThrow('no longer available');
+      ).resolves.toMatchObject({
+        items: [{ unitPrice: 5000, available: true }],
+      });
     },
   );
+
+  it('returns every store product without a fixed limit or editorial requirements', async () => {
+    const products = Array.from({ length: 339 }, (_, index) => ({
+      ...product,
+      productID: `product-${index}`,
+      slug: '',
+      description: null,
+      image: null,
+    }));
+    const catalog = await service(products).catalog(storeID, false);
+    expect(catalog).toHaveLength(339);
+    expect(new Set(catalog.map((item) => item.slug)).size).toBe(339);
+    expect(products[0].slug).toBe('');
+  });
+
+  it('keeps products with a pricing error visible without inventing a sale price', async () => {
+    const noPrice = {
+      ...product,
+      variations: [
+        {
+          ...product.variations[0],
+          storeProducts: [
+            { storeProductID: 'sp-1', stock: 10, pricingError: 'No price' },
+          ],
+        },
+      ],
+    };
+    const catalog = await service([noPrice]).catalog(storeID);
+    expect(catalog).toHaveLength(1);
+    expect(catalog[0].variants[0].price).toBeNull();
+  });
 
   it('quotes authoritative product metadata for the purchase receipt', async () => {
     const commerce = service(

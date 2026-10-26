@@ -3,7 +3,7 @@ import { validateSync } from 'class-validator';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { BulkProductItemDto } from './dto/create-products-bulk.dto';
-import { hasWebContent, isProductImageList } from './product-images';
+import { meetsChannelPhotoPolicy, isProductImageList } from './product-images';
 
 const photo = 'https://res.cloudinary.com/demo/image/upload/boot.jpg';
 describe('ERP product photos and web publication', () => {
@@ -46,27 +46,35 @@ describe('ERP product photos and web publication', () => {
       ).toBe(true);
     }
   });
-  it('allows optional photos but always requires description and slug', () => {
+  it('does not require editorial fields when the channel permits missing photos', () => {
     const product = { slug: 'boot', description: 'Ready', image: '' };
-    expect(hasWebContent(product, false)).toBe(true);
-    expect(hasWebContent(product)).toBe(false);
-    expect(hasWebContent({ ...product, slug: ' ' }, false)).toBe(false);
-    expect(hasWebContent({ ...product, description: ' ' }, false)).toBe(false);
+    expect(meetsChannelPhotoPolicy(product, false)).toBe(true);
+    expect(meetsChannelPhotoPolicy(product)).toBe(false);
+    expect(meetsChannelPhotoPolicy({ ...product, slug: ' ' }, false)).toBe(
+      true,
+    );
+    expect(
+      meetsChannelPhotoPolicy({ ...product, description: ' ' }, false),
+    ).toBe(true);
   });
-  it('allows inventory drafts but requires all three web fields to publish', () => {
+  it('enforces only the explicit photo policy, independently of description or slug', () => {
     expect(isProductImageList('')).toBe(true);
     expect(
-      hasWebContent({ image: photo, slug: 'boot', description: 'Ready' }),
+      meetsChannelPhotoPolicy({
+        image: photo,
+        slug: 'boot',
+        description: 'Ready',
+      }),
     ).toBe(true);
-    for (const missing of [{ image: '' }, { slug: ' ' }, { description: '' }]) {
+    for (const missing of [{ slug: ' ' }, { description: '' }]) {
       expect(
-        hasWebContent({
+        meetsChannelPhotoPolicy({
           image: photo,
           slug: 'boot',
           description: 'Ready',
           ...missing,
         }),
-      ).toBe(false);
+      ).toBe(true);
     }
   });
 });
