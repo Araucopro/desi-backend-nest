@@ -29,6 +29,17 @@ la nota en la UI; no se crea un DTE ni un tipo de documento nuevo.
 El tenant y la tienda salen exclusivamente del token del canal. No se aceptan
 tenantID ni storeID en el cuerpo. El token vive solo en el backend del ecommerce.
 
+`GET /internal/commerce/context` informa `salesEnabled` y `acceptTestPayments`
+desde el canal autenticado. El ecommerce debe consultarlos antes de crear una
+preferencia de pago: `salesEnabled=false` bloquea cualquier venta;
+`acceptTestPayments=false` bloquea las pruebas, pero permite ventas reales si
+`salesEnabled=true`. Permitir pruebas no bloquea las ventas reales. Estos
+permisos no cambian las credenciales ni el entorno de Mercado Pago. El ERP los
+revalida al registrar la venta, aunque cambien despues de iniciar el pago.
+
+Este agregado de campos de contexto no requiere migraciones. Desplegar el ERP
+actualizado antes del ecommerce que verifica estos permisos al iniciar el pago.
+
 ## POST /internal/commerce/sales
 
 Authorization: Bearer <token del canal>

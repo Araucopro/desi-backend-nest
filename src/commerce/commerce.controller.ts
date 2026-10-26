@@ -14,6 +14,7 @@ import {
   CommerceQuoteResponseDto,
 } from './dto/catalog-response.dto';
 import { CommerceQuoteDto } from './dto/quote.dto';
+import { CommerceContextResponseDto } from './dto/commerce-context-response.dto';
 
 type ChannelRequest = FastifyRequest & {
   user: {
@@ -22,6 +23,8 @@ type ChannelRequest = FastifyRequest & {
     channelCode: string;
     channelName: string;
     domain: string | null;
+    salesEnabled: boolean;
+    acceptTestPayments: boolean;
     requireProductPhoto: boolean;
     tenantId: string;
     storeId: string;
@@ -36,6 +39,7 @@ export class CommerceController {
   constructor(private readonly commerce: CommerceService) {}
 
   @Get('context')
+  @ApiOkResponse({ type: CommerceContextResponseDto })
   @ApiOperation({
     summary: 'Verificar la vinculación del canal con tenant y tienda',
   })
@@ -46,6 +50,8 @@ export class CommerceController {
       channelCode: request.user.channelCode,
       channelName: request.user.channelName,
       domain: request.user.domain,
+      salesEnabled: request.user.salesEnabled === true,
+      acceptTestPayments: request.user.acceptTestPayments === true,
       requireProductPhoto: request.user.requireProductPhoto !== false,
     };
   }
