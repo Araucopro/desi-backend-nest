@@ -6,6 +6,7 @@ import {
   IsUUID,
   Matches,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 
 export class CreateCommerceChannelDto {
@@ -40,6 +41,15 @@ export class CreateCommerceChannelDto {
   @IsOptional()
   @IsBoolean()
   acceptTestPayments?: boolean;
+
+  @ApiPropertyOptional({
+    default: true,
+    description:
+      'Exigir al menos una foto HTTP/HTTPS para publicar y cotizar productos en este canal.',
+  })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsBoolean()
+  requireProductPhoto?: boolean;
 }
 
 export class UpdateCommerceChannelDto {
@@ -73,4 +83,13 @@ export class UpdateCommerceChannelDto {
   @IsOptional()
   @IsBoolean()
   acceptTestPayments?: boolean;
+
+  @ApiPropertyOptional({
+    default: true,
+    description:
+      'Exigir al menos una foto HTTP/HTTPS para publicar y cotizar productos en este canal.',
+  })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsBoolean()
+  requireProductPhoto?: boolean;
 }

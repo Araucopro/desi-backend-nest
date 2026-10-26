@@ -47,46 +47,52 @@ export class CommerceService {
     };
   }
 
-  async catalog(storeId: string) {
+  async catalog(storeId: string, requireProductPhoto = true) {
     await this.context(storeId);
     const products = await this.inventory.getStoreInventory(storeId);
-    return products.filter(hasWebContent).map((product) => ({
-      productID: product.productID,
-      slug: product.slug,
-      name: product.name,
-      brand: product.brand ?? null,
-      description: product.description ?? null,
-      image: productImages(product.image)
-        .filter(isProductImageUrl)
-        .slice(0, 5)
-        .join(', '),
-      category: product.category?.name ?? null,
-      variants: (product.variations ?? []).flatMap((variation) =>
-        (variation.storeProducts ?? []).map((raw) => {
-          const storeProduct = raw as PricedStoreProduct;
-          return {
-            variationID: variation.variationID,
-            storeProductID: storeProduct.storeProductID,
-            sku: variation.sku,
-            size: variation.variation ?? null,
-            color: variation.subVariation ?? null,
-            stock: Math.max(0, Number(storeProduct.stock)),
-            compareAtPrice:
-              !storeProduct.pricingError &&
-              storeProduct.finalPrice !== undefined &&
-              Number(storeProduct.priceList) > storeProduct.finalPrice
-                ? Number(storeProduct.priceList)
-                : null,
-            price: storeProduct.pricingError
-              ? null
-              : (storeProduct.finalPrice ?? null),
-          };
-        }),
-      ),
-    }));
+    return products
+      .filter((product) => hasWebContent(product, requireProductPhoto))
+      .map((product) => ({
+        productID: product.productID,
+        slug: product.slug,
+        name: product.name,
+        brand: product.brand ?? null,
+        description: product.description ?? null,
+        image: productImages(product.image)
+          .filter(isProductImageUrl)
+          .slice(0, 5)
+          .join(', '),
+        category: product.category?.name ?? null,
+        variants: (product.variations ?? []).flatMap((variation) =>
+          (variation.storeProducts ?? []).map((raw) => {
+            const storeProduct = raw as PricedStoreProduct;
+            return {
+              variationID: variation.variationID,
+              storeProductID: storeProduct.storeProductID,
+              sku: variation.sku,
+              size: variation.variation ?? null,
+              color: variation.subVariation ?? null,
+              stock: Math.max(0, Number(storeProduct.stock)),
+              compareAtPrice:
+                !storeProduct.pricingError &&
+                storeProduct.finalPrice !== undefined &&
+                Number(storeProduct.priceList) > storeProduct.finalPrice
+                  ? Number(storeProduct.priceList)
+                  : null,
+              price: storeProduct.pricingError
+                ? null
+                : (storeProduct.finalPrice ?? null),
+            };
+          }),
+        ),
+      }));
   }
 
-  async quote(storeId: string, dto: CommerceQuoteDto) {
+  async quote(
+    storeId: string,
+    dto: CommerceQuoteDto,
+    requireProductPhoto = true,
+  ) {
     await this.context(storeId);
     const quantities = new Map<string, number>();
     for (const item of dto.items) {
@@ -118,7 +124,8 @@ export class CommerceService {
     if (
       stock.some(
         (item) =>
-          !item.variation?.product || !hasWebContent(item.variation.product),
+          !item.variation?.product ||
+          !hasWebContent(item.variation.product, requireProductPhoto),
       )
     ) {
       throw new BadRequestException(

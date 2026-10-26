@@ -23,6 +23,7 @@ export class CommerceChannel {
   @Column({ type: 'boolean', default: true }) active!: boolean;
   @Column({ type: 'boolean', default: false }) salesEnabled!: boolean;
   @Column({ type: 'boolean', default: false }) acceptTestPayments!: boolean;
+  @Column({ type: 'boolean', default: true }) requireProductPhoto!: boolean;
   @CreateDateColumn({ type: 'timestamp with time zone' }) createdAt!: Date;
   @UpdateDateColumn({ type: 'timestamp with time zone' }) updatedAt!: Date;
 }

@@ -24,7 +24,7 @@ export function isProductImageUrl(value: string): boolean {
   }
 }
 
-/** Empty photos are allowed in inventory; the commerce catalog requires one. */
+/** Empty photos are allowed in inventory; each channel chooses if they are required online. */
 export function isProductImageList(value: unknown): boolean {
   if (typeof value !== 'string' || value.length > 10000) return false;
   if (!value.trim()) return true;
@@ -49,14 +49,18 @@ export function IsProductImageList(
     });
 }
 
-export function hasWebContent(product: {
-  image?: string | null;
-  slug?: string | null;
-  description?: string | null;
-}): boolean {
+export function hasWebContent(
+  product: {
+    image?: string | null;
+    slug?: string | null;
+    description?: string | null;
+  },
+  requireProductPhoto = true,
+): boolean {
   return Boolean(
     product.slug?.trim() &&
     product.description?.trim() &&
-    productImages(product.image).some(isProductImageUrl),
+    (!requireProductPhoto ||
+      productImages(product.image).some(isProductImageUrl)),
   );
 }

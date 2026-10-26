@@ -19,7 +19,7 @@ export class CommerceCatalogProductDto {
   @ApiProperty({ type: String, nullable: true }) description!: string | null;
   @ApiProperty({
     description:
-      'Up to five comma-separated HTTP/HTTPS photo URLs, cover first.',
+      'Up to five comma-separated HTTP/HTTPS photo URLs, cover first. Empty when the channel allows products without photos.',
   })
   image!: string;
   @ApiProperty({ type: String, nullable: true }) category!: string | null;

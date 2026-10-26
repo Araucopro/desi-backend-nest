@@ -22,6 +22,7 @@ type ChannelRequest = FastifyRequest & {
     channelCode: string;
     channelName: string;
     domain: string | null;
+    requireProductPhoto: boolean;
     tenantId: string;
     storeId: string;
   };
@@ -45,6 +46,7 @@ export class CommerceController {
       channelCode: request.user.channelCode,
       channelName: request.user.channelName,
       domain: request.user.domain,
+      requireProductPhoto: request.user.requireProductPhoto !== false,
     };
   }
 
@@ -53,10 +55,13 @@ export class CommerceController {
   @ApiOperation({
     summary: 'Catalogo y stock de la tienda vinculada',
     description:
-      'Solo productos con foto HTTP/HTTPS, descripcion y slug. image contiene hasta cinco URLs separadas por comas. Sin requisito de categoria ni de stock positivo.',
+      'Requiere descripcion y slug. La foto HTTP/HTTPS es obligatoria solo si requireProductPhoto esta activado en el canal (por defecto true). image contiene hasta cinco URLs separadas por comas, o una cadena vacia si no hay fotos. Sin requisito de categoria ni de stock positivo.',
   })
   catalog(@Req() request: ChannelRequest) {
-    return this.commerce.catalog(request.user.storeId);
+    return this.commerce.catalog(
+      request.user.storeId,
+      request.user.requireProductPhoto !== false,
+    );
   }
 
   @Post('quote')
@@ -64,9 +69,13 @@ export class CommerceController {
   @ApiOperation({
     summary: 'Cotizar productos de la tienda vinculada',
     description:
-      'Cada item incluye storeProductID, sku, name, image (portada), size, color, quantity, unitPrice, lineTotal y available. Productos sin contenido web completo: 400.',
+      'Cada item incluye storeProductID, sku, name, image (portada o null), size, color, quantity, unitPrice, lineTotal y available. Aplica la misma politica requireProductPhoto del catalogo; productos sin descripcion o slug, o sin foto si el canal la exige: 400.',
   })
   quote(@Req() request: ChannelRequest, @Body() dto: CommerceQuoteDto) {
-    return this.commerce.quote(request.user.storeId, dto);
+    return this.commerce.quote(
+      request.user.storeId,
+      dto,
+      request.user.requireProductPhoto !== false,
+    );
   }
 }

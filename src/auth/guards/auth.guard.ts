@@ -192,6 +192,7 @@ export class AuthGuard implements CanActivate {
       channelCode: channel.code,
       channelName: channel.name,
       domain: channel.domain,
+      requireProductPhoto: channel.requireProductPhoto !== false,
       tenantId: channel.tenantID,
       storeId: channel.storeID,
     };

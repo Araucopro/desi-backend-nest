@@ -9,7 +9,17 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiTags,
+  ApiOkResponse,
+  ApiCreatedResponse,
+} from '@nestjs/swagger';
+import {
+  CommerceChannelResponseDto,
+  CommerceChannelWithTokenResponseDto,
+} from './dto/commerce-channel-response.dto';
 import { FastifyRequest } from 'fastify';
 import { MasterRoute } from '../auth/decorators/master.decorator';
 import { MasterAuthGuard } from '../auth/guards/master-auth.guard';
@@ -33,12 +43,14 @@ export class MasterCommerceController {
   constructor(private readonly channels: MasterCommerceService) {}
 
   @Get()
+  @ApiOkResponse({ type: [CommerceChannelResponseDto] })
   @ApiOperation({ summary: 'Listar canales ecommerce de un tenant' })
   list(@Param('tenantID', ParseUUIDPipe) tenantID: string) {
     return this.channels.list(tenantID);
   }
 
   @Post()
+  @ApiCreatedResponse({ type: CommerceChannelWithTokenResponseDto })
   @ApiOperation({
     summary: 'Asignar un ecommerce al tenant y emitir token una sola vez',
   })
@@ -56,8 +68,10 @@ export class MasterCommerceController {
   }
 
   @Patch(':channelID')
+  @ApiOkResponse({ type: CommerceChannelResponseDto })
   @ApiOperation({
-    summary: 'Cambiar tienda, nombre, dominio o estado del canal',
+    summary:
+      'Cambiar tienda, nombre, dominio, estado o politica de fotos del canal',
   })
   update(
     @Param('tenantID', ParseUUIDPipe) tenantID: string,
@@ -75,6 +89,7 @@ export class MasterCommerceController {
   }
 
   @Post(':channelID/rotate-token')
+  @ApiCreatedResponse({ type: CommerceChannelWithTokenResponseDto })
   @ApiOperation({
     summary: 'Invalidar token anterior y emitir uno nuevo una sola vez',
   })
