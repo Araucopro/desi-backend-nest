@@ -18,9 +18,12 @@ describe('MasterCommerceService provisioning', () => {
     const storeFindOne = jest
       .fn()
       .mockResolvedValue(storeBelongsToTenant ? { storeID, tenantID } : null);
+    const channelFindOne = jest.fn();
     const manager = {
       getRepository: jest.fn((entity: unknown) =>
-        entity === Store ? { findOne: storeFindOne } : { findOne: jest.fn() },
+        entity === Store
+          ? { findOne: storeFindOne }
+          : { findOne: channelFindOne },
       ),
       create: jest.fn((_entity: unknown, value: unknown) => value),
       save: jest.fn(
@@ -48,7 +51,7 @@ describe('MasterCommerceService provisioning', () => {
       tenants as never,
       tenantContext as never,
     );
-    return { service, channels, storeFindOne, tenantContext };
+    return { service, channels, storeFindOne, tenantContext, channelFindOne };
   }
 
   it('leaves tenants with no channel unchanged', async () => {
@@ -83,6 +86,7 @@ describe('MasterCommerceService provisioning', () => {
       active: true,
       salesEnabled: false,
       acceptTestPayments: false,
+      requireProductPhoto: true,
     });
     expect(created.token).toMatch(/^[0-9a-f-]{36}\.[0-9a-f]{64}$/);
     expect(created).not.toHaveProperty('tokenHash');
@@ -90,6 +94,77 @@ describe('MasterCommerceService provisioning', () => {
       expect.objectContaining({ tenantId: tenantID }),
       expect.any(Function),
     );
+  });
+
+  it('creates a channel with optional photos only when explicitly requested', async () => {
+    const { service } = setup();
+    const result = await service.create(
+      tenantID,
+      { ...dto, requireProductPhoto: false },
+      'master-1',
+      MasterRole.SUPER_ADMIN,
+    );
+    expect(result.requireProductPhoto).toBe(false);
+  });
+
+  it('updates only the selected tenant/channel and preserves unrelated settings', async () => {
+    const { service, channelFindOne } = setup();
+    const row = {
+      ...dto,
+      channelID: 'channel-1',
+      tenantID,
+      active: true,
+      salesEnabled: true,
+      acceptTestPayments: false,
+      requireProductPhoto: true,
+    };
+    channelFindOne.mockResolvedValue(row);
+    const result = await service.update(
+      tenantID,
+      'channel-1',
+      { requireProductPhoto: false },
+      'master-1',
+      MasterRole.SUPER_ADMIN,
+    );
+    expect(channelFindOne).toHaveBeenCalledWith({
+      where: { channelID: 'channel-1', tenantID },
+      lock: { mode: 'pessimistic_write' },
+    });
+    expect(result).toMatchObject({
+      requireProductPhoto: false,
+      salesEnabled: true,
+      acceptTestPayments: false,
+    });
+    const renamed = await service.update(
+      tenantID,
+      'channel-1',
+      { name: 'New name' },
+      'master-1',
+      MasterRole.SUPER_ADMIN,
+    );
+    expect(renamed.requireProductPhoto).toBe(false);
+    const restored = await service.update(
+      tenantID,
+      'channel-1',
+      { requireProductPhoto: true },
+      'master-1',
+      MasterRole.SUPER_ADMIN,
+    );
+    expect(restored.requireProductPhoto).toBe(true);
+  });
+
+  it('rejects a photo-policy update by a support master before accessing channel data', async () => {
+    const { service, channelFindOne } = setup();
+    await expect(
+      service.update(
+        tenantID,
+        'channel-1',
+        { requireProductPhoto: false },
+        'master-1',
+        MasterRole.SUPPORT,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(channelFindOne).not.toHaveBeenCalled();
   });
 
   it('allows only a master super admin to assign channels', async () => {

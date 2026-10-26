@@ -21,6 +21,7 @@ type SetupOptions = {
   channelTenantID?: string;
   channelStoreID?: string;
   channelEnabled?: boolean;
+  requireProductPhoto?: boolean;
 };
 
 function setupAuthGuard(options: SetupOptions = {}) {
@@ -86,6 +87,7 @@ function setupAuthGuard(options: SetupOptions = {}) {
                       .update(CHANNEL_TOKEN)
                       .digest('hex'),
                     active: true,
+                    requireProductPhoto: options.requireProductPhoto,
                   },
             ),
           }
@@ -204,9 +206,20 @@ describe('AuthGuard', () => {
       channelCode: 'DESI_WEB',
       channelName: 'desi.cl',
       domain: 'www.desi.cl',
+      requireProductPhoto: true,
       tenantId: '5323b94c-bea8-40fd-aac4-efdb6efcd75c',
       storeId: 'ad191d2e-934b-4ec7-9792-c91a758d7336',
     });
+  });
+
+  it('loads the photo policy from the authenticated channel record', async () => {
+    const { guard, context, request } = setupAuthGuard({
+      isChannel: true,
+      channelToken: CHANNEL_TOKEN,
+      requireProductPhoto: false,
+    });
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(request.user).toMatchObject({ requireProductPhoto: false });
   });
 
   it('resolves a second channel to a different tenant without ERP env changes', async () => {

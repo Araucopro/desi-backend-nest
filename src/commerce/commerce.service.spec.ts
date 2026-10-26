@@ -102,6 +102,72 @@ describe('CommerceService catalog content', () => {
       variants: [{ stock: 0, price: 5000 }],
     });
   });
+  it('permits missing photos only for the channel with the requirement disabled', async () => {
+    const commerce = service([
+      { ...product, image: null },
+      { ...product, image: null, description: ' ' },
+      { ...product, image: null, slug: ' ' },
+    ]);
+    const optional = await commerce.catalog(storeID, false);
+    expect(optional).toHaveLength(1);
+    expect(optional[0].image).toBe('');
+    // A different channel using the same store retains its own strict policy.
+    expect(await commerce.catalog(storeID, true)).toEqual([]);
+    expect(await commerce.catalog(storeID)).toEqual([]);
+  });
+
+  it('quotes a product without a photo when allowed, and rejects it after the requirement is restored', async () => {
+    const commerce = service(
+      [],
+      [
+        {
+          storeProductID: 'sp-1',
+          stock: 10,
+          variation: {
+            ...product.variations[0],
+            product: { ...product, image: '' },
+          },
+        },
+      ],
+    );
+    const dto = { items: [{ storeProductID: 'sp-1', quantity: 1 }] };
+    const quote = await commerce.quote(storeID, dto, false);
+    expect(quote.items[0]).toMatchObject({
+      image: null,
+      unitPrice: 5000,
+      available: true,
+    });
+    await expect(commerce.quote(storeID, dto, true)).rejects.toThrow(
+      'no longer available',
+    );
+  });
+
+  it.each([{ slug: '' }, { description: ' ' }])(
+    'still rejects incomplete web content with optional photos: %s',
+    async (missing) => {
+      const commerce = service(
+        [],
+        [
+          {
+            storeProductID: 'sp-1',
+            stock: 10,
+            variation: {
+              ...product.variations[0],
+              product: { ...product, image: '', ...missing },
+            },
+          },
+        ],
+      );
+      await expect(
+        commerce.quote(
+          storeID,
+          { items: [{ storeProductID: 'sp-1', quantity: 1 }] },
+          false,
+        ),
+      ).rejects.toThrow('no longer available');
+    },
+  );
+
   it('quotes authoritative product metadata for the purchase receipt', async () => {
     const commerce = service(
       [],

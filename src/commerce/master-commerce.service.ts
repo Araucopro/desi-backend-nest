@@ -46,6 +46,7 @@ export class MasterCommerceService {
       active: channel.active,
       salesEnabled: channel.salesEnabled,
       acceptTestPayments: channel.acceptTestPayments,
+      requireProductPhoto: channel.requireProductPhoto !== false,
       createdAt: channel.createdAt,
       updatedAt: channel.updatedAt,
     };
@@ -111,6 +112,7 @@ export class MasterCommerceService {
               active: true,
               salesEnabled: dto.salesEnabled ?? false,
               acceptTestPayments: dto.acceptTestPayments ?? false,
+              requireProductPhoto: dto.requireProductPhoto ?? true,
             });
             const saved = await manager.save(channel);
             await manager.save(
@@ -173,6 +175,8 @@ export class MasterCommerceService {
             row.salesEnabled = dto.salesEnabled;
           if (dto.acceptTestPayments !== undefined)
             row.acceptTestPayments = dto.acceptTestPayments;
+          if (dto.requireProductPhoto !== undefined)
+            row.requireProductPhoto = dto.requireProductPhoto;
           const saved = await manager.save(row);
           await manager.save(
             AuditEvent,

@@ -46,6 +46,13 @@ describe('ERP product photos and web publication', () => {
       ).toBe(true);
     }
   });
+  it('allows optional photos but always requires description and slug', () => {
+    const product = { slug: 'boot', description: 'Ready', image: '' };
+    expect(hasWebContent(product, false)).toBe(true);
+    expect(hasWebContent(product)).toBe(false);
+    expect(hasWebContent({ ...product, slug: ' ' }, false)).toBe(false);
+    expect(hasWebContent({ ...product, description: ' ' }, false)).toBe(false);
+  });
   it('allows inventory drafts but requires all three web fields to publish', () => {
     expect(isProductImageList('')).toBe(true);
     expect(
