@@ -22,6 +22,7 @@ import {
   SpecialOffer,
   SpecialOfferBundleItem,
   SpecialOfferProduct,
+  OfferSalesChannel,
 } from './entities/special-offer.entity';
 import { Category } from '../categories/entities/category.entity';
 import {
@@ -34,6 +35,7 @@ import { TenantContextService } from '../multitenant/tenant-context.service';
 import { TransactionRunnerService } from '../common/services/transaction-runner.service';
 import {
   matchesOffer,
+  matchesOfferCoverage,
   resolveOfferPriority,
   simulateOfferPrice,
   sortOffers,
@@ -42,6 +44,9 @@ import {
 } from './offer-engine';
 import type { OfferCartContext, OfferValidationInput } from './offer.types';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
+import { Store } from '../stores/entities/store.entity';
+import { Product } from '../products/entities/product.entity';
+import { CommerceChannel } from '../commerce/entities/commerce-channel.entity';
 
 export type {
   OfferCartContext,
@@ -90,6 +95,7 @@ export class OfferService {
     );
 
     return this.runInTransaction(async (manager) => {
+      await this.validateCoverage(manager, createSpecialOfferDto);
       const repository = manager.getRepository(SpecialOffer);
       const tenantID = this.tenantContext?.getTenantId();
       let bundleItemsToSave: Array<{
@@ -110,6 +116,11 @@ export class OfferService {
       const offer = repository.create({
         tenantID,
         description: createSpecialOfferDto.description,
+        storeIDs: createSpecialOfferDto.storeIDs ?? [],
+        salesChannels: createSpecialOfferDto.salesChannels ?? [
+          OfferSalesChannel.PHYSICAL,
+          OfferSalesChannel.ONLINE,
+        ],
         discountType: createSpecialOfferDto.discountType,
         value: createSpecialOfferDto.value,
         scope: createSpecialOfferDto.scope ?? DiscountScope.UNIT,
@@ -197,7 +208,10 @@ export class OfferService {
           updateSpecialOfferDto.storeID !== undefined
             ? updateSpecialOfferDto.storeID
             : (offer.storeID ?? null),
-        productIDs: updateSpecialOfferDto.productIDs ?? [],
+        productIDs:
+          updateSpecialOfferDto.productIDs ??
+          offer.productTargets?.map((target) => target.productID) ??
+          [],
         categoryID:
           updateSpecialOfferDto.categoryID !== undefined
             ? updateSpecialOfferDto.categoryID
@@ -225,7 +239,29 @@ export class OfferService {
         updateSpecialOfferDto.endDate ?? offer.endDate,
       );
 
+      if (
+        updateSpecialOfferDto.storeIDs !== undefined ||
+        updateSpecialOfferDto.salesChannels !== undefined ||
+        updateSpecialOfferDto.targetScope !== undefined ||
+        updateSpecialOfferDto.storeID !== undefined ||
+        updateSpecialOfferDto.storeProductID !== undefined ||
+        updateSpecialOfferDto.productIDs !== undefined ||
+        updateSpecialOfferDto.categoryID !== undefined
+      ) {
+        await this.validateCoverage(manager, {
+          ...config,
+          storeIDs: updateSpecialOfferDto.storeIDs ?? offer.storeIDs,
+          salesChannels:
+            updateSpecialOfferDto.salesChannels ?? offer.salesChannels,
+        });
+      }
       Object.assign(offer, {
+        ...(updateSpecialOfferDto.storeIDs !== undefined
+          ? { storeIDs: updateSpecialOfferDto.storeIDs }
+          : {}),
+        ...(updateSpecialOfferDto.salesChannels !== undefined
+          ? { salesChannels: updateSpecialOfferDto.salesChannels }
+          : {}),
         ...(updateSpecialOfferDto.description !== undefined
           ? { description: updateSpecialOfferDto.description }
           : {}),
@@ -355,7 +391,7 @@ export class OfferService {
     }
     if (filters.storeID) {
       query.andWhere(
-        '(offer.storeID = :storeID OR storeProduct.store.storeID = :storeID)',
+        '(offer.storeID = :storeID OR :storeID = ANY(offer."storeIDs") OR store.storeID = :storeID)',
         { storeID: filters.storeID },
       );
     }
@@ -477,6 +513,7 @@ export class OfferService {
         new Brackets((qb) =>
           qb
             .where('offer.storeID = :storeID')
+            .orWhere(':storeID = ANY(offer."storeIDs")')
             .orWhere('storeProduct.storeProductID IN (:...storeProductIDs)'),
         ),
       )
@@ -505,6 +542,7 @@ export class OfferService {
     }
 
     return offers
+      .filter((offer) => matchesOfferCoverage(offer, cartContext))
       .filter((offer) => {
         if (offer.discountType === DiscountType.BUNDLE) {
           if (offer.storeID !== cartContext.storeID) return false;
@@ -517,9 +555,7 @@ export class OfferService {
             bundleStoreProductIDs.has(item.storeProductID),
           );
         }
-        const matchesStore =
-          offer.storeID === cartContext.storeID ||
-          storeProductIDs.includes(offer.storeProductID ?? '');
+        const matchesStore = matchesOfferCoverage(offer, cartContext);
         if (!matchesStore) return false;
         return cartContext.items.some((item) =>
           matchesOffer(item, offer, categoryScopes),
@@ -578,6 +614,7 @@ export class OfferService {
           new Brackets((qb) =>
             qb
               .where('offer.storeID = :storeID')
+              .orWhere(':storeID = ANY(offer."storeIDs")')
               .orWhere('storeProduct.storeProductID IN (:...storeProductIDs)'),
           ),
         )
@@ -618,6 +655,7 @@ export class OfferService {
         for (const item of context.items) {
           const itemContext: OfferCartContext = { ...context, items: [item] };
           const applicable = offers
+            .filter((offer) => matchesOfferCoverage(offer, itemContext))
             .filter((offer) => {
               if (offer.discountType === DiscountType.BUNDLE) {
                 if (offer.storeID !== itemContext.storeID) return false;
@@ -629,9 +667,7 @@ export class OfferService {
                 return bundleStoreProductIDs.has(item.storeProductID);
               }
 
-              const matchesStore =
-                offer.storeID === itemContext.storeID ||
-                item.storeProductID === (offer.storeProductID ?? '');
+              const matchesStore = matchesOfferCoverage(offer, itemContext);
               return matchesStore && matchesOffer(item, offer, categoryScopes);
             })
             .filter((offer) => {
@@ -697,6 +733,117 @@ export class OfferService {
         .filter((item) => matchesOffer(item, offer, categoryScopes))
         .map((item) => item.storeProductID),
     );
+  }
+
+  async getOfferOptions() {
+    return this.runInTransaction(async (manager) => {
+      const tenantID = this.tenantContext!.getTenantId();
+      const stores = await manager
+        .getRepository(Store)
+        .find({
+          where: { tenantID },
+          select: ['storeID', 'name'],
+          order: { name: 'ASC' },
+        });
+      const channels = await manager
+        .getRepository(CommerceChannel)
+        .find({ where: { tenantID, active: true }, select: ['storeID'] });
+      const onlineStores = new Set(channels.map((channel) => channel.storeID));
+      return {
+        stores: stores.map((store) => ({
+          storeID: store.storeID,
+          name: store.name,
+          onlineEnabled: onlineStores.has(store.storeID),
+        })),
+        salesChannels: channels.length
+          ? [OfferSalesChannel.PHYSICAL, OfferSalesChannel.ONLINE]
+          : [OfferSalesChannel.PHYSICAL],
+      };
+    });
+  }
+
+  private async validateCoverage(
+    manager: EntityManager,
+    config: OfferValidationInput & {
+      storeIDs?: string[];
+      salesChannels?: OfferSalesChannel[];
+    },
+  ) {
+    if (config.storeIDs === undefined && config.salesChannels === undefined)
+      return;
+    const tenantID = this.tenantContext!.getTenantId();
+    const storeIDs = config.storeIDs?.length
+      ? config.storeIDs
+      : config.storeID
+        ? [config.storeID]
+        : [];
+    if (
+      !storeIDs.length ||
+      !config.storeID ||
+      !storeIDs.includes(config.storeID)
+    )
+      throw new BadRequestException(
+        'Selecciona sucursales e incluye la tienda de referencia',
+      );
+    const count = await manager
+      .getRepository(Store)
+      .count({ where: { tenantID, storeID: In(storeIDs) } });
+    if (count !== storeIDs.length)
+      throw new BadRequestException(
+        'Una o más sucursales no pertenecen a tu empresa',
+      );
+    if (
+      (config.targetScope === OfferTargetScope.VARIATION ||
+        config.discountType === DiscountType.BUNDLE) &&
+      storeIDs.length !== 1
+    )
+      throw new BadRequestException(
+        'Las variantes y combos aplican únicamente a su sucursal de origen',
+      );
+    if (config.storeProductID) {
+      const product = await manager
+        .getRepository(StoreProduct)
+        .findOne({
+          where: {
+            tenantID,
+            storeProductID: config.storeProductID,
+            store: { storeID: config.storeID },
+          },
+        });
+      if (!product)
+        throw new BadRequestException(
+          'El producto no pertenece a la sucursal seleccionada',
+        );
+    }
+    if (
+      config.productIDs?.length &&
+      config.targetScope === OfferTargetScope.PRODUCT
+    ) {
+      const count = await manager
+        .getRepository(Product)
+        .count({ where: { tenantID, productID: In(config.productIDs) } });
+      if (count !== new Set(config.productIDs).size)
+        throw new BadRequestException(
+          'Los productos deben pertenecer a tu empresa',
+        );
+    }
+    if (config.categoryID && config.targetScope === OfferTargetScope.CATEGORY) {
+      if (
+        !(await manager
+          .getRepository(Category)
+          .count({ where: { tenantID, categoryID: config.categoryID } }))
+      )
+        throw new BadRequestException('La categoría no pertenece a tu empresa');
+    }
+    if (config.salesChannels?.includes(OfferSalesChannel.ONLINE)) {
+      const count = await manager
+        .getRepository(CommerceChannel)
+        .count({ where: { tenantID, active: true, storeID: In(storeIDs) } });
+      if (!count)
+        throw new BadRequestException(
+          'No hay un ecommerce activo en las sucursales seleccionadas',
+        );
+    }
   }
 
   private async resolveBundleStoreProducts(

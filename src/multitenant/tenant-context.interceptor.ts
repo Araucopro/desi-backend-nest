@@ -46,6 +46,7 @@ export class TenantContextInterceptor implements NestInterceptor {
     return this.context.run(
       {
         tenantId,
+        salesChannel: payload?.type === 'channel' ? 'ONLINE' : 'PHYSICAL',
         timeZone,
         userId: payload?.userId ?? payload?.id,
         masterUserId: payload?.masterUserId,

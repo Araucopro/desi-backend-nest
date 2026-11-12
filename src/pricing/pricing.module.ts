@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PriceHistory } from './entities/price-history.entity';
+import { TenantOfferAdminGuard } from './tenant-offer-admin.guard';
 import { PricingService } from './pricing.service';
 import { PricingController } from './pricing.controller';
 import {
@@ -28,6 +29,7 @@ import { TransactionRunnerService } from '../common/services/transaction-runner.
   ],
   controllers: [PricingController],
   providers: [
+    TenantOfferAdminGuard,
     PricingService,
     OfferService,
     MarginValidator,

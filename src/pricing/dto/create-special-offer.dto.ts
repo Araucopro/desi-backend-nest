@@ -1,5 +1,8 @@
 import {
+  ValidateIf,
   IsArray,
+  ArrayNotEmpty,
+  ArrayUnique,
   IsBoolean,
   IsEnum,
   IsInt,
@@ -16,6 +19,7 @@ import {
   DiscountType,
   DiscountScope,
   OfferTargetScope,
+  OfferSalesChannel,
 } from '../entities/special-offer.entity';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -48,6 +52,31 @@ export class CreateSpecialOfferBundleItemDto {
 }
 
 export class CreateSpecialOfferDto {
+  @ApiPropertyOptional({
+    enum: OfferSalesChannel,
+    isArray: true,
+    description:
+      'Canales de venta habilitados. Omitido conserva ambos canales para compatibilidad.',
+  })
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsEnum(OfferSalesChannel, { each: true })
+  salesChannels?: OfferSalesChannel[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Sucursales del tenant donde aplica. Debe incluir storeID. VARIATION y BUNDLE admiten solo su tienda de origen. Omitido conserva la tienda original.',
+  })
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  storeIDs?: string[];
+
   @ApiPropertyOptional({
     description:
       'ID del producto en la tienda (StoreProduct). Obligatorio para targetScope VARIATION.',
