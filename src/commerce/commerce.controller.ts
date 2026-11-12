@@ -61,7 +61,7 @@ export class CommerceController {
   @ApiOperation({
     summary: 'Catalogo y stock de la tienda vinculada',
     description:
-      'Descripcion y slug son opcionales: si falta el slug, devuelve una URL estable basada en productID. La foto HTTP/HTTPS solo es obligatoria si requireProductPhoto esta activado. Incluye productos sin precio calculable y agotados; las validaciones de compra se aplican al cotizar.',
+      'Incluye promociones elegibles por variante, filtradas por canal online, tienda y vigencia. Descripcion y slug son opcionales: si falta el slug, devuelve una URL estable basada en productID. La foto HTTP/HTTPS solo es obligatoria si requireProductPhoto esta activado. Incluye productos sin precio calculable y agotados; las validaciones de compra se aplican al cotizar.',
   })
   catalog(@Req() request: ChannelRequest) {
     return this.commerce.catalog(
@@ -75,7 +75,7 @@ export class CommerceController {
   @ApiOperation({
     summary: 'Cotizar productos de la tienda vinculada',
     description:
-      'Cada item incluye storeProductID, sku, name, image (portada o null), size, color, quantity, unitPrice, lineTotal y available. No exige descripcion ni slug. Aplica la politica requireProductPhoto del canal y conserva el motor de precios y las comprobaciones de stock y tienda.',
+      'Cada item incluye baseUnitPrice, discount y promotions aplicadas. Un item gratis puede tener unitPrice y lineTotal iguales a cero. Cada item incluye storeProductID, sku, name, image (portada o null), size, color, quantity, unitPrice, lineTotal y available. No exige descripcion ni slug. Aplica la politica requireProductPhoto del canal y conserva el motor de precios y las comprobaciones de stock y tienda.',
   })
   quote(@Req() request: ChannelRequest, @Body() dto: CommerceQuoteDto) {
     return this.commerce.quote(

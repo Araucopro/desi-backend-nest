@@ -249,4 +249,30 @@ describe('CommerceService catalog content', () => {
       }),
     ).rejects.toThrow('no longer available');
   });
+
+  it('publishes the matched quantity promotion even before the customer completes a pair', async () => {
+    const promotion = {
+      offerID: 'offer-1',
+      discountType: 'BUY_X_GET_Y',
+      label: '2x1',
+      description: 'Calzado',
+      buyQuantity: 2,
+      payQuantity: 1,
+    };
+    const commerce = service([
+      {
+        ...product,
+        variations: product.variations.map((variation) => ({
+          ...variation,
+          storeProducts: variation.storeProducts.map((storeProduct) => ({
+            ...storeProduct,
+            promotions: [promotion],
+          })),
+        })),
+      },
+    ]);
+    const catalog = await commerce.catalog(storeID);
+    expect(catalog[0].variants[0].promotions).toEqual([promotion]);
+    expect(catalog[0].variants[0].price).toBe(5000);
+  });
 });

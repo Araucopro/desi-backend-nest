@@ -6,7 +6,10 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
+import { TenantOfferAdminGuard } from './tenant-offer-admin.guard';
+import { OfferOptionsResponseDto } from './dto/offer-options-response.dto';
 import { PricingService } from './pricing.service';
 import { OfferService } from './offer.service';
 import { UpdatePriceDto } from './dto/update-price.dto';
@@ -107,13 +110,26 @@ export class PricingController {
     return this.offerService.getSpecialOffers(query);
   }
 
+  @Get('offer-options')
+  @UseGuards(TenantOfferAdminGuard)
+  @ApiOperation({
+    summary:
+      'Alcances de descuentos disponibles para el administrador del tenant',
+  })
+  @ApiResponse({ status: 200, type: OfferOptionsResponseDto })
+  getOfferOptions() {
+    return this.offerService.getOfferOptions();
+  }
+
   @Post('offers')
+  @UseGuards(TenantOfferAdminGuard)
   @ApiOperation({ summary: 'Crear una oferta especial' })
   createOffer(@Body() createSpecialOfferDto: CreateSpecialOfferDto) {
     return this.offerService.createSpecialOffer(createSpecialOfferDto);
   }
 
   @Post('offers/:id')
+  @UseGuards(TenantOfferAdminGuard)
   @ApiOperation({ summary: 'Actualizar una oferta especial' })
   updateOffer(
     @Param('id', ParseUUIDPipe) id: string,

@@ -4,8 +4,13 @@ import {
   DiscountType,
   OfferTargetScope,
   SpecialOffer,
+  OfferSalesChannel,
 } from './entities/special-offer.entity';
-import { OfferCartItem, OfferValidationInput } from './offer.types';
+import {
+  OfferCartContext,
+  OfferCartItem,
+  OfferValidationInput,
+} from './offer.types';
 
 export function validateOfferConfiguration(
   config: OfferValidationInput,
@@ -180,6 +185,23 @@ export function sortOffers(left: SpecialOffer, right: SpecialOffer): number {
   return left.offerID.localeCompare(right.offerID);
 }
 
+export function matchesOfferCoverage(
+  offer: SpecialOffer,
+  context: OfferCartContext,
+): boolean {
+  const channel = context.salesChannel ?? OfferSalesChannel.PHYSICAL;
+  const channels = offer.salesChannels ?? [
+    OfferSalesChannel.PHYSICAL,
+    OfferSalesChannel.ONLINE,
+  ];
+  if (!channels.includes(channel)) return false;
+  if (offer.storeIDs?.length) return offer.storeIDs.includes(context.storeID);
+  return (
+    offer.storeID === context.storeID ||
+    context.items.some((item) => item.storeProductID === offer.storeProductID)
+  );
+}
+
 export function matchesOffer(
   item: OfferCartItem,
   offer: SpecialOffer,
@@ -187,7 +209,9 @@ export function matchesOffer(
 ): boolean {
   switch (offer.targetScope) {
     case OfferTargetScope.STORE:
-      return offer.storeID === item.storeID;
+      return offer.storeIDs?.length
+        ? offer.storeIDs.includes(item.storeID)
+        : offer.storeID === item.storeID;
     case OfferTargetScope.PRODUCT:
       return Boolean(
         offer.productTargets?.some(

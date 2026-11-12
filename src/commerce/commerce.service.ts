@@ -5,6 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { In } from 'typeorm';
+import {
+  appliedPromotions,
+  type OfferPromotion,
+} from '../pricing/offer-presentation';
 import { TenantContextService } from '../multitenant/tenant-context.service';
 import { PricingService } from '../pricing/pricing.service';
 import { StoreProductService } from '../relations/storeproduct/storeproduct.service';
@@ -18,6 +22,7 @@ import {
 import { CommerceQuoteDto } from './dto/quote.dto';
 
 type PricedStoreProduct = StoreProduct & {
+  promotions?: OfferPromotion[];
   finalPrice?: number;
   pricingError?: string;
 };
@@ -69,6 +74,9 @@ export class CommerceService {
           (variation.storeProducts ?? []).map((raw) => {
             const storeProduct = raw as PricedStoreProduct;
             return {
+              promotions: storeProduct.pricingError
+                ? []
+                : (storeProduct.promotions ?? []),
               variationID: variation.variationID,
               storeProductID: storeProduct.storeProductID,
               sku: variation.sku,
@@ -152,6 +160,14 @@ export class CommerceService {
           ).find(isProductImageUrl) ?? null,
         size: productsById.get(item.storeProductID)?.variation ?? null,
         color: productsById.get(item.storeProductID)?.subVariation ?? null,
+        baseUnitPrice: item.baseUnitPrice,
+        discount: Math.max(
+          0,
+          Math.round(
+            ((item.basePrice ?? item.lineTotal) - item.lineTotal) * 100,
+          ) / 100,
+        ),
+        promotions: appliedPromotions(item.discountsApplied ?? []),
         unitPrice: item.finalUnitPrice,
         lineTotal: item.lineTotal,
         available: (stockById.get(item.storeProductID) ?? 0) >= item.quantity,

@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 export interface TenantRequestContext {
   tenantId: string;
+  salesChannel?: 'PHYSICAL' | 'ONLINE';
   timeZone?: string;
   userId?: string;
   masterUserId?: string;
