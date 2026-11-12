@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { PriceHistory, PriceType } from './entities/price-history.entity';
 import { UpdatePriceDto } from './dto/update-price.dto';
+import { availablePromotions, type OfferPromotion } from './offer-presentation';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { Product } from '../products/entities/product.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
@@ -54,6 +55,7 @@ export type ProductListPricingTarget = {
 };
 
 export type ProductListPricingOutcome = {
+  promotions?: OfferPromotion[];
   result?: PricingResult;
   error?: string;
 };
@@ -432,6 +434,7 @@ export class PricingService {
           (discount) => discount.source === 'AUTO' && discount.applied,
         );
         outcomes.set(line.storeProductID, {
+          promotions: availablePromotions(offers),
           result: {
             basePrice: line.basePrice,
             finalPrice: line.currentTotal,

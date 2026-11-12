@@ -98,6 +98,7 @@ export class StoreProductService {
           const outcome = pricingResults.get(storeProduct.storeProductID);
           if (outcome?.result) {
             Object.assign(storeProduct, {
+              promotions: outcome.promotions ?? [],
               finalPrice: outcome.result.finalPrice,
               discountApplied: outcome.result.discountApplied,
               discountsApplied: outcome.result.discountsApplied ?? [],

@@ -1,6 +1,22 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { DiscountType } from '../../pricing/entities/special-offer.entity';
+
+export class CommercePromotionDto {
+  @ApiProperty({ format: 'uuid' }) offerID!: string;
+  @ApiProperty({ enum: DiscountType }) discountType!: DiscountType;
+  @ApiProperty() label!: string;
+  @ApiProperty({ type: String, nullable: true }) description!: string | null;
+  @ApiProperty({ type: Number, nullable: true }) buyQuantity!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) payQuantity!: number | null;
+}
 
 export class CommerceCatalogVariantDto {
+  @ApiProperty({
+    type: [CommercePromotionDto],
+    description:
+      'Promociones elegibles de esta variante para el canal online. El precio final depende del carrito.',
+  })
+  promotions!: CommercePromotionDto[];
   @ApiProperty({ format: 'uuid' }) variationID!: string;
   @ApiProperty({ format: 'uuid' }) storeProductID!: string;
   @ApiProperty() sku!: string;
@@ -32,6 +48,13 @@ export class CommerceCatalogProductDto {
 }
 
 export class CommerceQuotedItemDto {
+  @ApiProperty() baseUnitPrice!: number;
+  @ApiProperty({ minimum: 0 }) discount!: number;
+  @ApiProperty({
+    type: [CommercePromotionDto],
+    description: 'Promociones efectivamente aplicadas a esta línea.',
+  })
+  promotions!: CommercePromotionDto[];
   @ApiProperty({ format: 'uuid' }) storeProductID!: string;
   @ApiProperty() sku!: string;
   @ApiProperty() name!: string;
