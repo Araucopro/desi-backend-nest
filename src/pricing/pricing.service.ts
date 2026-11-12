@@ -11,7 +11,10 @@ import { UpdatePriceDto } from './dto/update-price.dto';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 import { Product } from '../products/entities/product.entity';
 import { ProductVariation } from '../products/entities/product-variation.entity';
-import { DiscountType } from './entities/special-offer.entity';
+import {
+  DiscountType,
+  OfferSalesChannel,
+} from './entities/special-offer.entity';
 import {
   BreakdownEntry,
   CalculateCartInput,
@@ -186,6 +189,10 @@ export class PricingService {
       const cartContext: OfferCartContext = {
         storeID,
         pricingDate,
+        salesChannel:
+          this.tenantContext?.get?.(false)?.salesChannel === 'ONLINE'
+            ? OfferSalesChannel.ONLINE
+            : OfferSalesChannel.PHYSICAL,
         items: lines.map((line) => this.toOfferCartItem(line)),
       };
 
@@ -384,6 +391,10 @@ export class PricingService {
       offerContexts.push({
         storeID: line.storeID,
         pricingDate,
+        salesChannel:
+          this.tenantContext?.get?.(false)?.salesChannel === 'ONLINE'
+            ? OfferSalesChannel.ONLINE
+            : OfferSalesChannel.PHYSICAL,
         items: [this.toOfferCartItem(line)],
       });
     }

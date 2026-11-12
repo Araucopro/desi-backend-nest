@@ -1,6 +1,7 @@
 import {
   DiscountType,
   OfferTargetScope,
+  OfferSalesChannel,
 } from './entities/special-offer.entity';
 
 export type OfferCartItem = {
@@ -16,6 +17,7 @@ export type OfferCartItem = {
 };
 
 export type OfferCartContext = {
+  salesChannel?: OfferSalesChannel;
   storeID: string;
   pricingDate: Date;
   items: OfferCartItem[];

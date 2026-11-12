@@ -27,6 +27,11 @@ export enum DiscountScope {
   TOTAL = 'TOTAL',
 }
 
+export enum OfferSalesChannel {
+  PHYSICAL = 'PHYSICAL',
+  ONLINE = 'ONLINE',
+}
+
 export enum OfferTargetScope {
   VARIATION = 'VARIATION',
   STORE = 'STORE',
@@ -64,6 +69,17 @@ export class SpecialOffer {
 
   @Column({ type: 'uuid', nullable: true })
   storeID?: string | null;
+
+  /** Empty preserves the legacy single-store restriction. */
+  @Column({ type: 'uuid', array: true, default: () => "'{}'::uuid[]" })
+  storeIDs?: string[];
+
+  @Column({
+    type: 'text',
+    array: true,
+    default: () => "ARRAY['PHYSICAL','ONLINE']::text[]",
+  })
+  salesChannels?: OfferSalesChannel[];
 
   @ManyToOne(() => Product, { nullable: true })
   @JoinColumn({ name: 'productID' })
