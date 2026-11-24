@@ -53,6 +53,7 @@ export class CommerceController {
       salesEnabled: request.user.salesEnabled === true,
       acceptTestPayments: request.user.acceptTestPayments === true,
       requireProductPhoto: request.user.requireProductPhoto !== false,
+      supportsShipping: true,
     };
   }
 

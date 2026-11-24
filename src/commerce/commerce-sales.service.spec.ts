@@ -121,6 +121,28 @@ function setup() {
 }
 
 describe('CommerceSalesService paid confirmations', () => {
+  it('preserves the full payment and separates delivery from merchandise without another sale or stock item', async () => {
+    const ctx = setup();
+    const dto = input();
+    dto.payment.amount = 6190;
+    dto.shipping = { ...dto.shipping!, cost: 5000, carrier: 'Chilexpress', serviceCode: 3, serviceName: 'EXPRESS' };
+    const result = await ctx.service.confirm(binding, dto);
+    expect(ctx.sales.createCommerceSale).toHaveBeenCalledWith(ctx.manager, binding.storeId,
+      { items: dto.items, receiver: dto.receiver, issueDate: '2026-10-15' }, expect.any(String), 1190);
+    expect(result.payment.amount).toBe(6190);
+    expect(ctx.orders[0].customerDetails.shipping).toEqual(dto.shipping);
+    await ctx.service.confirm(binding, dto);
+    expect(ctx.sales.createCommerceSale).toHaveBeenCalledTimes(1);
+    await expect(ctx.service.confirm(binding, { ...dto, shipping: { ...dto.shipping, cost: 4000 } })).rejects.toThrow();
+  });
+
+  it.each([-1, 0.5, 1190, 1200])('rejects invalid freight before any sale: %s', async cost => {
+    const ctx = setup();
+    await expect(ctx.service.confirm(binding, { ...input(), shipping: { ...input().shipping!, cost,
+      carrier: 'Chilexpress', serviceCode: 3, serviceName: 'EXPRESS' } })).rejects.toThrow('Desglose');
+    expect(ctx.sales.createCommerceSale).not.toHaveBeenCalled();
+  });
+
   it('scopes products to the channel and preserves buyer, payment and shipping data', async () => {
     const ctx = setup();
     const dto = input();

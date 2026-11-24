@@ -21,6 +21,7 @@ describe('CommerceController channel photo policy', () => {
         storeID: 'store-1',
         salesEnabled: true,
         acceptTestPayments,
+        supportsShipping: true,
       });
     },
   );

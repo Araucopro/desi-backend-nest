@@ -25,6 +25,15 @@ const payload = () => ({
 const validate = (value: unknown) =>
   pipe.transform(value, { type: 'body', metatype: CreateCommerceSaleDto });
 
+it('accepts freight metadata and rejects invalid or unknown freight fields', async () => {
+  const shipping = { street: 'Calle 1', comuna: 'Santiago', region: 'Metropolitana', cost: 500,
+    carrier: 'Chilexpress', serviceCode: 3, serviceName: 'EXPRESS' };
+  await expect(validate({ ...payload(), shipping })).resolves.toMatchObject({ shipping });
+  for (const patch of [{ cost: -1 }, { cost: 0.5 }, { cost: '500' }, { serviceCode: 0 }, { carrier: 'Otro' }, { price: 1 }]) {
+    await expect(validate({ ...payload(), shipping: { ...shipping, ...patch } })).rejects.toThrow();
+  }
+});
+
 it('accepts a buyer without RUT and rejects client-supplied tenant/store routing', async () => {
   await expect(validate(payload())).resolves.toMatchObject(payload());
   await expect(validate({ ...payload(), tenantID: 'other' })).rejects.toThrow();

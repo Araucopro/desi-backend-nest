@@ -53,6 +53,11 @@ export class CommerceShippingDto {
   @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(255) street!: string;
   @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(160) comuna!: string;
   @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(160) region!: string;
+  @ApiPropertyOptional({ description: 'Despacho incluido en payment.amount; separado de la venta de productos', minimum: 0 })
+  @IsOptional() @IsInt() @Min(0) @Max(9999999999) cost?: number;
+  @ApiPropertyOptional() @IsOptional() @Equals('Chilexpress') carrier?: string;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) serviceCode?: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(120) serviceName?: string;
 }
 
 export class CommercePaymentDto {

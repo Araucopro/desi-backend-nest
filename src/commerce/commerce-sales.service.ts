@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -79,6 +80,11 @@ export class CommerceSalesService {
 
   async confirm(binding: CommerceBinding, dto: CreateCommerceSaleDto) {
     this.assertTenant(binding);
+    const shippingCost = dto.shipping?.cost ?? 0;
+    if (!Number.isSafeInteger(shippingCost) || shippingCost < 0 || shippingCost >= dto.payment.amount ||
+        (shippingCost > 0 && (dto.shipping?.carrier !== 'Chilexpress' || !dto.shipping.serviceCode || !dto.shipping.serviceName))) {
+      throw new BadRequestException('Desglose de despacho invalido');
+    }
     const requestHash = commerceRequestHash(dto);
     return this.context.transaction(async (manager) => {
       const channel = await manager.getRepository(CommerceChannel).findOne({
@@ -192,7 +198,7 @@ export class CommerceSalesService {
           ),
         },
         'commerce:' + requestHash + ':' + binding.channelId,
-        dto.payment.amount,
+        dto.payment.amount - shippingCost,
       );
       const order = await repository.save(
         repository.create({
