@@ -40,5 +40,6 @@ Verificación local: 31 pruebas de `commerce-sales.service.spec.ts`,
 Coordinar el despliegue con `CHILEXPRESS_CHECKOUT_ENABLED` del ecommerce y
 `NEXT_PUBLIC_CHILEXPRESS_ENABLED` de su frontend. El ecommerce no cobra despacho
 si el contexto del ERP no anuncia compatibilidad. La rama se basa en `fa0f1a0`
-de `feats-descuentos-alcance`; el `dev` y `main` locales aún no tienen commerce:
-integrar primero esa dependencia o elegir la rama de destino que ya la contenga.
+de `feats-descuentos-alcance`. El 24-11-2026 se verificó que ese commit ya está
+incluido en `origin/main` (`f311c87`) y que el remoto ya no tiene `dev`.
+El PR se prepara hacia `main`, sin fusionar ni activar un despliegue productivo.
