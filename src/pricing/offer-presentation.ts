@@ -21,20 +21,24 @@ type PromotionSource = Pick<
 >;
 
 function present(source: PromotionSource): OfferPromotion {
-  const buy = source.buyQuantity ?? null;
-  const pay = source.payQuantity ?? null;
+  const isSecondUnit =
+    source.discountType === DiscountType.SECOND_UNIT_PERCENTAGE;
+  const buy = isSecondUnit ? 2 : (source.buyQuantity ?? null);
+  const pay = isSecondUnit ? null : (source.payQuantity ?? null);
   const label =
     source.discountType === DiscountType.BUY_X_GET_Y
       ? buy && pay
         ? buy + 'x' + pay
         : 'Promoción por cantidad'
-      : source.discountType === DiscountType.BUNDLE
-        ? 'Combo'
-        : source.discountType === DiscountType.PERCENTAGE
-          ? source.value + '% de descuento'
-          : source.discountType === DiscountType.FIXED_PRICE
-            ? 'Precio especial'
-            : 'Descuento';
+      : isSecondUnit
+        ? source.value + '% de descuento en la segunda unidad de menor precio'
+        : source.discountType === DiscountType.BUNDLE
+          ? 'Combo'
+          : source.discountType === DiscountType.PERCENTAGE
+            ? source.value + '% de descuento'
+            : source.discountType === DiscountType.FIXED_PRICE
+              ? 'Precio especial'
+              : 'Descuento';
   return {
     offerID: source.offerID,
     discountType: source.discountType,
@@ -71,7 +75,7 @@ export function appliedPromotions(
       return [];
     const quantity = (name: string) =>
       typeof discount.details?.[name] === 'number'
-        ? (discount.details[name] as number)
+        ? discount.details[name]
         : null;
     return [
       present({

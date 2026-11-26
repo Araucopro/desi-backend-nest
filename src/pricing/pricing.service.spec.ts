@@ -418,6 +418,90 @@ describe('PricingService', () => {
     expect(result.items[1].lineTotal).toBe(350);
   });
 
+  it.each([
+    [1, 900],
+    [2, 1200],
+  ])(
+    'applies second-unit exclusivity only when a pair of %s units exists',
+    async (quantity, expected) => {
+      mockSingleLineStoreProduct(storeProduct());
+      offerService.getApplicableOffers.mockResolvedValue([
+        offer({
+          discountType: DiscountType.SECOND_UNIT_PERCENTAGE,
+          value: 80,
+          exclusive: true,
+        }),
+        offer({ offerID: 'later-offer', value: 10 }),
+      ]);
+      offerService.getApplicableStoreProductIDs.mockResolvedValue(
+        new Set(['sp-1']),
+      );
+      const result = await service.calculateCart({
+        storeID: 'store-1',
+        items: [{ storeProductID: 'sp-1', quantity }],
+      });
+      expect(result.totals.total).toBe(expected);
+      expect(result.items[0].discountsApplied[0].discountType).toBe(
+        quantity === 1
+          ? DiscountType.PERCENTAGE
+          : DiscountType.SECOND_UNIT_PERCENTAGE,
+      );
+    },
+  );
+
+  it('preserves the single-unit catalog price and advertises the configured second-unit offer', async () => {
+    const sp = storeProduct();
+    const promo = offer({
+      discountType: DiscountType.SECOND_UNIT_PERCENTAGE,
+      value: 75,
+      exclusive: true,
+    });
+    offerService.getApplicableOffersForItems.mockResolvedValue(
+      new Map([['sp-1', [promo]]]),
+    );
+    const result = await service.calculatePricesForProductList(
+      manager as never,
+      [
+        {
+          storeProduct: sp,
+          variation: sp.variation,
+          product: sp.variation.product,
+        },
+      ],
+    );
+    expect(result.get('sp-1')?.result?.finalPrice).toBe(1000);
+    expect(result.get('sp-1')?.result?.discountApplied).toBe(false);
+    expect(result.get('sp-1')?.promotions?.[0].label).toBe(
+      '75% de descuento en la segunda unidad de menor precio',
+    );
+  });
+
+  it('ignores manual discounts when an exclusive second-unit offer applies', async () => {
+    mockSingleLineStoreProduct(storeProduct());
+    offerService.getApplicableOffers.mockResolvedValue([
+      offer({
+        discountType: DiscountType.SECOND_UNIT_PERCENTAGE,
+        value: 80,
+        exclusive: true,
+      }),
+    ]);
+    offerService.getApplicableStoreProductIDs.mockResolvedValue(
+      new Set(['sp-1']),
+    );
+    const result = await service.calculateCart({
+      storeID: 'store-1',
+      items: [{ storeProductID: 'sp-1', quantity: 2 }],
+      manualDiscount: 10,
+    });
+    expect(result.totals.total).toBe(1200);
+    expect(result.items[0].discountsApplied[1]).toMatchObject({
+      source: 'MANUAL',
+      applied: false,
+      reasonIgnored: 'exclusive_offer',
+    });
+    expect(userDiscountValidator.validate).not.toHaveBeenCalled();
+  });
+
   it('applies 2x1 discount to the cheapest eligible unit', async () => {
     const sp1 = storeProduct({
       storeProductID: 'sp-1',

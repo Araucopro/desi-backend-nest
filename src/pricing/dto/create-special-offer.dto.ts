@@ -194,12 +194,16 @@ export class CreateSpecialOfferDto {
   @ApiProperty({
     enum: DiscountType,
     description:
-      'Tipo de descuento: PERCENTAGE, FIXED_AMOUNT, FIXED_PRICE, BUY_X_GET_Y, BUNDLE',
+      'Tipo de descuento: PERCENTAGE, FIXED_AMOUNT, FIXED_PRICE, BUY_X_GET_Y, SECOND_UNIT_PERCENTAGE, BUNDLE. SECOND_UNIT_PERCENTAGE descuenta value% de las unidades más baratas: una por cada par participante.',
   })
   @IsEnum(DiscountType)
   discountType: DiscountType;
 
-  @ApiProperty({ description: 'Valor numérico del descuento o precio final' })
+  @ApiProperty({
+    description:
+      'Valor numérico del descuento o precio final. Para SECOND_UNIT_PERCENTAGE es el porcentaje configurable, mayor que 0 y hasta 100, con hasta 2 decimales (ej: 80).',
+    example: 80,
+  })
   @IsNumber()
   value: number;
 

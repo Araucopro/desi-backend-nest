@@ -31,6 +31,7 @@ export type OfferBundleItemInput = {
 
 export type OfferValidationInput = {
   discountType: DiscountType;
+  value?: number;
   targetScope?: OfferTargetScope;
   storeProductID?: string | null;
   storeID?: string | null;
