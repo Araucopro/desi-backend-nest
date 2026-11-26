@@ -35,6 +35,7 @@ import {
   applyBundle,
   applyBuyXGetY,
   applyManualDiscount,
+  applySecondUnitPercentage,
   applyStandardOffer,
   MutableCartLine,
   recordManualIgnored,
@@ -217,7 +218,9 @@ export class PricingService {
         );
         if (!applicableLines.length) continue;
 
-        if (offer.discountType === DiscountType.BUY_X_GET_Y) {
+        if (offer.discountType === DiscountType.SECOND_UNIT_PERCENTAGE) {
+          if (!applySecondUnitPercentage(applicableLines, offer)) continue;
+        } else if (offer.discountType === DiscountType.BUY_X_GET_Y) {
           applyBuyXGetY(applicableLines, offer);
         } else if (offer.discountType === DiscountType.BUNDLE) {
           applyBundle(applicableLines, offer);
@@ -412,7 +415,9 @@ export class PricingService {
       try {
         const offers = offersByStoreProductID.get(line.storeProductID) ?? [];
         for (const offer of offers) {
-          if (offer.discountType === DiscountType.BUY_X_GET_Y) {
+          if (offer.discountType === DiscountType.SECOND_UNIT_PERCENTAGE) {
+            if (!applySecondUnitPercentage([line], offer)) continue;
+          } else if (offer.discountType === DiscountType.BUY_X_GET_Y) {
             applyBuyXGetY([line], offer);
           } else if (offer.discountType === DiscountType.BUNDLE) {
             applyBundle([line], offer);

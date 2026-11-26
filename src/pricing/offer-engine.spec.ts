@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
-import { DiscountType } from './entities/special-offer.entity';
-import { validateOfferConfiguration } from './offer-engine';
+import { DiscountType, SpecialOffer } from './entities/special-offer.entity';
+import { simulateOfferPrice, validateOfferConfiguration } from './offer-engine';
 import { OfferValidationInput } from './offer.types';
 
 function bundleConfig(
@@ -84,5 +84,45 @@ describe('validateOfferConfiguration (BUNDLE)', () => {
         { requireBundleStoreProductIDs: false },
       ),
     ).not.toThrow();
+  });
+});
+
+describe('SECOND_UNIT_PERCENTAGE configuration', () => {
+  const config = {
+    discountType: DiscountType.SECOND_UNIT_PERCENTAGE,
+    storeProductID: 'sp-1',
+    value: 80,
+  };
+
+  it.each([0.01, 0.5, 20, 50, 80, 100])(
+    'accepts an editable percentage of %s',
+    (value) => {
+      expect(() =>
+        validateOfferConfiguration({ ...config, value }),
+      ).not.toThrow();
+    },
+  );
+
+  it.each([undefined, null, 0, -1, 0.001, 80.555, 100.01, NaN, Infinity, '80'])(
+    'rejects invalid percentages: %s',
+    (value) => {
+      expect(() =>
+        validateOfferConfiguration({
+          ...config,
+          value,
+        } as OfferValidationInput),
+      ).toThrow(BadRequestException);
+    },
+  );
+
+  it.each([
+    [1, 1000],
+    [2, 1200],
+    [3, 2200],
+    [4, 2400],
+  ])('simulates %s equal-price units as %s', (quantity, expected) => {
+    expect(simulateOfferPrice(config as SpecialOffer, 1000, quantity)).toBe(
+      expected,
+    );
   });
 });

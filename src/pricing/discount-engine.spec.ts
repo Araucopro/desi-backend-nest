@@ -1,4 +1,8 @@
-import { applyBundle, MutableCartLine } from './discount-engine';
+import {
+  applyBundle,
+  applySecondUnitPercentage,
+  MutableCartLine,
+} from './discount-engine';
 import { DiscountType, SpecialOffer } from './entities/special-offer.entity';
 import { StoreProduct } from '../relations/storeproduct/entities/storeproduct.entity';
 
@@ -40,6 +44,88 @@ function bundleOffer(
     })),
   } as SpecialOffer;
 }
+
+describe('applySecondUnitPercentage', () => {
+  const promo = {
+    offerID: 'second-unit',
+    discountType: DiscountType.SECOND_UNIT_PERCENTAGE,
+    value: 80,
+  } as SpecialOffer;
+
+  it('charges the expensive item in full regardless of cart order', () => {
+    const expensive = line({
+      storeProductID: 'expensive',
+      currentTotal: 30000,
+    });
+    const cheap = line({ storeProductID: 'cheap', currentTotal: 20000 });
+    expect(applySecondUnitPercentage([expensive, cheap], promo)).toBe(true);
+    expect(expensive.currentTotal).toBe(30000);
+    expect(cheap.currentTotal).toBe(4000);
+    expect(cheap.discountsApplied[0]).toMatchObject({
+      discountType: DiscountType.SECOND_UNIT_PERCENTAGE,
+      value: 80,
+      details: { buyQuantity: 2, pairs: 1, discountedUnits: 1, percentage: 80 },
+    });
+    expect(expensive.discountsApplied).toHaveLength(0);
+  });
+
+  it.each([
+    [1, 1000],
+    [2, 1200],
+    [3, 2200],
+    [4, 2400],
+    [5, 3400],
+  ])(
+    'discounts complete pairs within a single line of %s units',
+    (quantity, expected) => {
+      const item = line({ quantity, currentTotal: quantity * 1000 });
+      applySecondUnitPercentage([item], promo);
+      expect(item.currentTotal).toBe(expected);
+    },
+  );
+
+  it('discounts only the two cheapest units across multiple lines for five units', () => {
+    const lines = [30000, 20000, 10000, 5000, 1000].map((price, index) =>
+      line({ storeProductID: `sp-${index}`, currentTotal: price }),
+    );
+    applySecondUnitPercentage(lines, promo);
+    expect(lines.map((item) => item.currentTotal)).toEqual([
+      30000, 20000, 10000, 1000, 200,
+    ]);
+  });
+
+  it('resolves equal prices deterministically', () => {
+    const a = line({ storeProductID: 'a' });
+    const b = line({ storeProductID: 'b' });
+    applySecondUnitPercentage([b, a], promo);
+    expect(a.currentTotal).toBe(200);
+    expect(b.currentTotal).toBe(1000);
+  });
+
+  it('rounds monetary amounts and supports a different percentage', () => {
+    const cheap = line({ currentTotal: 19.99 });
+    const expensive = line({ storeProductID: 'expensive', currentTotal: 30 });
+    applySecondUnitPercentage([cheap, expensive], { ...promo, value: 25 });
+    expect(cheap.currentTotal).toBe(14.99);
+    expect(expensive.currentTotal).toBe(30);
+  });
+
+  it('does not move the discount onto an expensive item when the cheapest is free', () => {
+    const free = line({ currentTotal: 0 });
+    const expensive = line({ storeProductID: 'expensive', currentTotal: 1000 });
+    expect(applySecondUnitPercentage([expensive, free], promo)).toBe(false);
+    expect(expensive.currentTotal).toBe(1000);
+  });
+
+  it('keeps the existing margin exemption opt-in', () => {
+    const normal = line({ quantity: 2, currentTotal: 2000 });
+    applySecondUnitPercentage([normal], promo);
+    expect(normal.marginExempt).toBe(false);
+    const exempt = line({ quantity: 2, currentTotal: 2000 });
+    applySecondUnitPercentage([exempt], { ...promo, allowBelowMargin: true });
+    expect(exempt.marginExempt).toBe(true);
+  });
+});
 
 describe('applyBundle', () => {
   it('frees one unit per complete set with requiredQuantity > 1', () => {

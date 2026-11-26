@@ -87,6 +87,58 @@ export function applyBuyXGetY(lines: MutableCartLine[], offer: SpecialOffer) {
   });
 }
 
+/** Like quantity offers, discounts the cheapest floor(total eligible units / 2) units. */
+export function applySecondUnitPercentage(
+  lines: MutableCartLine[],
+  offer: SpecialOffer,
+): boolean {
+  if (!Number.isFinite(offer.value) || offer.value <= 0 || offer.value > 100) {
+    return false;
+  }
+  const totalUnits = lines.reduce((total, line) => total + line.quantity, 0);
+  const pairs = Math.floor(totalUnits / 2);
+  if (pairs < 1) return false;
+
+  const candidates = lines
+    .filter((line) => line.quantity > 0)
+    .map((line) => ({ line, unitPrice: line.currentTotal / line.quantity }))
+    .sort(
+      (left, right) =>
+        left.unitPrice - right.unitPrice ||
+        left.line.storeProductID.localeCompare(right.line.storeProductID),
+    );
+
+  let remaining = pairs;
+  let applied = false;
+  for (const { line, unitPrice } of candidates) {
+    if (remaining <= 0) break;
+    // Zero-priced units still occupy their place among the cheapest units.
+    const discountedUnits = Math.min(line.quantity, remaining);
+    remaining -= discountedUnits;
+    const previousPrice = line.currentTotal;
+    const discount = toMoney(discountedUnits * unitPrice * (offer.value / 100));
+    const nextPrice = toMoney(Math.max(0, previousPrice - discount));
+    if (nextPrice >= previousPrice) continue;
+
+    line.currentTotal = nextPrice;
+    recordAutomaticDiscount(
+      line,
+      offer,
+      previousPrice,
+      nextPrice,
+      DiscountScope.TOTAL,
+      {
+        buyQuantity: 2,
+        pairs,
+        discountedUnits,
+        percentage: offer.value,
+      },
+    );
+    applied = true;
+  }
+  return applied;
+}
+
 export function applyBundle(lines: MutableCartLine[], offer: SpecialOffer) {
   const bundleItems = (offer.bundleItems ?? []).filter(
     (item) => !!item.storeProductID,

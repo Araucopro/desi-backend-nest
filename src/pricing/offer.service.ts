@@ -202,6 +202,7 @@ export class OfferService {
         updateSpecialOfferDto.bundleItems !== undefined;
       const config: OfferValidationInput = {
         discountType: updateSpecialOfferDto.discountType ?? offer.discountType,
+        value: updateSpecialOfferDto.value ?? offer.value,
         targetScope,
         storeProductID: nextStoreProductID,
         storeID:
@@ -738,13 +739,11 @@ export class OfferService {
   async getOfferOptions() {
     return this.runInTransaction(async (manager) => {
       const tenantID = this.tenantContext!.getTenantId();
-      const stores = await manager
-        .getRepository(Store)
-        .find({
-          where: { tenantID },
-          select: ['storeID', 'name'],
-          order: { name: 'ASC' },
-        });
+      const stores = await manager.getRepository(Store).find({
+        where: { tenantID },
+        select: ['storeID', 'name'],
+        order: { name: 'ASC' },
+      });
       const channels = await manager
         .getRepository(CommerceChannel)
         .find({ where: { tenantID, active: true }, select: ['storeID'] });
@@ -801,15 +800,13 @@ export class OfferService {
         'Las variantes y combos aplican únicamente a su sucursal de origen',
       );
     if (config.storeProductID) {
-      const product = await manager
-        .getRepository(StoreProduct)
-        .findOne({
-          where: {
-            tenantID,
-            storeProductID: config.storeProductID,
-            store: { storeID: config.storeID },
-          },
-        });
+      const product = await manager.getRepository(StoreProduct).findOne({
+        where: {
+          tenantID,
+          storeProductID: config.storeProductID,
+          store: { storeID: config.storeID },
+        },
+      });
       if (!product)
         throw new BadRequestException(
           'El producto no pertenece a la sucursal seleccionada',
