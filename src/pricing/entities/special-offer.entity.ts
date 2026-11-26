@@ -19,6 +19,7 @@ export enum DiscountType {
   FIXED_AMOUNT = 'FIXED_AMOUNT', // e.g., $5000 off
   FIXED_PRICE = 'FIXED_PRICE', // e.g., Final price $9990
   BUY_X_GET_Y = 'BUY_X_GET_Y', // e.g., 2x1, 3x2, 6x5
+  SECOND_UNIT_PERCENTAGE = 'SECOND_UNIT_PERCENTAGE', // percentage off the cheapest unit per pair
   BUNDLE = 'BUNDLE', // e.g., bundle de productos con una unidad gratis
 }
 

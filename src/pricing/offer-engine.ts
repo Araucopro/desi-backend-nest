@@ -18,6 +18,20 @@ export function validateOfferConfiguration(
 ): void {
   const targetScope = config.targetScope ?? OfferTargetScope.VARIATION;
 
+  if (config.discountType === DiscountType.SECOND_UNIT_PERCENTAGE) {
+    if (
+      typeof config.value !== 'number' ||
+      !Number.isFinite(config.value) ||
+      config.value <= 0 ||
+      config.value > 100 ||
+      Math.round(config.value * 100) / 100 !== config.value
+    ) {
+      throw new BadRequestException(
+        'SECOND_UNIT_PERCENTAGE requiere value mayor que 0 y menor o igual a 100, con hasta 2 decimales',
+      );
+    }
+  }
+
   if (config.discountType === DiscountType.BUY_X_GET_Y) {
     const buy = config.buyQuantity;
     const pay = config.payQuantity;
@@ -151,6 +165,12 @@ export function simulateOfferPrice(
         );
       }
       return currentPrice;
+    case DiscountType.SECOND_UNIT_PERCENTAGE:
+      return Math.max(
+        0,
+        currentPrice -
+          Math.floor(quantity / 2) * currentUnitPrice * (offer.value / 100),
+      );
     case DiscountType.BUNDLE:
     default:
       return currentPrice;

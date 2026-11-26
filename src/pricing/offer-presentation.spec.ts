@@ -13,6 +13,35 @@ const offer = {
   priority: 10,
 } as SpecialOffer;
 describe('public promotion metadata', () => {
+  it('describes the configured percentage in available and applied promotions', () => {
+    const secondUnit = {
+      ...offer,
+      discountType: DiscountType.SECOND_UNIT_PERCENTAGE,
+      value: 65,
+    };
+    const available = availablePromotions([secondUnit]);
+    expect(available[0]).toMatchObject({
+      label: '65% de descuento en la segunda unidad de menor precio',
+      buyQuantity: 2,
+      payQuantity: null,
+    });
+    expect(
+      appliedPromotions([
+        {
+          source: 'AUTO',
+          applied: true,
+          offerID: offer.offerID,
+          description: offer.description,
+          discountType: DiscountType.SECOND_UNIT_PERCENTAGE,
+          value: 65,
+          previousPrice: 1000,
+          resultingPrice: 350,
+          scope: 'TOTAL',
+          details: { buyQuantity: 2, discountedUnits: 1 },
+        },
+      ]),
+    ).toEqual(available);
+  });
   it('describes quantity offers without exposing tenant or pricing permissions', () => {
     expect(availablePromotions([offer])).toEqual([
       {

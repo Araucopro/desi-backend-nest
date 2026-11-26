@@ -184,6 +184,152 @@ describe('discount coverage with the real offer and pricing services', () => {
     OfferTargetScope.BRAND,
     OfferTargetScope.PRODUCT,
   ])(
+    'supports second-unit discounts for %s without discounting outsiders',
+    async (target) => {
+      const test = scenario(target);
+      test.offer.discountType = DiscountType.SECOND_UNIT_PERCENTAGE;
+      test.offer.value = 80;
+      const result = await test.pricing.calculateCart(test.input);
+      expect(result.items.map((item) => item.lineTotal)).toEqual([
+        200, 2000, 500,
+      ]);
+      expect(result.totals).toEqual({
+        subtotal: 3500,
+        discount: 800,
+        total: 2700,
+      });
+    },
+  );
+
+  it('supports the entire store inventory', async () => {
+    const test = scenario(OfferTargetScope.STORE);
+    test.offer.discountType = DiscountType.SECOND_UNIT_PERCENTAGE;
+    test.offer.value = 80;
+    const result = await test.pricing.calculateCart(test.input);
+    expect(result.items.map((item) => item.lineTotal)).toEqual([
+      1000, 2000, 100,
+    ]);
+    expect(result.totals.total).toBe(3100);
+  });
+
+  it('enforces the margin unless an administrator explicitly allows the exception', async () => {
+    const test = scenario(OfferTargetScope.BRAND);
+    test.offer.discountType = DiscountType.SECOND_UNIT_PERCENTAGE;
+    test.offer.value = 100;
+    test.offer.allowBelowMargin = false;
+    await expect(test.pricing.calculateCart(test.input)).rejects.toThrow(
+      BadRequestException,
+    );
+    test.offer.allowBelowMargin = true;
+    expect((await test.pricing.calculateCart(test.input)).totals.total).toBe(
+      2500,
+    );
+  });
+
+  it('requires a valid percentage when switching an existing offer to the new type', async () => {
+    const test = scenario(OfferTargetScope.STORE);
+    await expect(
+      test.offers.updateSpecialOffer(test.offer.offerID, {
+        discountType: DiscountType.SECOND_UNIT_PERCENTAGE,
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(test.repository.save).not.toHaveBeenCalled();
+  });
+
+  it.each([20, 50, 80, 100])(
+    'uses the configured percentage %s',
+    async (value) => {
+      const test = scenario(OfferTargetScope.BRAND);
+      test.offer.discountType = DiscountType.SECOND_UNIT_PERCENTAGE;
+      test.offer.value = value;
+      expect((await test.pricing.calculateCart(test.input)).totals.total).toBe(
+        3500 - (1000 * value) / 100,
+      );
+    },
+  );
+
+  it('persists a new second-unit offer for all products with the configured percentage', async () => {
+    const test = scenario(OfferTargetScope.STORE);
+    await test.offers.createSpecialOffer({
+      discountType: DiscountType.SECOND_UNIT_PERCENTAGE,
+      value: 80,
+      targetScope: OfferTargetScope.STORE,
+      storeID: 'store-1',
+      storeIDs: ['store-1', 'branch-2'],
+      salesChannels: [OfferSalesChannel.PHYSICAL],
+      startDate: '2026-01-01',
+    });
+    expect(test.repository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantID: 'tenant-1',
+        discountType: DiscountType.SECOND_UNIT_PERCENTAGE,
+        value: 80,
+        targetScope: OfferTargetScope.STORE,
+        storeIDs: ['store-1', 'branch-2'],
+      }),
+    );
+  });
+
+  it('edits the percentage and preserves it during a scope-only update', async () => {
+    const test = scenario(OfferTargetScope.STORE);
+    test.offer.discountType = DiscountType.SECOND_UNIT_PERCENTAGE;
+    test.offer.value = 80;
+    await test.offers.updateSpecialOffer(test.offer.offerID, { value: 50 });
+    expect(test.repository.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({ value: 50 }),
+    );
+    expect((await test.pricing.calculateCart(test.input)).totals.total).toBe(
+      3250,
+    );
+    await test.offers.updateSpecialOffer(test.offer.offerID, {
+      targetScope: OfferTargetScope.BRAND,
+      brand: 'Marca A',
+    });
+    expect(test.repository.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        value: 50,
+        targetScope: OfferTargetScope.BRAND,
+        brand: 'Marca A',
+      }),
+    );
+    expect((await test.pricing.calculateCart(test.input)).totals.total).toBe(
+      3000,
+    );
+  });
+
+  it.each([0, -5, 101, NaN])(
+    'rejects an invalid percentage update %s before saving',
+    async (value) => {
+      const test = scenario(OfferTargetScope.STORE);
+      test.offer.discountType = DiscountType.SECOND_UNIT_PERCENTAGE;
+      test.offer.value = 80;
+      await expect(
+        test.offers.updateSpecialOffer(test.offer.offerID, { value }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(test.repository.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it('respects store and authenticated channel restrictions for second-unit discounts', async () => {
+    for (const [storeID, channel] of [
+      ['branch-2', OfferSalesChannel.PHYSICAL],
+      ['store-1', OfferSalesChannel.ONLINE],
+      ['outside-store', OfferSalesChannel.PHYSICAL],
+    ] as const) {
+      const test = scenario(OfferTargetScope.BRAND, channel, storeID);
+      test.offer.discountType = DiscountType.SECOND_UNIT_PERCENTAGE;
+      test.offer.value = 80;
+      expect((await test.pricing.calculateCart(test.input)).totals.total).toBe(
+        storeID === 'branch-2' ? 2700 : 3500,
+      );
+    }
+  });
+
+  it.each([
+    OfferTargetScope.CATEGORY,
+    OfferTargetScope.BRAND,
+    OfferTargetScope.PRODUCT,
+  ])(
     'charges the expensive eligible product and keeps the outsider at full price for %s',
     async (target) => {
       const { pricing, input } = scenario(target);

@@ -156,7 +156,7 @@ export class PricingController {
   @Post('calculate-cart')
   @ApiOperation({
     summary:
-      'Calcular carrito completo con ofertas apilables, 2x1/3x2/6x5 y combos',
+      'Calcular carrito con ofertas apilables, descuento porcentual en segunda unidad, 2x1/3x2/6x5 y combos',
   })
   @ApiBody({ type: CalculateCartDto })
   @ApiResponse({
